@@ -16,6 +16,11 @@ import { doc, getDoc, setDoc, serverTimestamp } from "https://www.gstatic.com/fi
 export function redirectIfLoggedIn() {
   onAuthStateChanged(auth, async (user) => {
     if (!user) return;
+    // Check role first — deities go to their own dashboard
+    const userSnap = await getDoc(doc(db, "users", user.uid));
+    if (userSnap.exists() && userSnap.data().role === "deity") {
+      window.location.href = "deity-dashboard.html"; return;
+    }
     const snap = await getDoc(doc(db, "characters", user.uid));
     window.location.href = snap.exists() ? "dashboard.html" : "create-character.html";
   });

@@ -2059,6 +2059,13 @@ export function initDashboard() {
   onAuthStateChanged(auth, async (user) => {
     if (!user) { window.location.href = "auth.html"; return; }
     _uid = user.uid;
+    // Guard: if this user is a deity, they don't belong on the player dashboard
+    try {
+      const _userRoleSnap = await getDoc(doc(db, "users", user.uid));
+      if (_userRoleSnap.exists() && _userRoleSnap.data().role === "deity") {
+        window.location.href = "deity-dashboard.html"; return;
+      }
+    } catch(_) { /* non-critical, continue */ }
     window.loadNotifications();
     window.loadDivineVisions();
     try {
