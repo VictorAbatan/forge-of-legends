@@ -1006,7 +1006,7 @@ window._onDeityPanelSwitch        = onDeityPanelSwitch;
 window._loadDeityNpcs             = loadDeityNpcs;
 window._openDeityNpcForm          = openDeityNpcForm;
 window._switchDeityChat           = switchDeityChat;
-window._sendDeityChat             = sendDeityChat;
+// window._sendDeityChat is assigned to sendDeityChatPatched below (handles both tabs)
 window._resetModalRecipient       = _resetModalRecipient;
 
 function hideLoading() {
@@ -2578,6 +2578,8 @@ async function switchDeityChat(locationId) {
             <div class="chat-msg-header">
               <span class="chat-msg-name" onclick="window._openDchatPlayerPopup('${locSafeName}')" style="cursor:pointer">${msg.charName||"Unknown"}</span>
               ${msg.title ? `<span class="chat-msg-title">${msg.title}</span>` : ""}
+            </div>
+            <div class="chat-msg-meta">
               <span class="chat-msg-rank">${msg.rank||"Wanderer"} · Lv.${msg.level||1}</span>
               <span class="chat-msg-time">${time}</span>
             </div>
@@ -2819,6 +2821,8 @@ function _startGeneralChatListener() {
             <div class="chat-msg-header">
               <span class="chat-msg-name" onclick="window._openDchatPlayerPopup('${gcSafeName}')" style="cursor:pointer">${msg.charName || "Unknown"}</span>
               ${msg.title ? `<span class="chat-msg-title">${escapeHtml(msg.title)}</span>` : ""}
+            </div>
+            <div class="chat-msg-meta">
               <span class="chat-msg-rank">${msg.rank || "Wanderer"} · Lv.${msg.level || 1}</span>
               <span class="chat-msg-time">${time}</span>
             </div>
