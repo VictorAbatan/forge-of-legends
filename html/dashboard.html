@@ -229,13 +229,13 @@
       <div class="nav-section-label">Navigate</div>
       <div class="nav-item active" data-panel="home"       onclick="switchPanel('home')">      <span class="nav-icon">⚡</span> Overview</div>
       <div class="nav-item"        data-panel="character"  onclick="switchPanel('character')"> <span class="nav-icon">📜</span> Character</div>
-      <div class="nav-item"        data-panel="skills"     onclick="switchPanel('skills')">    <span class="nav-icon">�</span> Skills</div>
+      <div class="nav-item"        data-panel="skills"     onclick="switchPanel('skills')">    <span class="nav-icon">🔮</span> Skills</div>
       <div class="nav-item"        data-panel="inventory"  onclick="switchPanel('inventory')"> <span class="nav-icon">🎒</span> Inventory</div>
       <div class="nav-item"        data-panel="map"        onclick="switchPanel('map')">       <span class="nav-icon">🗺️</span> World Map</div>
       <div class="nav-item"        data-panel="chat"       onclick="switchPanel('chat')" style="position:relative">      <span class="nav-icon">💬</span> RP Chat<span class="mention-badge" id="nav-mention-badge" style="display:none">0</span></div>
       <div class="nav-item"        data-panel="profession" onclick="switchPanel('profession')"><span class="nav-icon">⛏️</span> Profession</div>
       <div class="nav-item"        data-panel="market"     onclick="switchPanel('market')">    <span class="nav-icon">🏪</span> Market</div>
-      <div class="nav-item"        data-panel="quests"     onclick="switchPanel('quests')">    <span class="nav-icon">�</span> Quests</div>
+      <div class="nav-item"        data-panel="quests"     onclick="switchPanel('quests')">    <span class="nav-icon">📋</span> Quests</div>
       <div class="nav-item"        data-panel="activity"   onclick="switchPanel('activity')"> <span class="nav-icon">📡</span> Activity</div>
       <div class="nav-item" data-panel="worlddev" onclick="switchPanel('worlddev')"><span class="nav-icon">🌍</span> World Development</div>
       <div class="nav-item" data-panel="battle"   onclick="switchPanel('battle')">  <span class="nav-icon">⚔️</span> Battle</div>
@@ -243,11 +243,10 @@
       <div class="nav-item" data-panel="faction"    onclick="switchPanel('faction')">   <span class="nav-icon">🛡️</span> Faction</div>
       <div class="nav-item" data-panel="companion" onclick="switchPanel('companion')"><span class="nav-icon">🐾</span> Companion</div>
       <!-- COMPANION PANEL moved to main-content below -->
+      <div class="nav-section-label" style="margin-top:8px">ACCOUNT</div>
+      <a href="deity-dashboard.html" class="nav-item" id="btn-deity-view" style="display:none;text-decoration:none;color:inherit"><span class="nav-icon">⚡</span> Deity View</a>
+      <div class="nav-item" onclick="window._leaveWorld()" style="color:var(--text-dim)"><span class="nav-icon">🚪</span> Leave World</div>
     </nav>
-    <div class="sidebar-footer">
-      <a href="deity-dashboard.html" class="deity-switch-btn" id="btn-deity-view" style="display:none">⚡ DEITY VIEW</a>
-      <button class="btn-logout" id="btn-logout" onclick="window._leaveWorld()">LEAVE WORLD</button>
-    </div>
   </aside>
 
 

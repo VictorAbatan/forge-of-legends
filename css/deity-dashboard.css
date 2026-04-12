@@ -436,34 +436,19 @@ textarea.field-input { resize: vertical; line-height: 1.5; min-height: 70px; }
 .toast.warning { border-color: #5c4a1a; color: #c9a84c; }
 
 /* Shared chat classes (reused from player dashboard) */
-/* ── Chat message layout ─────────────────────────────────────────────────── */
-.chat-msg {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-  margin-bottom: 2px;
-}
+.chat-msg { display: flex; gap: 10px; align-items: flex-end; }
 .chat-msg.own { flex-direction: row-reverse; }
-.chat-msg-avatar {
-  width: 34px; height: 34px; min-width: 34px;
-  border-radius: 50%;
-  border: 1px solid var(--border);
-  background: var(--ink3);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 1rem; overflow: hidden;
-  margin-top: 20px; /* pushes avatar down past name+meta rows to sit beside bubble */
-}
+.chat-msg-avatar { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--border); background: var(--ink3); display: flex; align-items: center; justify-content: center; font-size: 1rem; flex-shrink: 0; overflow: hidden; }
 .chat-msg-avatar img { width:100%; height:100%; object-fit:cover; border-radius:50%; }
-.chat-msg-body { max-width: 72%; display: flex; flex-direction: column; align-items: flex-start; }
-.chat-msg.own .chat-msg-body { align-items: flex-end; text-align: right; }
-.chat-msg-header { display: flex; align-items: center; gap: 5px; margin-bottom: 2px; overflow: hidden; max-width: 100%; }
-.chat-msg-name  { font-family: var(--ff-display); font-size: 0.72rem; color: var(--gold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
-.chat-msg-title { font-size: 0.68rem; color: var(--text-dim); font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.chat-msg-meta  { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
-.chat-msg-rank  { font-family: var(--ff-mono); font-size: 0.55rem; color: var(--ash-light); padding: 1px 5px; border-radius: 8px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); white-space: nowrap; }
-.chat-msg-time  { font-family: var(--ff-mono); font-size: 0.52rem; color: var(--ash-light); white-space: nowrap; }
-.chat-msg-text  { font-size: 0.86rem; color: var(--text); line-height: 1.6; word-break: break-word; background: var(--ink3); padding: 8px 12px; border-radius: 0 12px 12px 12px; display: inline-block; max-width: 100%; }
-.chat-msg.own .own-text { background: rgba(201,168,76,0.15); border: 1px solid rgba(201,168,76,0.2); border-radius: 12px 0 12px 12px; padding: 8px 12px; font-size: 0.86rem; color: var(--text); line-height: 1.6; word-break: break-word; display: inline-block; max-width: 100%; }
+.chat-msg-body { max-width: 72%; }
+.chat-msg-header { display: flex; align-items: baseline; gap: 6px; margin-bottom: 3px; flex-wrap: wrap; }
+.chat-msg-name  { font-family: var(--ff-display); font-size: 0.72rem; color: var(--gold); }
+.chat-msg-title { font-size: 0.68rem; color: var(--text-dim); font-style: italic; }
+.chat-msg-rank  { font-family: var(--ff-mono); font-size: 0.55rem; color: var(--ash-light); padding: 1px 5px; border-radius: 8px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); }
+.chat-msg-time  { font-family: var(--ff-mono); font-size: 0.52rem; color: var(--ash-light); }
+.chat-msg-text  { font-size: 0.86rem; color: var(--text); line-height: 1.6; word-break: break-word; background: var(--ink3); padding: 8px 12px; border-radius: 0 12px 12px 12px; display: inline-block; }
+.chat-msg.own .chat-msg-body { text-align: right; }
+.chat-msg.own .own-text { background: rgba(201,168,76,0.15); border: 1px solid rgba(201,168,76,0.2); border-radius: 12px 0 12px 12px; padding: 8px 12px; font-size: 0.86rem; color: var(--text); line-height: 1.6; word-break: break-word; display: inline-block; }
 .chat-msg.own .own-time { font-family: var(--ff-mono); font-size: 0.52rem; color: var(--ash-light); margin-top: 3px; }
 .npc-msg .npc-avatar { border-color: rgba(120,100,200,0.4) !important; }
 .npc-name  { color: #a08ee0 !important; }

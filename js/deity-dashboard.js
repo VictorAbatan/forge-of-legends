@@ -2532,10 +2532,6 @@ async function switchDeityChat(locationId) {
       if (isMe) {
         el.innerHTML = `
           <div class="chat-msg-body">
-            ${isNpc ? `<div class="chat-msg-header" style="justify-content:flex-end">
-              <span class="chat-msg-name npc-name">🧙 ${msg.charName||"NPC"}</span>
-              ${msg.title ? `<span class="chat-msg-title">${msg.title}</span>` : ""}
-            </div>` : ""}
             ${replyQuoteHTML}
             <div class="chat-msg-text ${isNpc?"npc-bubble own-npc":"own-text"}">${formatChatText(msg.text||"")}</div>
             <div class="chat-msg-actions">
@@ -2559,12 +2555,6 @@ async function switchDeityChat(locationId) {
         el.innerHTML = `
           <div class="chat-msg-avatar npc-avatar">${av}</div>
           <div class="chat-msg-body">
-            <div class="chat-msg-header">
-              <span class="chat-msg-name npc-name">🧙 ${msg.charName||"NPC"}</span>
-              ${msg.title ? `<span class="chat-msg-title">${msg.title}</span>` : ""}
-              <span class="chat-msg-rank" style="color:var(--gold);font-size:0.7rem">NPC</span>
-              <span class="chat-msg-time">${time}</span>
-            </div>
             ${replyQuoteHTML}
             <div class="chat-msg-text npc-bubble">${formatChatText(msg.text||"")}</div>
           </div>`;
@@ -2575,12 +2565,7 @@ async function switchDeityChat(locationId) {
         el.innerHTML = `
           <div class="chat-msg-avatar" onclick="window._openDchatPlayerPopup('${locSafeName}')" style="cursor:pointer">${av}</div>
           <div class="chat-msg-body">
-            <div class="chat-msg-header">
-              <span class="chat-msg-name" onclick="window._openDchatPlayerPopup('${locSafeName}')" style="cursor:pointer">${msg.charName||"Unknown"}</span>
-              ${msg.title ? `<span class="chat-msg-title">${msg.title}</span>` : ""}
-            </div>
             <div class="chat-msg-meta">
-              <span class="chat-msg-rank">${msg.rank||"Wanderer"} · Lv.${msg.level||1}</span>
               <span class="chat-msg-time">${time}</span>
             </div>
             ${replyQuoteHTML}
@@ -2775,10 +2760,6 @@ function _startGeneralChatListener() {
       if (isMe) {
         el.innerHTML = `
           <div class="chat-msg-body">
-            ${isNpc ? `<div class="chat-msg-header" style="justify-content:flex-end">
-              <span class="chat-msg-name npc-name">🧙 ${escapeHtml(msg.charName||"NPC")}</span>
-              ${msg.title ? `<span class="chat-msg-title">${escapeHtml(msg.title)}</span>` : ""}
-            </div>` : ""}
             ${replyQuoteHTML}
             <div class="chat-msg-text ${isNpc ? "npc-bubble own-npc" : "own-text"}">${formatChatText(msg.text || "")}</div>
             <div class="chat-msg-actions">
@@ -2802,12 +2783,6 @@ function _startGeneralChatListener() {
         el.innerHTML = `
           <div class="chat-msg-avatar npc-avatar">${av}</div>
           <div class="chat-msg-body">
-            <div class="chat-msg-header">
-              <span class="chat-msg-name npc-name">🧙 ${escapeHtml(msg.charName||"NPC")}</span>
-              ${msg.title ? `<span class="chat-msg-title">${escapeHtml(msg.title)}</span>` : ""}
-              <span class="chat-msg-rank" style="color:var(--gold);font-size:0.7rem">NPC</span>
-              <span class="chat-msg-time">${time}</span>
-            </div>
             ${replyQuoteHTML}
             <div class="chat-msg-text npc-bubble">${formatChatText(msg.text||"")}</div>
           </div>`;
@@ -2818,12 +2793,7 @@ function _startGeneralChatListener() {
         el.innerHTML = `
           <div class="chat-msg-avatar" onclick="window._openDchatPlayerPopup('${gcSafeName}')" style="cursor:pointer">${av}</div>
           <div class="chat-msg-body">
-            <div class="chat-msg-header">
-              <span class="chat-msg-name" onclick="window._openDchatPlayerPopup('${gcSafeName}')" style="cursor:pointer">${msg.charName || "Unknown"}</span>
-              ${msg.title ? `<span class="chat-msg-title">${escapeHtml(msg.title)}</span>` : ""}
-            </div>
             <div class="chat-msg-meta">
-              <span class="chat-msg-rank">${msg.rank || "Wanderer"} · Lv.${msg.level || 1}</span>
               <span class="chat-msg-time">${time}</span>
             </div>
             ${msg.location ? `<div class="chat-msg-location">📍 ${escapeHtml(msg.location)}</div>` : ""}
