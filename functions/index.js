@@ -653,7 +653,19 @@ exports.craftItem = onCall(CALL_OPTS, async (request) => {
 
   const { recipeName, npc } = request.data;
   const RECIPES = getCraftingRecipes();
-  const recipe  = RECIPES[npc]?.find(r => r.name === recipeName);
+
+  // Primary lookup: exact npc key + case-insensitive name match
+  const normalised = recipeName?.trim().toLowerCase();
+  let recipe = RECIPES[npc]?.find(r => r.name.toLowerCase() === normalised);
+
+  // Fallback: search every NPC list so a wrong npc value never blocks a valid recipe
+  if (!recipe) {
+    for (const list of Object.values(RECIPES)) {
+      recipe = list.find(r => r.name.toLowerCase() === normalised);
+      if (recipe) break;
+    }
+  }
+
   if (!recipe) throw new HttpsError("not-found", `Recipe not found: ${recipeName}`);
 
   const char = await getCharacter(uid);
@@ -673,7 +685,8 @@ exports.craftItem = onCall(CALL_OPTS, async (request) => {
     if (item.qty <= 0) inv.splice(inv.indexOf(item), 1);
   }
 
-  const crafted = { name: recipe.name, icon: recipe.icon, type: recipe.type, qty: 1 };
+  const typeIcons = { weapon:"⚔️", armor:"🛡️", consumable:"🧪" };
+  const crafted = { name: recipe.name, icon: recipe.icon || typeIcons[recipe.type] || "📦", type: recipe.type, qty: 1 };
   const merged  = mergeInventory(inv, [crafted]);
 
   await db.collection("characters").doc(uid).update({

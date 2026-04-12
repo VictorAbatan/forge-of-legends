@@ -9958,7 +9958,7 @@ window.doCraft = async function(npc, recipeName) {
       await refreshCharData();
       setTimeout(hideCraftingModal, 1700);
     } catch (err) {
-      showCraftingResult(err.message || 'Purchase failed.');
+      showCraftingResult(`❌ Purchase failed. Please try again.`);
       setTimeout(hideCraftingModal, 2000);
     }
     return;
@@ -9973,11 +9973,28 @@ window.doCraft = async function(npc, recipeName) {
     await refreshCharData();
     setTimeout(hideCraftingModal, 1700);
   } catch(err) {
-    let msg = err.message || 'Crafting failed.';
-    if (err.details) msg += `<br><small>${err.details}</small>`;
-    else if (err.code) msg += ` (Error code: ${err.code})`;
+    const raw = err.message || '';
+    let msg;
+    if (raw.includes('Missing materials')) {
+      // "Missing materials: need 4x Tin, have 0" → friendly version
+      const match = raw.match(/need (\d+)x ([^,]+), have (\d+)/);
+      if (match) {
+        msg = `⚒️ Not enough materials!<br><small>You need <b>${match[1]}x ${match[2]}</b> but only have <b>${match[3]}</b>.</small>`;
+      } else {
+        msg = `⚒️ You're missing some required materials.`;
+      }
+    } else if (raw.includes('Not enough gold')) {
+      const match = raw.match(/Need (\d+), have (\d+)/);
+      msg = match
+        ? `💰 Not enough gold!<br><small>This recipe costs <b>${match[1]} coins</b> but you only have <b>${match[2]}</b>.</small>`
+        : `💰 Not enough gold to craft this item.`;
+    } else if (raw.includes('Recipe not found')) {
+      msg = `📜 Recipe unavailable. Try again or contact support.`;
+    } else {
+      msg = `❌ Crafting failed. Please try again.`;
+    }
     showCraftingResult(msg);
-    setTimeout(hideCraftingModal, 2000);
+    setTimeout(hideCraftingModal, 2800);
   }
 };
 
