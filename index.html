@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Forge of Legends</title>
+<link rel="stylesheet" href="css/global.css"/>
+<link rel="stylesheet" href="css/landing.css"/>
+</head>
+<body>
+
+<div class="landing-bg"></div>
+<div class="landing-stars" id="stars"></div>
+<div class="particles" id="particles"></div>
+
+<!-- Nav dots -->
+<div class="nav-dots">
+  <div class="nav-dot active" onclick="scrollToSection(0)"></div>
+  <div class="nav-dot" onclick="scrollToSection(1)"></div>
+  <div class="nav-dot" onclick="scrollToSection(2)"></div>
+</div>
+
+<div class="landing-page">
+
+  <!-- Nav -->
+  <nav class="landing-nav">
+    <div class="nav-logo">
+      <div class="nav-logo-icon">
+        <svg viewBox="0 0 40 40" fill="none">
+          <circle cx="20" cy="20" r="18" stroke="rgba(201,168,76,0.35)" stroke-width="0.8"/>
+          <path d="M20 4 L23 14 L33 14 L25 20 L28 30 L20 24 L12 30 L15 20 L7 14 L17 14 Z"
+                stroke="#C9A84C" stroke-width="0.8" fill="rgba(201,168,76,0.1)"/>
+          <circle cx="20" cy="20" r="2" fill="#C9A84C"/>
+        </svg>
+      </div>
+      <span class="nav-logo-text">FORGE OF LEGENDS</span>
+    </div>
+    <div class="nav-links">
+      <span class="nav-link" onclick="scrollToSection(1)">World</span>
+      <span class="nav-link" onclick="scrollToSection(2)">Deities</span>
+    </div>
+    <a href="html/auth.html" class="nav-cta">SIGN IN</a>
+  </nav>
+
+  <!-- ══════════════════════
+       SECTION 1 — HERO
+  ══════════════════════ -->
+  <section class="section hero" id="section-0">
+    <div class="hero-content">
+
+      <div class="hero-sigil">
+        <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- Outer ring — rotates slowly -->
+          <g>
+            <animateTransform attributeName="transform" type="rotate"
+              from="0 50 50" to="360 50 50" dur="22s" repeatCount="indefinite"/>
+            <circle cx="50" cy="50" r="46" stroke="rgba(201,168,76,0.22)" stroke-width="0.6"/>
+            <circle cx="50" cy="50" r="46" stroke="rgba(201,168,76,0.12)" stroke-width="0.3" stroke-dasharray="3 8"/>
+          </g>
+          <!-- Inner ring — counter-rotates -->
+          <g>
+            <animateTransform attributeName="transform" type="rotate"
+              from="0 50 50" to="-360 50 50" dur="34s" repeatCount="indefinite"/>
+            <circle cx="50" cy="50" r="38" stroke="rgba(201,168,76,0.18)" stroke-width="0.5"/>
+          </g>
+          <!-- Star — rotates with outer ring -->
+          <g>
+            <animateTransform attributeName="transform" type="rotate"
+              from="0 50 50" to="360 50 50" dur="22s" repeatCount="indefinite"/>
+            <path d="M 50.0,14.0 L 58.2,38.7 L 84.2,38.9 L 63.3,54.3 L 71.2,79.1 L 50.0,64.0 L 28.8,79.1 L 36.7,54.3 L 15.8,38.9 L 41.8,38.7 Z"
+                  stroke="#C9A84C" stroke-width="1.2" fill="rgba(201,168,76,0.08)" stroke-linejoin="round"/>
+          </g>
+          <!-- Centre dot — always static and centred -->
+          <circle cx="50" cy="50" r="3" fill="rgba(201,168,76,0.85)"/>
+        </svg>
+      </div>
+
+      <h1 class="hero-title">FORGE OF LEGENDS</h1>
+      <p class="hero-tagline">where legends are forged</p>
+
+      <div class="hero-cta">
+        <a href="html/auth.html" class="btn-primary">ENTER THE WORLD</a>
+        <a href="html/auth.html" class="btn-outline">CREATE ACCOUNT</a>
+      </div>
+    </div>
+
+    <div class="hero-scroll" onclick="scrollToSection(1)">
+      <span>Discover</span>
+      <div class="scroll-line"></div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════
+       SECTION 2 — WORLD
+  ══════════════════════ -->
+  <section class="section lore-section reveal" id="section-1">
+    <div class="lore-content">
+      <p class="lore-eyebrow">The World of Legends</p>
+      <h2 class="lore-heading">A World That Lives and Breathes</h2>
+      <p class="lore-body">
+        Forge Of Legends is a living world shaped by
+        every choice its inhabitants make. The gods watch. The monsters hunger.
+        Your story will be written into history whether you are ready or not.
+      </p>
+      <div class="pillars">
+        <div class="pillar-card">
+          <div class="pillar-icon">⚔️</div>
+          <div class="pillar-title">ASYNC ROLEPLAY</div>
+          <div class="pillar-desc">Post whenever you're free. No one waits. No story dies because of schedules.</div>
+        </div>
+        <div class="pillar-card">
+          <div class="pillar-icon">🗺️</div>
+          <div class="pillar-title">LIVING WORLD</div>
+          <div class="pillar-desc">The map changes with every raid, battle, and divine event your group triggers.</div>
+        </div>
+        <div class="pillar-card">
+          <div class="pillar-icon">📜</div>
+          <div class="pillar-title">WORLD CHRONICLE</div>
+          <div class="pillar-desc">Every major event is written into history. Your legend endures forever.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════
+       SECTION 3 — DEITIES
+  ══════════════════════ -->
+  <section class="section deity-section" id="section-2">
+    <div class="deity-content">
+      <p class="lore-eyebrow">Choose Your Path</p>
+      <h2 class="lore-heading">Seven Deities</h2>
+      <p class="lore-body" style="opacity:1;transform:none">
+        The god you serve shapes your blessing, your leveling path,
+        and the sacred ingredients you must gather to ascend.
+      </p>
+      <div class="deity-grid">
+        <div class="deity-teaser">
+          <div class="deity-teaser-icon"><img src="https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/deity-images%2Fsah'run.jpeg?alt=media&token=a9ba07ac-26ad-405e-a773-3959a9dd5d9c" alt="Sah'run"/></div>
+          <div class="deity-teaser-name">SAH'RUN</div>
+          <div class="deity-teaser-domain">God of Flames<br/>Flames, Luminance, Hellfire</div>
+          <div class="deity-teaser-power">Flame of Forge · 3% forge drops</div>
+        </div>
+        <div class="deity-teaser">
+          <div class="deity-teaser-icon"><img src="https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/deity-images%2Falistor.jpeg?alt=media&token=00925b01-6a3f-4844-a833-99aabd61ca45" alt="Alistor"/></div>
+          <div class="deity-teaser-name">ALISTOR</div>
+          <div class="deity-teaser-domain">God of Darkness<br/>Darkness, Slumber, Secrets</div>
+          <div class="deity-teaser-power">Veil-step · 3% reduced robbery</div>
+        </div>
+        <div class="deity-teaser">
+          <div class="deity-teaser-icon"><img src="https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/deity-images%2Felionidas.jpeg?alt=media&token=3076c6f2-1e25-4664-8a50-668c834b62f8" alt="Elionidas"/></div>
+          <div class="deity-teaser-name">ELIONIDAS</div>
+          <div class="deity-teaser-domain">God of Abundance<br/>Fate, Blessings, Riches</div>
+          <div class="deity-teaser-power">Fortune's Drift · 3% precious loot</div>
+        </div>
+        <div class="deity-teaser">
+          <div class="deity-teaser-icon"><img src="https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/deity-images%2Fmah'run.jpeg?alt=media&token=7169560d-b36d-4009-9344-4703d5dca35b" alt="Mah'run"/></div>
+          <div class="deity-teaser-name">MAH'RUN</div>
+          <div class="deity-teaser-domain">Goddess of Stars<br/>Stars, Cosmos, Guidance</div>
+          <div class="deity-teaser-power">Astral Sight · 3% rare events</div>
+        </div>
+        <div class="deity-teaser">
+          <div class="deity-teaser-icon"><img src="https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/deity-images%2Ffreyja.jpeg?alt=media&token=434371f1-7d82-4d87-b7bb-4545fe37b5e6" alt="Freyja"/></div>
+          <div class="deity-teaser-name">FREYJA</div>
+          <div class="deity-teaser-domain">Goddess of Love<br/>Love, Souls, Desire</div>
+          <div class="deity-teaser-power">Heart's Favour · 3% NPC gifts</div>
+        </div>
+        <div class="deity-teaser">
+          <div class="deity-teaser-icon"><img src="https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/deity-images%2Farion.jpeg?alt=media&token=1fe0f371-aed9-4666-a02b-06cb10800af3" alt="Arion"/></div>
+          <div class="deity-teaser-name">ARION</div>
+          <div class="deity-teaser-domain">God of Justice<br/>Justice, Balance, Retribution</div>
+          <div class="deity-teaser-power">Balanced Scales · Even encounters</div>
+        </div>
+        <div class="deity-teaser">
+          <div class="deity-teaser-icon"><img src="https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/deity-images%2Fveil.jpeg?alt=media&token=e7fcf690-c559-4337-9012-dff063db7742" alt="Veil"/></div>
+          <div class="deity-teaser-name">VEIL</div>
+          <div class="deity-teaser-domain">God of Knowledge<br/>Knowledge, Memory, Secrets</div>
+          <div class="deity-teaser-power">Seeker's Mind · +3% EXP</div>
+        </div>
+      </div>
+      <div class="deity-cta">
+        <a href="html/auth.html" class="btn-primary">BEGIN YOUR STORY</a>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<script type="module">
+  // Stars
+  const starsEl = document.getElementById("stars");
+  for (let i = 0; i < 80; i++) {
+    const s = document.createElement("div");
+    s.className = "star";
+    const size = (Math.random() * 1.8 + 0.4).toFixed(1);
+    const isGold = Math.random() > 0.72;
+    s.style.cssText = `
+      width:${size}px; height:${size}px;
+      left:${(Math.random()*100).toFixed(1)}%;
+      top:${(Math.random()*100).toFixed(1)}%;
+      --dur:${(Math.random()*4+2).toFixed(1)}s;
+      --delay:-${(Math.random()*6).toFixed(1)}s;
+      ${isGold ? "background:rgba(201,168,76,0.65);" : ""}
+    `;
+    starsEl.appendChild(s);
+  }
+
+  // Particles
+  const partEl = document.getElementById("particles");
+  for (let i = 0; i < 22; i++) {
+    const p = document.createElement("div");
+    p.className = "particle";
+    p.style.cssText = `
+      left:${(Math.random()*100).toFixed(1)}%;
+      top:${(Math.random()*50+50).toFixed(1)}%;
+      --dur:${(Math.random()*6+6).toFixed(1)}s;
+      --delay:-${(Math.random()*12).toFixed(1)}s;
+    `;
+    partEl.appendChild(p);
+  }
+
+  // Scroll reveal
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(e => { if (e.isIntersecting) e.target.classList.add("visible"); });
+  }, { threshold: 0.25 });
+  document.querySelectorAll(".reveal").forEach(el => observer.observe(el));
+
+  // Nav dots
+  const sections = document.querySelectorAll(".section");
+  const dots = document.querySelectorAll(".nav-dot");
+  const dotObs = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        const idx = [...sections].indexOf(e.target);
+        dots.forEach((d, i) => d.classList.toggle("active", i === idx));
+      }
+    });
+  }, { threshold: 0.5 });
+  sections.forEach(s => dotObs.observe(s));
+
+  // Auth redirect
+  try {
+    const { auth, db } = await import("./firebase/firebase.js");
+    const { onAuthStateChanged } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js");
+    const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+    onAuthStateChanged(auth, async (user) => {
+      if (!user) return;
+      const snap = await getDoc(doc(db, "characters", user.uid));
+      window.location.href = snap.exists() ? "html/dashboard.html" : "html/create-character.html";
+    });
+  } catch(e) {}
+</script>
+
+<script>
+  function scrollToSection(i) {
+    document.getElementById("section-" + i)?.scrollIntoView({ behavior: "smooth" });
+  }
+</script>
+</body>
+</html>

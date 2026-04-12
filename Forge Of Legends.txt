@@ -1,0 +1,4686 @@
+﻿Forge Of Legends
+WORLD MAP
+
+
+
+
+
+
+CONTINENTS
+
+
+* Northern Continent (Safe Zone, mostly. Contains E-C monsters)
+
+
+* Western Continent (Safe Zone, mostly. Contains E-C monsters)
+
+
+* Eastern Continent (Danger Zone – A–B monsters)
+
+
+* Southern Continent (Endgame – S monsters only)
+
+
+
+
+
+
+NORTHERN CONTINENT — FROSTVEIL REGION
+
+
+The northern continent is a land characterized by snowy landscapes, frozen mountains, pristine ice forests, and white kingdoms, towns, villages. 
+
+
+Safe Zones 
+
+
+* Gladys Kingdom (Capital = Frostspire): The kingdom serves as one of the two safe regions on the world map. It features an ice castle, marble guild headquarters, faction buildings, living quarters, etc. 
+
+
+* The kingdom features smaller settlements like: Whitecrest Village, Icerun Hamlet, Paleglow Town, Mistveil Town. 
+
+
+
+
+Monster Zones
+
+
+Low-Level Zones (E–D Monsters)
+
+
+* Frostfang Valley: Blue-mane Wolves, Five-Fanged Bears
+
+
+* Sheen Lake: Groundhog Turtles, Twin-faced Serpents
+
+
+* Misty Hollow: Mist Phantom, Ice Ifrit, Water Wraith
+
+
+
+
+Intermediate Level Zones (C Monsters) 
+
+
+* Dark Cathedral: Condemned Knight, Revenant Bishop, Penitent Priest 
+
+
+
+
+
+
+Resources Location
+
+
+* Wisteria Forest: Can acquire foraging, herbs and hunting resources here. 
+
+
+* Silver Lake: Can acquire angler resources here. 
+
+
+* Hobbit Cave: Can acquire mining resources here. 
+
+
+* Arctic Willow Grove : Can acquire foraging, herbs and hunting resources here. 
+
+
+* Dream River: Can acquire angler resources here. 
+
+
+* Suldan Mine: Can acquire mining resources here. 
+
+
+
+
+
+
+Special Locations (Deity-Worship Materials)
+
+
+* Shrine of Secrets: 10% of finding any God of Knowledge worship materials. 
+
+
+* Aurora Basin: 10% chance of finding any Goddess of Stars worship materials. 
+
+
+* Forgotten Estuary: 10% chance of finding any God of Darkness worship materials. 
+
+
+
+
+
+
+
+
+WESTERN CONTINENT — VERDANTIS REGION 
+
+
+A land characterized by lush forests, vast valleys, green settlements and beautiful cottages. 
+
+
+Safe Zones
+
+
+* Elaria Kingdom (Capital = Solmere): The kingdom serves as one of the two safe regions on the map. It features a beautiful castle, cobblestone streets, forest settlements, etcetera. 
+
+
+* Smaller settlements in the kingdom include: Sunpetal Village, Basil Village, Riverend Town, Verdance Town 
+
+
+
+
+Monster Locations
+
+
+Low-Level Zones (E–D Monsters)
+
+
+* Whispering Forest: Red-mane Wolves, Vicious Gremlins
+
+
+* Golden Plains:  Scavengers, Rampage Bulls
+
+
+* Element Valley: Lightning Shrouds, Rock Golems, Flame Spirits
+
+
+
+
+Intermediate Level Zones (C Monsters) 
+
+
+* Defiled Sanctum: Skeletal Beast, Ghoul Blatherer, Cursed Fiend
+
+
+
+
+
+
+Resources Location
+
+
+* Asahi Valley: Can acquire foraging, herbs and hunting resources here. 
+
+
+* Moss Stream: Can acquire angler resources here. 
+
+
+*  Argent grotto: Can acquire mining resources here. 
+
+
+* Arctic Willow Grove : Can acquire foraging, herbs and hunting resources here. 
+
+
+* Golden River: Can acquire angler resources here. 
+
+
+* Shiny Cavern: Can acquire mining resources here. 
+
+
+
+
+
+
+Special Locations (Deity Worship Materials)
+
+
+*  Purgatory of Light: 10% chance to acquire any God of Flames worship materials
+
+
+*  Temple of Verdict: 10% chance to acquire any God of Justice worship materials 
+
+
+* Heart Garden: 10% chance to acquire any Goddess of Love worship materials
+
+
+* Valley of Overflowing: 10% chance to acquire any God of Abundance worship materials
+
+
+
+
+
+
+
+
+ EASTERN CONTINENT — VORTHAK
+
+
+A complete danger zone with no safe zones and a population of only B and A grade monsters. 
+
+
+
+
+REGIONS 
+
+
+Ashen Wastes
+
+
+* Dark Sphinx
+
+
+* Blue Phoenix
+
+
+* Fallen Cyclops
+
+
+
+
+Infernal Reach
+
+
+* Cerberus
+
+
+* Blood Kraken 
+
+
+
+
+Ruined Sanctum
+
+
+* Profane Priest
+
+
+* Corrupted Sage
+
+
+* Demonic Herald 
+
+
+
+
+Blighted World 
+
+
+* Abomination
+
+
+* Devil Centurion 
+
+
+
+
+
+
+
+
+SOUTHERN CONTINENT — NYX ABYSS
+
+
+An abyssal zone that holds only S-grade abominable concepts. 
+
+
+
+
+REGIONS
+
+
+Void Chasm
+
+
+* Void Lurker
+
+
+* Oblivion Eye
+
+
+
+
+Abyssal Depths
+
+
+* Abyssal Eater
+
+
+* Chaoswalker
+
+
+
+
+Fallen Heaven
+
+
+* Godless Thing 
+
+
+
+
+
+
+
+
+
+
+FOOTNOTE
+
+
+* NPCs are scattered across safe zones. 
+* Roleplay chat boxes are available for every safe zone location. (I.e Frostspire capital RP box; Whitecrest village rp box), and everyone present in that location will be able to roleplay together. 
+* A fee as well as travel time is required when moving between distances. Refer to Monetary System
+
+
+
+
+
+
+
+
+ 
+________________
+
+
+
+
+RACES
+
+
+
+
+Human
+* Race Attribute: Gains 10% more exp from battles. 
+
+
+Elf
+* Race Attribute: Magical skills cost less mana. 
+
+
+Orc
+* Race Attribute: Deals 10% increased melee damage. 
+
+
+Dwarf
+* Race Attribute: Gains 10% extra stat from gear. 
+
+
+Fairy
+* Race Attribute: Gains 10% luck. 
+
+
+Undead
+* Race Attribute: Gains 10% resistance to melee attacks. 
+
+
+Dragonborn
+* Race Attribute: Gains 10% resistance to magic attacks. 
+
+
+
+
+<<ASCENSION>>
+
+
+Sage:
+* Race Attribute: Gains 20% exp from battles. 
+
+
+High Elf:
+* Race Attribute: Gains double mana bar. 
+
+
+Warlord:
+* Race Attribute: Gains increased critical rate for melee attacks. 
+
+
+Titan:
+* Race Attribute: Gains 20% extra stat from gear. 
+
+
+Spirit:
+* Race Attribute: Gains 20% luck. 
+
+
+Lich:
+* Race Attribute: Gains one resurrection per battle. 
+
+
+Elder Dragon:
+* Race Attribute: Gains 20% resistance to magic attacks.
+
+
+
+
+
+
+FOOTNOTE
+
+
+* Race gives you passive bonuses. 
+* Ascension is possible when a player reaches the Exalted Rank. For example, a Human can become a Sage. Passive bonus increases when that happens. 
+
+
+
+
+
+
+________________
+
+
+
+
+DEITIES 
+
+
+
+
+Sah’run {God Of Flames} 
+
+
+Sah’run is the lord of flames and embodiment of scorch. He is also known as The Demon of Fire. 
+
+
+-Authorities
+Flames, Luminance, Hellfire. 
+
+
+-Materials For Worship
+Volcanic roots, Devil-Spring water, Ash of Elder trees. 
+
+
+-Advancement Ingredients
+Heart of the Red Phoenix, Gem of Luminance. 
+
+
+Blessing:
+* Flame of Forge: Enemies defeated have a 3% chance to drop forge materials. (iron, platinum, etc) 
+
+
+
+
+
+
+
+
+Alistor {God of Darkness} 
+
+
+Alistor is the God of darkness and shadows, and rest. He is also known as the Final Slumber. 
+
+
+-Authorities
+Darkness, Slumber, Secrets. 
+
+
+-Materials for Worship
+Ephemeral Footprints, Oil-stained Feathers, Whispering Purple Sands. 
+
+
+-Advancement Ingredients
+The Void-Eye, Orb of Silence. 
+
+
+Blessing:
+* Veil-step: Reduces chances of getting robbed/attacked while exploring by 3%. 
+
+
+
+
+
+
+Elionidas {God of Abundance} 
+
+
+Elionidas is the God of wealth, good luck and opportunities. . He is also known as The Fortunal.
+
+
+-Authorities:
+Fate, Blessings, Riches. 
+
+
+-Materials for worship
+Golden Wheat Sheaves, Miracle Coins, Ancient Mint Seeds. 
+
+
+-Advancement Ingredients
+Crown of Fortune, Tears of The Endless Goldfish. 
+
+
+Blessing:
+* Fortune’s Drift: Has a 3% chance of finding precious loot while exploring. 
+
+
+
+
+
+
+Mah’run {Goddess of Stars} 
+
+
+Mah’run is the Goddess of the night sky and eternal stars. She is also known as the Astral Mother. 
+
+
+-Authorities
+Stars, Cosmos, Guidance. 
+
+
+-Materials For Worship
+Starlight Dust, Moon Petals, Crystallized Night Dews. 
+
+
+-Advancement Ingredients
+Core of a Fallen Star, Fruit of World Tree. 
+
+
+Blessing:
+* Increases chance of encountering rare events and special locations by 3%.
+
+
+
+
+
+
+Freyja {Goddess Of Love} 
+
+
+Freyja is the Goddess of affection, passion and bonds. She is also known as the Heart Mother. 
+
+
+-Authorities
+Love, Souls, Desire. 
+
+
+-Materials For Worship
+Crimson Toad Moss, Branch of Soul Tree, Bloom Petals. 
+
+
+-Advancement Ingredients
+Divine Heart Essence, Forgotten Desire Seed. 
+
+
+Blessing:
+* Increases chances of receiving gifts from NPCs by 3%.
+
+
+
+
+
+
+Arion {God of Justice} 
+
+
+Arion is the God of law, balance and fairness. He is also known as the Divine Arbiter. 
+
+
+-Authorities
+Justice, Balance, Retribution. 
+
+
+-Materials For Worship
+Broken Shackles, Iron Oaths, Verdict Quill.
+
+
+-Advancement Ingredients
+Scales of Equilibrium, Adonai Sword. 
+
+
+Blessing:
+* Balances the ratio of good and bad encounters. 
+
+
+
+
+
+
+Veil {God of Knowledge} 
+
+
+Veil is the God of wisdom, memory and hidden truths. He is also known as The Hand Of Secret.
+
+
+-Authorities
+Knowledge, Memory, Secrets. 
+
+
+-Materials For Worship
+Ancient Scroll Fragments, White Mystic Woods, Truths. 
+
+
+-Advancement Ingredients
+Ink of Time, Eye of All-knowing. 
+
+
+Blessing:
+* Increases EXP gained from all activities by 3%. 
+
+
+
+
+
+
+
+
+FOOTNOTE
+
+
+
+
+* Deities grant blessings. When starting as a player, you get to pick one Deity and a corresponding blessing will be bestowed on random. Blessings aid with world exploration, but don't affect battles. 
+* Each Deity has a temple on the map. You can increase your faith level by sacrificing materials to your Deity. To sacrifice worship materials, you need to head to the corresponding Deity’s temple on the map. 
+* In the temple, you can check your faith level and how it affects your blessings received. 
+* The Deity selected will have an effect on the materials needed for advancement. 
+* As for Deity accounts, they will be able to do a bunch of things like check worshipper’s faith level, read their activity log, and bestow resources upon a worshipper of their choice. (Deities get a vast bunch of resources, materials, coins, potions, as startup.) Deities should bless in moderation. 
+* Deities will also be able to send private messages to their worshippers, in the form of “divine visions”. Divine vision can range from random knowledge, to simple pranks. 
+* Deities will also be able to create events (basically world quests multiple people can participate in.) Be it monster related, or simple rp plotline. 
+* For admins who will have both a Deity and player account, they will not be allowed to worship the Deity they control. This is to prevent irrational support of one's character.
+* Deities should also be able to Masquerade as Faction leaders. They will have a section where they can drop Faction missions for members of their organizations. Missions that can earn them rewards. 
+
+
+
+
+________________
+
+
+
+
+CLASSES 
+
+
+
+
+Classes revolve around these roles:
+* melee damage
+* tanking
+* magic
+* support
+* stealth
+* ranged
+* hybrid
+
+
+
+
+Warrior
+The classic frontline fighter who overwhelms enemies with raw skill.
+Role: Melee Damage. 
+---
+
+
+Guardian
+The defensive protector who absorbs damage and protects allies.
+Role: Tank / Defense. 
+---
+
+
+Arcanist
+A master of arcane power who channels destructive magic.
+Role: Magic Damage
+---
+
+
+Hunter 
+A master who specializes in ranged combat and traps. 
+Role: Ranged Damage. 
+---
+
+
+Assassin 
+A stealth fighter who strikes enemies before they can react.
+Role: Stealth
+---
+
+
+Cleric 
+A divine caster who channels the blessings of the gods.
+Role: Support 
+---
+Summoner
+A mystical class that deals with summoning creatures from other realms. 
+Role: Hybrid Magic
+
+
+
+
+
+
+________________
+
+
+
+
+SKILLTREE
+
+
+Every skill falls into one of these categories:
+
+
+* Stun skills (prevents players from moving for a turn)
+
+
+* Continuous damage skills (debuffs: Burn, bleeds, life drain, etc) 
+
+
+* Continuous empowerment skills (buffs that grow, etcetera) 
+
+
+* Heavy damage skills (Pretty straightforward. They deal heavy damage, and usually non magically. Basically, strikes that require melee) 
+
+
+* Sacrificial skills (Sacrifice something to gain something. For example, sacrificing a percentage of health to get a huge buff. Since you're sacrificing, the buffs are usually very large) 
+
+
+* Summoning skills (Summons helpers to deal damage)
+
+
+* Cleansing skills (Skills that cleanse debuffs) 
+
+
+* Rejuvenation skills (Skills that rejuvenate health) 
+
+
+
+
+
+
+
+
+⚔️ WARRIOR (Strong early → steady scaling)
+
+
+Basic
+
+
+* Cleave (Melee Damage. Non-magic skill) 
+Deals 105% STR damage
+
+
+* Battle Cry (Empowerment. Costs 10 Mana)
+Gain +20% STR
+
+
+* Crushing Blow (Heavy Damage. Non-magic skill)
+Deals 110% STR damage, ignores 10% DEF
+
+
+
+
+Intermediate
+
+
+* War Stomp (Stun. Non-magic skill)
+Stuns enemy for 1 turn
+
+
+* Bleeding Edge (Continuous Damage. Costs 20 Mana)
+Deals +15% STR per turn (3 turns) 
+
+
+* Iron Momentum (Empowerment. Costs 20 Mana)
+Gain +30% STR
+
+
+* Blood Gamble (Sacrificial. Costs 25 Mana)
+Lose 15% HP → gain +50% STR
+
+
+
+
+Advanced
+
+
+* Titan Breaker (Mighty Damage. Costs 50 Mana) 
+Deals 170% STR damage, ignores 50% DEF
+
+
+* Berserker’s Oath (Sacrificial. Costs 40 Mana)
+Lose 25% HP → gain +60% STR + 20% DEX
+
+
+* War God’s Fury (Empowerment. Costs 50 Mana) 
+Gain +80% STR. 
+
+
+
+
+---
+
+
+🛡️ GUARDIAN (Weak damage → unkillable late)
+
+
+Basic
+
+
+* Shield Bash (Stun. Non-magic skill) 
+Stuns enemy for 1 turn
+
+
+* Fortify (Empowerment. Costs 10 Mana) 
+Gain +20% DEF
+
+
+* Iron Guard (Empowerment. Non-magic skill)
+Reduce next turn’s damage by 15%
+
+
+
+
+Intermediate
+
+
+* Stone Skin (Empowerment. Cost 25 Mana)
+Gain +40% DEF
+
+
+* Reinforced Core (Rejuvenation. Costs 20 Mana)
+Restore 10% HP per turn, for 3 turns
+
+
+* Taunting Roar (Control. Costs 20 Mana)
+Locks enemy skills for one round
+
+
+* Pain Conversion (Sacrificial. Costs 25 Mana)
+Lose 20% HP → gain +50% DEF
+
+
+
+
+Advanced
+
+
+* Aegis of Eternity (Empowerment. Costs 40 Mana)
+Gain +50% HP
+
+
+* Colossus Form (Empowerment. Costs 50 Mana)
+Gain +60% DEF + 30% HP
+
+
+* Unbreakable Will (Cleanse. Costs 50 Mana) 
+Remove all debuffs + 1 turn immunity
+
+
+
+
+---
+
+
+🔮 ARCANIST (Weak early → insane late)
+
+
+Basic
+
+
+* Arcane Bolt (Magic Damage. Costs 5 Mana)
+Deals 105% INT damage
+
+
+* Mana Pulse (Magic Damage. No Mana Cost)
+Deals 100% INT damage
+
+
+* Robust Mind (Empowerment. Costs 10 Mana) 
+Gain +20% INT
+
+
+
+
+Intermediate
+
+
+* Astral Lance (Heavy Magic. Costs 25 Mana) 
+Deals 140% INT damage
+
+
+* Mind Burn (Continuous Damage. Costs 20 Mana) 
+Deals 15% damage per turn, for 3 turns
+
+
+* Echo-strike (Multi-hit. Costs 25 Mana)
+Next skill hits twice
+
+
+* Rune Sacrifice (Sacrificial. Costs 20 Mana) 
+Lose 20% HP → gain +50% INT
+
+
+
+
+Advanced
+
+
+* Meteorfall (Mighty Magic. Costs 50 Mana) 
+Deals 180% INT damage
+
+
+* Arcane Shower (Empowerment. Costs 50 Mana)
+Gain +80% INT
+
+
+* Hex (Debuff. Costs 50 Mana)
+Places a curse that saps 5% max HP per turn, for 5 turns. 
+
+
+
+
+---
+
+
+🏹 RANGER (Consistent all game)
+
+
+Basic
+
+
+* Pierce (Melee Damage. Non-magic skill)
+Deals 105% DEX damage
+
+
+* Hunter’s Poison (Debuff. Costs 10 Mana) 
+Inflicts poison that deals +10% damage each turn, for 3 turns
+
+
+* Quick Shot (Utility. Non-magic skill)
+Guaranteed first attack next turn
+
+
+
+
+Intermediate
+
+
+* Split Arrow (Continuous Damage. Costs 20 Mana)
+Deals +15% damage per turn, for 3 turns
+
+
+* Ensnare (Stun. Non-magic skill)
+Immobilizes enemy for 1 turn
+
+
+* Falcon Sight (Empowerment. Costs 20 Mana)
+Gain +30% DEX
+
+
+* Vital Shot (Heavy Damage. Non-magic skill)
+Deals 135% DEX damage
+
+
+
+
+Advanced
+
+
+* Slayer (Mighty Damage. Non-magic skill)
+Deals 170% DEX damage
+
+
+* Predator’s Instinct (Empowerment. Costs 40 Mana)
+Gain +60% DEX
+
+
+* Executioner (Mighty Damage. Costs 50 Mana) 
+Deals 200% damage if target <40% HP
+
+
+
+
+---
+
+
+🗡️ ASSASSIN (Burst + PvP dominance)
+
+
+Basic
+
+
+* Backstab (Heavy Damage. Non-magic skill) 
+Deals 120% DEX (first hit bonus) 110% afterwards. 
+
+
+* Scorching Blade (Debuff. Costs 10 Mana) 
+Applies burn effect that deals +15% damage each turn
+
+
+* Shadow Step (Utility. Costs 5 Mana)
+Act first next turn
+
+
+
+
+Intermediate
+
+
+* Thunder Strike (Heavy Damage. Non-magic skill)
+Deals 135% DEX damage
+
+
+* Venom Surge (Debuff. Costs 20 Mana) 
+Poison effect that deals +15% damage each turn, for 3 turns
+
+
+* Trickster (Cleanse. Costs 20 Mana) 
+Removes all debuffs. 
+
+
+* Blood Pact (Sacrificial. Costs 25 Mana) 
+Lose 15% HP → gain +50% DEX
+
+
+
+
+Advanced
+
+
+* Death Mark (Mighty Magic. Costs 40 Mana)
+Target takes +60% damage
+
+
+* Phantom Assault (Multi-hit. Costs 50 Mana)
+Target takes 3 hits at 65% damage each
+
+
+* Predator (Heavy Damage. Costs 50 Mana) 
+Deals 200% damage to debuffed enemies
+
+
+
+
+---
+
+
+✨ CLERIC (Support → late-game carry)
+
+
+Basic
+
+
+* Healing Light (Rejuvenation. Costs 10 Mana) 
+Restore 15% HP for allies. 
+
+
+* Sacred Spark (Damage. Costs 5 Mana)
+Deals 105% INT damage
+
+
+* Neptune’s Embrace (Empowerment. Costs 15 Mana) 
+Allies gains +20% stats
+
+
+
+
+Intermediate
+
+
+* Divine Barrier (Shield. Costs 25 Mana) 
+Blocks 80% damage for 1 turn. 
+
+
+* Purify (Cleanse. Costs 25 Mana) 
+Removes all debuffs. 
+
+
+* Radiant Pulse (Rejuvenation. Costs 20 Mana)
+Gains 10% of total HP each turn. 
+
+
+* Life Exchange (Sacrificial. Costs 20 Mana)
+Lose 15% HP → allies gains +20% to all stats
+
+
+
+
+Advanced
+
+
+* Sanctuary (Rejuvenation. Costs 40 Mana)
+Gain 50% of total HP 
+
+
+* Divine Ascension (Empowerment. Costs 50 Mana)
+Team gains +60% to all stats
+
+
+* Lazarus (Revive. Costs 50 Mana)
+Revive one ally with 50% HP, once per battle. 
+
+
+
+
+---
+
+
+🌀 SUMMONER (Scaling / strategic)
+
+
+Basic
+
+
+* Lashing (Magic damage. Costs 5 Mana) 
+Deals 105% INT damage. 
+
+
+* Soul Bind (Stun/Control. Costs 10 Mana)
+Restrains enemy for 1 turn. 
+
+
+* Essence sap (Debuffs. Costs 10 Mana)
+Inflicts enemy with sap that deals 10% damage, for 4 turns
+
+
+
+
+Intermediate
+
+
+* Beastmaster (Summons. Costs 25 Mana)
+Summons Gargoyles that deal 40% of your INT as damage each turn. (Up to 3 can be summoned) 
+
+
+* Beast Empowerment (Empowerment. Costs 25 Mana)
+Increase the damage of summons by 30% 
+
+
+* Usurper (Debuff + Empowerment. Costs 25 Mana)
+Steals 5% of the opponent's total HP each turn and heals you for the same amount. 
+
+
+* Offering (Sacrificial. Costs 20 Mana)
+Lose one summon to gain 20% total HP. 
+
+
+
+
+Advanced
+
+
+* Leviathan (Summon. Costs 50 Mana)
+Summons leviathan that consistently deals 120% INT Damage each turn (can only be summoned once) 
+
+
+* Abyssal-touch (Debuffs. Costs 50 Mana)
+Enemy DEF is reduced by 40%
+
+
+* Profane Lord (Mighty Magic. Costs 50 Mana) 
+Destroy all summons to deal 200% INT damage
+
+
+
+
+
+
+FOOTNOTE
+
+
+* Base power = 100%.
+* Stackable buffs (empowerment) = 160% max. 
+* In regards to buffs or Sacrificial skills. If a Sacrificial skill deducts a certain percentage of your health to give you +40% increased intelligence, it means that skill can only be used 3 times. You cannot exceed a buff of 160%. 
+* If another skill gives a buff of 20%, it can only be used 8 times, and so on. There might be powerful skills that give 80% buff. It can only be used twice before it stops being effective. 
+* Players unlock two skills per rank Ascension, in the order listed on the skilltree. 
+ 
+
+
+
+
+________________
+
+
+
+
+CHARACTER TEMPLATE 
+
+
+
+
+Name: Name of Character. 
+
+
+Title(s): Titles earned along the way, bestowed by NPCs after a deed. 
+
+
+Race: Race of Character. 
+
+
+Sex: Male or Female. 
+
+
+Age: Age of the character. 
+
+
+Appearance: Character's appearance. 
+
+
+Deity: Deity worshipped. 
+
+
+Blessing: Blessing received from Deity. 
+~~~
+Class: Class of Character. 
+
+
+Rank: Rank of Character. 
+
+
+Level: Level of Character. 
+
+
+Exp Bar: [.............] Experience bar/points. Preferably bar. 
+
+
+~~~
+Health Bar: [............] Health bar/points. Preferably bar. (Base =100)
+
+
+Mana Bar: [............] Mana bar/points. Preferably bar. (Base =50)
+
+
+Stat Points: Stat points for allocation gained after each level up. 
+
+
+Stats:
+-Strength (10)             - Intelligence (10)
+-Defense (10)              - Dexterity (10)
+
+
+(Base stat attributes = 10 each. Welcome bonus = 20 points for allocation) 
+
+
+Equipment:
+
+
+-Armor                  - Weapon 
+
+
+~~~
+Profession: Profession of the character. 
+
+
+Party: Party joined for boss raids. 
+
+
+Home Kingdom: Starting kingdom of character. 
+
+
+Faction: Faction joined for missions and benefits. 
+
+
+Companion: Magical creature owned. 
+
+
+
+
+Footnote
+* Stats can be increased by points earned from leveling up, as well as points earned from equipment. 
+* Strength affects melee/non-magical damage for certain classes. 
+* Intelligence affects magic damage for certain classes. 
+* Defense affects the amount of damage received. 
+* Dexterity affects melee/non-magical damage for certain classes, and also affects turn based attacks. 
+
+
+
+
+________________
+
+
+
+
+BATTLE SYSTEM 
+
+
+
+
+There are three different battle modes in play:
+
+
+-Farming in Monster Zones
+-Boss Raids
+-PVP
+
+
+
+
+Farming
+Farming entails traveling to monster zones and fighting varied difficulty monsters to gather EXP. It is one of the most consistent ways of leveling up. Monsters killed will drop rewards according to their strength. If a player is stronger than the enemy, melee damage is often enough to vanquish them.
+
+
+There is also an option for “Auto Battle”, where you attack a large group of monsters nearby and fight them all. Battle switches to automatic mode, and it automatically shuffles between your equipped skills. All you have to do is monitor your health and mana, to prevent death. 
+
+
+
+
+Boss Raids
+This type of battle entails multiple players fighting against a single boss. These are usually found in raids or missions. Players create/join a party and take turns dealing damage to the boss monster. The leader of the party takes damage first, followed by whoever is next IF/WHEN the leader is vanquished. 
+
+
+
+
+PVP
+Player VS Player mode. This mode allows two players to compete with each other in tournaments, with decided resources/equipment on the line. It could also be a casual sparring session between two players. 
+
+
+
+
+Battle Format
+Which brings us to the battle format. During exploration, after detecting a monster, a panel like this will appear:
+
+
+[You have encountered Class-E monsters: Groundhog Turtles]
+
+
+[Fight]    [Run]    [Auto-battle] 
+
+
+… 
+[You have encountered a Class-A monster: Abyssal Presbyter] 
+
+
+[Fight]   [Run] 
+
+
+…
+After accepting a battle, it will have a panel like this:
+
+
+[Fighting Monsters…..]
+
+
+[Health]   [Mana] 
+
+
+…
+
+
+[Melee]   [Skill]
+
+
+[Health]   [Mana] 
+
+
+
+
+Melee is basically physical blows with your weapons. Your base 100% attack. 
+
+
+If you click skill, your list of available skills will pop up, and you can choose from them. Some skills are non-magical. The skills that require magic will consume mana. Once your mana is depleted, you can't use magic skills.
+
+
+
+
+FOOTNOTE
+
+
+* It is very much possible to die while farming, especially in “Auto Battle” mode. If you die while farming/exploring, you can only resurrect after a full day, and with half of your items gone. As such, it is paramount that you take note of your HP and Mana, and use potions to refill from time to time. 
+* Dying in PVP or Boss Raids won't incur any penalty. However, it is impossible to use potions or eat food when in battle. You can only prepare in advance. 
+* Using the “run” option during explorations deducts coins from your inventory. 
+
+
+________________
+
+
+
+
+PROFESSIONS
+
+
+
+
+
+
+Players are allowed to pick any one of these professions:
+
+
+
+
+* Miner: A profession that entails exploring caves and underground networks to excavate precious ores and runestones. 
+
+
+* Forager: A profession that entails forest exploration to acquire all sorts of fruits.
+
+
+* Angler: A profession that involves fishing. 
+
+
+* Herbalist: A profession that entails gathering special roots, branches and herbs. 
+
+
+* Hunter: A profession that entails hunting animals for their meat and bones. 
+
+
+
+
+The following professions are handled by NPCs. 
+
+
+* Blacksmiths: A profession that converts all sorts of ores into gear. 
+
+
+* Alchemists: A profession that converts special roots, branches, bones, and herbs into potions. 
+
+
+* Cooks: A profession that entails using berries, fruits, fish and meat to cook foods with varying effects. 
+
+
+* Enchanters: A profession that entails improving the state of equipment using runestones. 
+
+
+
+
+Profession EXP Bar 
+Every profession comes with an exp bar, and filling them up will result in a level-advancement. The exp bar is cleared after each level growth, and you have to fill it up once more. Below are the points needed for each level:
+
+
+
+
+* Level 0-1 = 0/100 points (can find only one resource at a time) 
+* Level 1-2 = 0/200 points (can find only one resource at a time) 
+* Level 2-3 = 0/400 points (30% chance of finding two resources at a time) 
+* Level 3-4 = 0/800 points (50% chance of finding two resources at a time) 
+* Level 4-5 = 0/1600 points (70% chance of finding two resources at a time) 
+* Level 5-6 = 0/3200 points (100% chance of finding two resources at a time) 
+* Level 6-7 = 0/6400 points (12% chance of finding three resources at a time) 
+* Level 7-8 = 0/12,800 points (24% chance of finding three resources at a time) 
+* Level 8-9 = 0/25,600 points (32% chance of finding three resources at a time) 
+* Level 9-10 = 0/51,200 points (50% chance of finding three resources at a time) 
+
+
+
+
+Material Find Percentage
+
+
+Level 0
+* Common: 80%
+* Uncommon: 20%
+* Rare: 0%
+* Legendary: 0%
+* Mythic: 0%
+
+
+Level 1
+* Common: 75%
+* Uncommon: 20%
+* Rare: 5%
+* Legendary: 0%
+* Mythic: 0%
+
+
+Level 2
+* Common: 70%
+* Uncommon: 22%
+* Rare: 8%
+* Legendary: 0%
+* Mythic: 0%
+
+
+Level 3
+* Common: 65%
+* Uncommon: 25%
+* Rare: 9%
+* Legendary: 1% 
+* Mythic: 0%
+
+
+Level 4
+* Common: 60%
+* Uncommon: 27%
+* Rare: 11%
+* Legendary: 2%
+* Mythic: 0% 
+
+
+Level 5
+* Common: 55%
+* Uncommon: 30% 
+* Rare: 12%
+* Legendary: 3% 
+* Mythic: 0%
+
+
+Level 6
+* Common: 50%
+* Uncommon: 32% 
+* Rare: 14%
+* Legendary: 4% 
+* Mythic: 0%
+
+
+Level 7
+* Common: 40%
+* Uncommon: 30%  
+* Rare: 25%
+* Legendary: 5%
+* Mythic: 0.1%
+
+
+Level 8
+* Common: 35%
+* Uncommon: 30%
+* Rare: 20%
+* Legendary: 10%
+* Mythic: 5%
+
+
+Level 9
+* Common: 30%
+* Uncommon: 23%
+* Rare: 26%
+* Legendary: 14%
+* Mythic: 7%
+
+
+Level 10
+* Common: 15%
+* Uncommon: 25%
+* Rare: 30%
+* Legendary: 20%
+* Mythic: 10%
+
+
+
+
+
+
+
+
+FOOTNOTE:
+
+
+* Players are required to pick a profession from the available options and begin working to find the corresponding materials.
+* NPC vendors are scattered across the map. Materials submitted by players are automatically made into finished products, which everyone will have access to. 
+
+
+
+
+
+
+
+
+________________
+
+
+
+
+MONETARY SYSTEM
+
+
+
+
+Gold Coins are spent in the Forge of Legends world. Here, we'll be going over how the economy works by highlighting the prices attributed to all sellable/buyable materials and resources. 
+
+
+First, we'll take a look at the Profession aspect. All resources share the same tiers, so we simply use a universal template. 
+
+
+
+
+RESOURCE MARKET PRICES 
+
+
+
+
+Common Resources 
+
+
+* 8 – 12 coins 
+* Matches E-D monster drops. Basically, 3–5 common resources = 1 monster kill. 
+
+
+
+
+Uncommon Resources 
+
+
+* 18 – 25 coins
+
+
+
+
+Rare
+
+
+* 45 – 65 coins
+
+
+
+
+Legendary 
+
+
+* 120 – 180 coins
+
+
+
+
+Mythic
+
+
+* 350 – 500 coins
+
+
+
+
+
+
+COOKED FOOD PRICING 
+
+
+
+
+
+
+Common Food
+
+
+* 25 – 40 coins
+* (+5% stat, short duration)
+
+
+
+
+Uncommon Food
+
+
+* 60 – 90 coins
+* (+10% stat)
+
+
+
+
+Rare Food
+
+
+* 140 – 200 coins
+* (+15% stat)
+
+
+
+
+Legendary Food
+
+
+* 350 – 500 coins
+* (+20% stat)
+
+
+
+
+Mythic Food
+
+
+* 900 – 1200 coins
+* (+25% stat)
+
+
+
+
+
+
+POTIONS PRICING 
+
+
+
+
+Minor Potion 
+
+
+* 40 — 60 coins 
+
+
+
+
+Standard Potion 
+
+
+* 100 — 150 coins 
+
+
+
+
+Greater Potion 
+
+
+* 250 — 400 coins
+
+
+
+
+
+
+TRAVEL PRICING 
+
+
+
+
+
+
+WITHIN A KINGDOM (Short Distance)
+
+
+(Capital ↔ Town, Town ↔ Village, Village ↔ Village)
+
+
+* Base Cost: 20 coins + 10 seconds travel time 
+
+
+* Medium Distance: 30 coins + 30 seconds travel time 
+
+
+* Long Distance: 40 coins + 1 minute travel time 
+
+
+
+
+
+
+BETWEEN KINGDOMS (Safe Continents)
+
+
+(Frostveil ↔ Verdantis)
+
+
+* Standard Travel: 100 coins + 5 minutes travel time 
+
+
+* Fast Travel Option (premium/instant): 250 coins
+
+
+
+
+
+
+TO DANGER ZONES
+
+
+Eastern Continent (A–B Monsters)
+
+
+* Travel Cost: 250 coins
+
+
+
+
+Southern Continent (S Monsters)
+
+
+* Travel Cost: 500 coins
+
+
+
+
+
+
+
+
+________________
+
+
+
+
+RESOURCES 
+
+
+
+
+
+
+⛏️ MINING RESOURCES (Ores & Stones)
+
+
+Common
+
+
+* Iron 
+* Copper 
+* Tin
+* Limestone 
+* Coal
+
+
+Uncommon
+
+
+* Silver
+* Bronze 
+* Obsidian
+* Marble
+* Quartz
+
+
+Rare
+
+
+* Gold
+* Mythril 
+* Palladium
+
+
+
+
+Legendary
+
+
+* Titanium
+* Adamantium
+
+
+Mythic
+
+
+* Aetherium 
+
+
+
+
+---
+
+
+🌿 FORAGING RESOURCES (Fruits & Wild Finds)
+
+
+Common
+
+
+* Blueberries 
+* Apples
+* Garlic 
+* Mushroom
+* Melons
+
+
+Uncommon
+
+
+* Golden Pears
+* Moon Grapes
+* Sunfruit
+* Crystal Berries
+* Bitter Root
+
+
+Rare
+
+
+* Spirit Plum
+* Frost Apples
+* Ember Fruit
+
+
+Legendary
+
+
+* Celestial Fig
+* Dragonfruit
+
+
+Mythic
+
+
+* Eden’s Tear 
+
+
+
+
+---
+
+
+🎣 ANGLER RESOURCES (Fish & Aquatic)
+
+
+Common
+
+
+* Trout
+* Carp
+* Catfish 
+* Sardine
+* Pufferfish 
+
+
+Uncommon
+
+
+* Silverfin
+* Glowfish
+* Spotted Eel
+* Coral Snapper 
+* Red Minnow
+
+
+Rare
+
+
+* Shadowfish
+* Flamefish
+* Ying Koi
+
+
+Legendary
+
+
+* Celestial Whale
+* Black Unagi
+
+
+Mythic
+
+
+* Cosmic Leviathan
+
+
+
+
+---
+
+
+🌱 HERBALIST RESOURCES (Herbs, Roots, Leaves)
+
+
+Common
+
+
+* Mint Leaves
+* Basil Sprigs
+* Wild Herbs
+* Soft Bark
+* Wood
+
+
+Uncommon
+
+
+* Silverleaf
+* Goldroot
+* Nightshade
+* Glowleaf
+* Lotus
+
+
+Rare
+
+
+* Spirit Herb
+* Jade Vine
+* Ghost Root
+
+
+Legendary
+
+
+* Phoenix Bloom
+* Middlemist
+
+
+Mythic
+
+
+* Void Orchid 
+
+
+
+
+---
+
+
+🏹 HUNTER RESOURCES (Meat, Bones, Skins)
+
+
+Common
+
+
+* Raw Meat 
+* Tough Hide
+* Bone Fragments
+* Feathers 
+* Animal Fat
+
+
+Uncommon
+
+
+* Leather
+* Fangs
+* Fur
+* Horns
+* Claws
+
+
+Rare
+
+
+* Spirit Venison
+* Shadow Hide
+* Drake Meat
+
+
+Legendary
+
+
+* Cyclops Eye
+* Dragon Scales
+
+
+Mythic
+
+
+* Titan Heart
+
+
+
+
+
+
+Base Resource EXP Values
+
+
+* Common — 10 EXP
+* Uncommon — 25 EXP
+* Rare — 60 EXP
+* Legendary — 150 EXP
+* Mythic — 500 EXP
+
+
+
+
+
+
+
+
+________________
+
+
+
+
+
+
+DEITY-WORSHIP MATERIALS 
+
+
+
+
+
+
+* Volcanic roots, Devil-Spring water, Ash of Elder trees. 
+* Ephemeral Footprints, Oil-stained Feathers, Whispering Purple Sands.
+* Golden Wheat Sheaves, Miracle Coins, Ancient Mint Seeds. 
+* Starlight Dust, Moon Petals, Crystallized Night Dews. 
+* Crimson Toad Moss, Branch of Soul Tree, Bloom Petals.
+* Broken Shackles, Iron Oaths, Verdict Quill.
+* Ancient Scroll Fragments, White Mystic Woods, Truths. 
+
+
+
+
+
+
+________________
+
+
+
+
+RANKS/ADVANCEMENT 
+
+
+
+
+PLAYERS RANKS
+
+
+Each Rank contains 100 Levels within. 
+
+
+* Wanderer: A soul merely stepping into the world. (0-100)
+
+
+* Follower: A soul who admires a certain path. (101-200)
+
+
+* Disciple: Now walks a certain path. (201-300)
+
+
+* Master: Is now a master of that path. (301-400)
+
+
+* Exalted: Praised as a lord of his path. (401-500)
+
+
+* Crown: A leader. (501-600)
+
+
+* Supreme: An absolute monarch. (601-700)
+
+
+* Legend: A being spoken of in legends. (701-800)
+
+
+* Myth: A true fable. (801-900)
+
+
+* Eternal: An everlasting being. (901-1000)
+
+
+
+
+As such, a player may be referred to as “A Level 302 Master”, “A Level 50 Wanderer”.
+
+
+
+
+PLAYER ADVANCEMENT
+
+
+Advancement occurs in two ways:
+
+
+-Level Ups
+-Rank Ascension
+
+
+Level Ups
+In order to level up, one simply needs to partake in battles and gather EXP. The most consistent way of gathering experience points is through Farming. Raid bosses in events give higher EXP, but only occur from time to time. 
+
+
+* A growth multiplier is used to multiply the current EXP bar for every level increased. For example, 100 EXP is needed to go from level 1 to 2. Upon reaching level 2, we use a multiplier on the 100 EXP. Upon reaching level 3, we use a multiplier on level 2’s EXP bar.
+
+
+Rank multipliers = ×1.10
+
+
+For example:
+
+
+1 — 2 = 100 EXP
+2 — 3 = 110 EXP
+3 — 4 = 121 EXP
+4 — 5 = 133 EXP (etc… all the way to 100)
+
+
+EXP bar resets upon reaching a new rank, with a solid increase in its base amount. 
+
+
+
+
+Rank
+	Base EXP
+	Multiplier 
+	1
+	100
+	×1.10
+	2
+	150
+	×1.10
+	3
+	225
+	×1.10
+	4
+	340
+	×1.10
+	5
+	500
+	×1.10
+	6
+	750
+	×1.10
+	7
+	1100
+	×1.10
+	8
+	1600
+	×1.10
+	9
+	2300
+	×1.10
+	10
+	3200
+	×1.10
+	
+
+
+
+
+
+
+
+
+
+* Base HP bar = 100
+Players gain +10 per Level Up, and +150 per  Rank Ascension. 
+
+
+* Base Mana Bar = 50
+Players gain +5 per Level Up, and +75 per Rank Ascension. 
+
+
+* Base Stat Attributes = 10; Welcome Points Bonus =20
+Players gain +3 points per level up, and +25 per Rank Ascension.
+
+
+
+
+Rank Ascension 
+Rank Ascensions are more difficult, as it comes with higher bonuses. In order to move from one rank to another, players will need to gather ingredients which correspond to whatever Deity they worship. 
+
+
+Ingredients:
+* Heart of the Red Phoenix, Gem of Luminance. (God of Flames) 
+
+
+* The Void-Eye, Orb of Silence. (God of Darkness) 
+
+
+* Crown of Fortune, Tears of The Endless Goldfish. (God of Abundance) 
+
+
+* Core of a Fallen Star, Fruit of World Tree. (Goddess of Stars) 
+
+
+* Divine Heart Essence, Forgotten Desire Seed. (Goddess of Love) 
+
+
+* Scales of Equilibrium, Adonai Sword. (God of Justice) 
+
+
+* Ink of Time, Eye of All-knowing. (God of Knowledge) 
+
+
+
+
+
+
+FOOTNOTE
+
+
+* Ingredients cannot be gathered or farmed like any other resource. Rather, they are specifically bestowed after certain achievements: Increasing Faith level, participating in major Events, etc. 
+* The number of ingredients needed multiplies by 2 with each rank. (i.e If a Wanderer needs 1x Void-Eye, 1x Orb of Silence to advance to Rank 2, it becomes 2x each the next time, and 4x each the next time.. Etc.)
+
+
+
+
+
+
+
+
+
+
+________________
+
+
+
+
+MONSTERS
+
+
+
+
+
+
+MONSTER GRADES (POWER TIERS)
+
+
+These are the grades for monsters scattered across the map, meant for farming. 
+
+
+Grades
+
+
+* E = Weak creatures (early game)
+* D = Slightly stronger threats
+* C = Averagely powerful creatures 
+* B =  Very dangerous enemies
+* A =  Extremely powerful monsters
+* S = Boss-level. Abominable threats. 
+
+
+
+
+
+
+MONSTER STAT SCALING
+
+
+Each monster has:
+
+
+-HP: Monster's health stat. 
+-ATK: Strength and Intelligence stats packed into one. 
+-DEF: Monster's defense stat. 
+-DEX: Monster's dexterity stat. 
+
+
+
+
+BASE STAT RANGE PER GRADE
+
+
+
+
+Grade
+	HP
+	ATK
+	DEF
+	DEX
+	E
+	80-120
+	8-12
+	5-10
+	5-10
+	D
+	150-220
+	15-22
+	10-18
+	10-18
+	C
+	300-450
+	30-45
+	20-35
+	20-35
+	B
+	600-900
+	60-85
+	40-65
+	40-65
+	A
+	1200-1800
+	110-160
+	80-120
+	80-120
+	S
+	2500-4000
+	200-300
+	150-220
+	150-220
+	
+
+
+
+This chart shows the base stat for all monsters on the maps. However, “Rank Multiplier” will come into play when it's time for battle. The player's rank is calculated, which then multiplies the stats of the monster.
+
+
+These are the rank multipliers:
+
+
+* Rank 1 = x1
+* Rank 2 = x2
+* Rank 3 = x3
+* Rank 4 = x4
+* Rank 5 = x5
+* Rank 6 = x7
+* Rank 7 = x9
+* Rank 8 = x11
+* Rank 9 = x13
+* Rank 10 = x15
+
+
+Basically, if a Rank 1 goes against a grade E creature, stats remain the same because it is only being multiplied by 1. If a rank 3 goes against a grade E monster, the monster's stats are all multiplied by 3. 
+
+
+
+
+EXP REWARDS PER MONSTER
+
+
+This must match your player leveling system.
+
+
+BASE EXP PER KILL
+
+
+Grades
+
+
+* E = 20 EXP
+* D = 50 EXP
+* C = 120 EXP
+* B = 300 EXP
+* A = 700 EXP
+* S = 1500 EXP
+
+
+
+
+DROP ITEMS
+
+
+Each monster grade affects what they can drop:
+
+
+Grades
+
+
+* E = (100% chance for 20-30 Coins, 30% chance for any common resource, 10% chance for any minor potion, 5% chance for E-grade Runestone) 
+
+
+* D = (100% chance for 40-60 Coins, 50% chance for any common resource, 30% chance for any uncommon resource, 30% chance for any minor potion, 5% chance for D-grade Runestone) 
+
+
+* C = (100% chance for 80 - 120 Coins, 100% chance for any common resource, 50% chance for any uncommon resource, 10% chance for any rare resource, 10% chance for any standard potion, 5% chance for C-grade Runestone) 
+
+
+* B = (100% chance for 180 - 260 Coins, 100% chance for any uncommon resource, 50% chance for any rare resource, 5% chance for any legendary resource, 30% chance for any standard potion, 5% chance for a B-grade Runestone) 
+
+
+* A = (100% chance for 400 - 550 Coins, 100% chance for any rare resource, 30% chance for any legendary resource, 10% chance for any greater potion, 5% chance for an A-grade Runestone)
+
+
+* S = (100% chance for 900 - 1200 Coins, 50% chance for any legendary resource, 10% chance for any mythic resource, 30% chance for any greater potion, 5% chance for an S-grade Runestone) 
+
+
+
+
+
+
+
+
+MONSTER TYPES 
+
+
+
+
+
+
+BEASTS (E-Grade) 
+
+
+Beasts populate the lowest grade. They are mostly common animals like: Wolves, Boars, Bears, Serpents, etcetera. They are usually named in the manner of their species, as well as a certain attribute. 
+
+
+* Groundhog Turtle
+* Red-mane Wolf
+* Five-Fanged Bear
+* Twin-faced Serpent
+* Scavenger 
+* Blue-mane Wolf
+* Vicious Gremlin
+* Rampage Bull
+
+
+
+
+ELEMENTALS (D-Grade) 
+
+
+The D-grade begins to feature magic-oriented monsters. This grade is populated by elemental creatures. 
+
+
+* Flame Spirit
+* Water Wraith
+* Stone Golems
+* Ice Ifrit
+* Lightning Shroud 
+* Mist Phantom
+
+
+
+
+UNDEAD (C-grade) 
+
+
+This grade includes ghastly undead creatures. Range covers a lot, as long as the creature is now dead. 
+
+
+* Skeletal Beast
+* Condemned Knight 
+* Revenant Bishop 
+* Ghoul Blatherer 
+* Cursed Fiend
+* Penitent Priest 
+
+
+
+
+FABLE (B-Grade) 
+
+
+This grade is populated by mythical or fable creatures. 
+
+
+* Dark Sphinx 
+* Blue Phoenix
+* Cyclops
+* Cerberus 
+* Blood Kraken
+
+
+
+
+CORRUPTED (A-Grade) 
+
+
+This grade is filled with all sorts of corrupted creatures.
+
+
+* Profane Priest
+* Devil Centurion 
+* Demonic Herald
+* Corrupted Sage
+* Abomination
+
+
+
+
+ELDRITCH (S-Grade) 
+
+
+A grade for abyssal concepts, and eldritch forces. 
+
+
+* Abyssal Eater
+* Void Lurker 
+* Chaoswalker
+* Oblivion Eye
+* Godless Thing
+
+
+
+
+
+
+FOOTNOTE 
+
+
+* Raid/Event Bosses are not included in this section. Raid bosses do not go by this scaling, and are instead specially crafted when it's time for their appearance.
+* Raid bosses are built to match specific player ranks, and they come with custom stats and mechanics. 
+* For example, a raid boss may have the ability to stun players every three turns, or deal 50% more damage once it reaches half HP. 
+
+
+
+
+
+
+________________
+
+
+EQUIPMENTS
+
+
+
+
+
+
+GEAR STRUCTURE
+
+
+
+
+There are two main gear categories:
+
+
+* Weapons
+Increase damage (STR / INT / DEX scaling)
+
+
+* Armor
+* Increase DEF + HP or minor stats
+
+
+
+
+EQUIPMENT GRADES
+
+
+
+
+Grades
+
+
+* E —Basic
+* D — Slight upgrade
+* C — Standard
+* B — Strong
+* A — Elite
+* S — Endgame
+
+
+
+
+BASE STAT RANGE 
+
+
+
+
+This will be scaled with the player's natural stats. Basically: 
+
+
+-Stat Attribute (weapon stat) 
+
+
+Weapons (Attack focus) 
+
+
+* E        +5 - 9 (STR, INT, DEX) 
+* D        +10 - 19 (STR, INT, DEX) 
+* C        +20  - 34 (STR, INT, DEX) 
+* B        +35 - 54 (STR, INT, DEX) 
+* A        +55 - 79 (STR, INT, DEX) 
+* S        +80 - 100 (STR, INT, DEX)
+
+
+
+
+These are base stat boosts (without enchantments) for each grade, in regards to weapons. Weapons affect STR, INT, DEX. 
+
+
+
+
+Armor (Defense Focus)
+
+
+* E        +5 - 9 (DEF)   
+* D        +10 - 19 (DEF)        +5 - 9 HP
+* C        +20 - 34 (DEF)       +10 - 19 HP
+* B        +35 - 54 (DEF)        +20 - 39 HP
+* A        +55 - 79 (DEF)        +40 - 59 HP
+* S        +80 - 100  (DEF)    +60 - 80 HP
+
+
+
+
+
+
+WEAPON TYPES
+
+
+
+
+Warrior / Guardian
+
+
+* Greatsword
+
+
+* Warhammer
+
+
+* Shield + Sword
+
+
+
+
+Arcanist / Summoner
+
+
+* Staff
+
+
+* Wand
+
+
+* Grimoire
+
+
+
+
+Ranger / Assassin
+
+
+* Bow
+
+
+* Daggers
+
+
+* Shortblade
+
+
+
+
+Cleric
+
+
+* Staff
+
+
+* Cross
+
+
+* Mace
+
+
+
+
+
+
+________________
+
+
+
+
+
+
+EQUIPMENT LIST
+
+
+
+
+
+
+
+
+E-GRADE WEAPONS (Single Stat. Uses Common-Uncommon) 
+
+
+1. Rusted Greatsword (+7 STR) → 5 Iron, 2 Tough Hide
+* Cost = 220 Coins 
+
+
+
+
+2. Crude Bow (+6 DEX) → 4 Iron, 1 Leather
+* Cost =210 Coins 
+
+
+
+
+3. Iron Dagger (+5 DEX) → 4 Iron, 1 Bone Fragments
+* Cost = 200 Coins 
+
+
+
+
+4. Apprentice Wand (+8 INT) → 3 Quartz, 2 Animal Fat
+* Cost = 230 Coins 
+
+
+
+
+5. Shortblade (+6 STR) → 5 Iron
+* Cost = 210 Coins 
+
+
+
+
+6. Bone Mace (+7 STR) → 4 Bone Fragments, 1 Iron
+* Cost = 215 Coins 
+
+
+
+
+7. Hunter Knife (+6 DEX) → 3 Iron, 1 Fur
+* Cost = 210 Coins 
+
+
+
+
+8. Quartz Rod (+9 INT) → 4 Quartz, 2 Limestone
+* Cost = 240 Coins 
+
+
+
+
+9. Tin Blade (+5 STR) → 4 Tin
+* Cost = 200 Coins 
+
+
+
+
+10. Feather Knife (+6 DEX) → 3 Iron, 2 Feathers
+* Cost = 215 Coins 
+
+
+
+
+
+
+
+
+E-GRADE ARMOR (DEF Only)
+
+
+1. Leather Vest (+6 DEF) → 4 Leather
+* Cost = 200 Coins 
+
+
+
+
+2. Iron Plate (+8 DEF) → 5 Iron
+* Cost = 230 Coins 
+
+
+
+
+3. Bone Armor (+7 DEF) → 4 Bone Fragments
+* Cost = 210 Coins
+
+
+
+
+4. Fur Coat (+5 DEF) → 3 Fur
+* Cost = 190 Coins 
+
+
+
+
+5. Hide Armor (+6 DEF) → 4 Tough Hide
+* Cost = 205 Coins 
+
+
+
+
+6. Feather Cloak (+5 DEF) → 3 Feathers
+* Cost = 190 Coins
+
+
+
+
+7. Tin Armor (+7 DEF) → 4 Tin
+* Cost =215 Coins
+
+
+
+
+8. Copper Plate (+6 DEF) → 4 Copper
+* Cost = 210 Coins 
+
+
+
+
+9. Marble Guard (+8 DEF) → 3 Marble
+* Cost = 230 Coins 
+
+
+
+
+10. Obsidian Layer (+9 DEF) → 3 Obsidian
+* Cost = 240 Coins
+
+
+
+
+
+
+D-GRADE WEAPONS (Dual Stats Begin. Uses Uncommon-Common) 
+
+
+1. Obsidian Greatsword (+14 STR, +5 DEX) → 5 Obsidian, 2 Coal
+* Cost = 460 Coins 
+
+
+
+
+2. Silver Wand (+12 INT, +6 DEX) → 4 Silver, 2 Tough Hide
+* Cost = 440 Coins 
+
+
+
+
+3. Longbow (+13 DEX, +5 STR) → 5 Leather, 2 iron
+* Cost = 430 Coins 
+
+
+
+
+4. Twin Daggers (+11 DEX, +6 STR) → 5 Fangs, 2 Copper
+* Cost = 435 Coins 
+
+
+
+
+5. Warhammer (+15 STR, +4 DEF*) → 6 Bronze, 2 Bone Fragments 
+* Cost = 470 Coins
+
+
+
+
+6. Arc Rod (+14 INT, +5 STR) → 4 Quartz, 3 Feathers 
+* Cost = 450 Coins
+
+
+
+
+7. Bronze Blade (+13 STR, +6 DEX) → 3 Bronze, 2 Leather 
+* Cost = 430 Coins 
+
+
+
+
+8. Hunter Bow (+12 DEX, +5 INT) → 4 Fur, 2 Tin
+* Cost = 425 Coins 
+
+
+
+
+9. Spiked Mace (+14 STR, +5 DEX) → 5 Marble, 2 Bone Fragments 
+* Cost = 445 Coins 
+
+
+
+
+10. Mystic Knife (+13 DEX, +6 INT) → 3 Claws, 2 Horns
+* Cost = 455 Coins 
+
+
+
+
+
+
+
+
+D-GRADE ARMOR
+
+
+(DEF + HP)
+
+
+1. Steel Armor (+15 DEF, +7 HP) → 6 Iron, 2 Silver
+* Cost = 460 Coins 
+
+
+
+
+2. Reinforced Leather (+13 DEF, +6 HP) → 4 Leather, 1 Coal
+* Cost = 420 Coins
+
+
+
+
+3. Silver Guard (+14 DEF, +7 HP) → 5 Silver, 1 Animal Fat
+* Cost = 450 Coins 
+
+
+
+
+4. Bone Plate (+16 DEF, +8 HP) → 5 Bone Fragments, 2 Marble
+* Cost = 470 Coins 
+
+
+
+
+5. Fur Armor (+12 DEF, +6 HP) → 3 Fur, 2 Limestone
+* Cost = 410 Coins
+
+
+
+
+6. Horned Armor (+17 DEF, +9 HP) → 5 Horns, 2 Tin
+* Cost = 475 Coins 
+
+
+
+
+7. Scale Vest (+15 DEF, +7 HP) → 4 Tough Hide, 2 Silver
+* Cost = 445 Coins 
+
+
+
+
+8. Bronze Armor (+16 DEF, +8 HP) → 4 Bronze, 2 Copper
+* Cost = 460 Coins
+
+
+
+
+9. Obsidian Plate (+18 DEF, +9 HP) → 4 Obsidian, 3 Claws 
+* Cost = 480 Coins
+
+
+
+
+10. Marble Armor (+14 DEF, +6 HP) → 4 Marble, 2 Bone Fragments
+* Cost = 440 Coins
+
+
+
+
+
+
+ C-GRADE WEAPONS (Uncommon-Rare) 
+
+
+1. Silver Greatsword (+25 STR, +8 DEX) → 7 Silver, 2 Spirit Venison
+* Cost = 820 Coins 
+
+
+
+
+2. Arcane Staff (+28 INT, +10 DEX) → 8 Quartz, 3 Shadow Hide
+* Cost = 880 Coins 
+
+
+
+
+3. Composite Bow (+26 DEX, +9 STR) → 7 Leather, 3 Gold
+* Cost = 840 Coins
+
+
+
+
+4. Assassin Daggers (+27 DEX, +8 INT) → 7 Fangs, 2 Palladium
+* Cost = 860 Coins
+
+
+
+
+5. Mystic Blade (+24 STR, +11 INT) → 6 Marble, 2 Spirit Venison
+* Cost = 830 Coins
+
+
+
+
+6. Warhammer (+30 STR, +5 DEX) → 8 Obsidian, 3 Mythril 
+* Cost = 920 Coins 
+
+
+
+
+7. Spellknife (+23 DEX, +12 INT) →7 Quartz, 2 Shadow Hide
+* Cost = 870 Coins 
+
+
+
+
+8.  Dagon Bow (+25 DEX, +9 STR) → 7 Silver, 3 Drake Meat
+* Cost = 850 Coins
+
+
+
+
+9. Bronze Cleaver (+28 STR, +7 DEX) → 5 Bronze, 3 Palladium
+* Cost = 840 Coins 
+
+
+
+
+10. Dark Rod (+29 INT, +6 STR) → 7 Quartz, 7 Obsidian
+* Cost = 950 Coins 
+
+
+
+
+
+
+
+
+C-GRADE ARMOR
+
+
+1. Shining Armor (+30 DEF, +15 HP) → 8 Silver, 5 Spirit Venison
+* Cost = 900 Coins
+
+
+
+
+2. Bronze Cuirass  (+32 DEF, +18 HP) → 9 Bronze, 5 Gold 
+* Cost = 930 Coins
+
+
+
+
+3. Jagged Chainmail (+28 DEF, +14 HP) → 7 Claws, 3 Palladium
+* Cost = 880 Coins
+
+
+
+
+4. Bone Fortress (+31 DEF, +16 HP) → 9 Horn, 5 Mythril 
+* Cost = 940 Coins 
+
+
+
+
+5. Obsidian Vest (+33 DEF, +17 HP) → 10 Obsidian, 5 Shadow Hide
+* Cost = 960 Coins
+
+
+
+
+6. Reptilian Scale (+29 DEF, +14 HP) → 7 Marble, 4 Drake Meat
+* Cost = 890 Coins 
+
+
+
+
+7. Shadow Cloak (+27 DEF, +13 HP) → 6 Fur, 3 Shadow Hide
+* Cost = 860 Coins 
+
+
+
+
+8. Golden Cape (+26 DEF, +12 HP) → 6 Leather, 2 Gold
+* Cost = 840 Coins 
+
+
+
+
+9. Warlord Hide (+30 DEF, +15 HP) → 8 Horns, 5 Palladium 
+* Cost = 910 Coins 
+
+
+
+
+10. Arcane Shell (+34 DEF, +19 HP) → 10 Obsidian, 6 Spirit Venison
+* Cost = 980 Coins 
+
+
+
+
+
+
+
+
+B-GRADE WEAPONS (Rare-Legendary)
+
+
+1. Myth-Blade (+48 STR, +15 DEX) → 15 Mythril, 5 Adamantium
+* Cost = 2,200 Coins 
+
+
+
+
+2. High-Scepter (+50 INT, +14 STR) → 17 Spirit Venison, 5 Adamantium
+* Cost = 2,250 Coins
+
+
+
+
+3. Draconic Bow (+47 DEX, +16 STR) → 15 Drake Meat, 4 Dragon Scales
+* Cost = 2,180 Coins 
+
+
+
+
+4. Shadow-Strike (+46 DEX, +18 INT) → 14 Shadow Hide, 5 Titanium
+* Cost = 2,220 Coins 
+
+
+
+
+5. Warbreaker (+52 STR, +10 DEX) → 19 Palladium, 6 Titanium
+* Cost = 2,300 Coins 
+
+
+
+
+6. Mystic Jian (+45 STR, +20 INT) → 14 Spirit Venison, 5 Dragon Scales
+* Cost = 2,240 Coins 
+
+
+
+
+7. Phantom Longbow (+48 DEX, +14 INT) → 16 Gold, 3 Cyclops Eye
+* Cost = 2,210 Coins 
+
+
+
+
+8. Spellhammer (+51 STR, +12 INT) → 18 Shadow Hide, 3 Cyclops Eye
+* Cost = 2,260 Coins 
+
+
+
+
+9. Venom Daggers (+47 DEX, +16 STR) → 15 Palladium, 4 Adamantium
+* Cost = 2,230 Coins 
+
+
+
+
+10. Ancient Wand (+53 INT, +10 DEX) → 20 Mythril, 4 Cyclops Eye
+* Cost = 2,320 Coins 
+
+
+
+
+
+
+
+
+B-GRADE ARMOR 
+
+
+1. Void-Spell Armor (+50 DEF, +30 HP) → 17 Shadow Hide, 10 Titanium
+* Cost = 2,300 Coins 
+
+
+
+
+2. Golden Scales  (+48 DEF, +25 HP) → 15 Gold, 7 Dragon Scales 
+* Cost = 2,200 Coins 
+
+
+
+
+3. Night Cloak (+45 DEF, +28 HP) → 14 Shadow Hide, 9 Cyclops Eye
+* Cost = 2,250 Coins 
+
+
+
+
+4. Spirit-Ward (+52 DEF, +35 HP) → 18 Spirit Venison, 12 Adamantium
+* Cost = 2,350 Coins
+
+
+
+
+5.  Paladin’s Mantle (+44 DEF, +24 HP) → 10 Palladium, 6 Dragon Scales
+* Cost = 2,180 Coins 
+
+
+
+
+6.  Draconic Robe (+49 DEF, +27 HP) → 15 Drake Meat, 7 Dragon Scales
+* Cost = 2,220 
+
+
+
+
+7.  Titanic Hide(+54 DEF, +39 HP) → 20 Palladium, 15 Titanium 
+* Cost = 2,400 Coins 
+
+
+
+
+8. Golden Warplate(+53 DEF, +36 HP) → 20 Gold, 12 Adamantium 
+* Cost = 2,380 Coins 
+
+
+
+
+9. Mythic Cuirass (+46 DEF, +26 HP) → 14 Mythril, 7 Cyclops Eye
+* Cost = 2,240 Coins 
+
+
+
+
+10. Quintessence Mantle  (+51 DEF, +33 HP) → 20 Spirit Venison, Shadow Hide 20
+* Cost = 2,450 Coins 
+
+
+
+
+
+
+
+
+A-GRADE WEAPONS (Legendary-Rare-Mythic) 
+
+
+
+
+1. Eragon-blade (+70 STR, +20 DEX) → 30 Dragon Scales, 12 Adamantium, 10 Palladium 
+* Cost = 5,600 Coins
+
+
+
+
+2.  Void-Steel (+75 STR, +15 DEF) → 33 Cyclops Eye, 10 Titanium, 9 Shadow Hide
+* Cost = 5,500 Coins 
+
+
+
+
+3. Star Lance (+78 INT, +18 DEX) → 35 Dragon Scales, 1 Aetherium
+* Cost = 5,800 Coins 
+
+
+
+
+4. Crack (+68 DEX, +22 INT) → 27 Adamantium, 12 Titanium, 14 Mythril 
+* Cost = 5,550 Coins 
+
+
+
+
+5. Divine Fall (+72 STR, +20 INT) → 31 Cyclops Eye, 12 Dragon Scales, 10 Gold
+* Cost = 5,650 Coins 
+
+
+
+
+6. Nether-Bow (+69 DEX, +19 STR) → 27 Adamantium, 10 Titanium, 9 Shadow Hide 
+* Cost = 5,500 Coins 
+
+
+
+
+7. Holy Relic (+77 INT, +16 STR) → 30 Dragon Scales, 1 Titan Heart, 1 Aetherium 
+* Cost = 5,900 Coins 
+
+
+
+
+8. Realm Cleaver (+74 STR, +18 DEX) → 32 Titanium, 1 Titan Heart, 12 Mythril 
+* Cost = 5,750 Coins 
+
+
+
+
+9. BeastFang (+71 DEX, +20 STR) → 30 Dragon Scales, 10 Adamantium, 7 Drake Meat 
+* Cost = 5,600 Coins 
+
+
+
+
+10.  Scion (+73 STR, +17 INT) → 31 Cyclops Eye, 1 Aetherium, 10 Spirit Venison
+* Cost = 5,700 Coins 
+
+
+
+
+
+
+
+
+A-GRADE ARMOR
+
+
+1. Heart Hide (+75 DEF, +55 HP) → 33 Adamantium, 2 Titan Heart
+* Cost = 5,700 Coins 
+
+
+
+
+2. Destroyer Mantle (+79 DEF, +59 HP) → 36 Titanium, 2 Aetherium, 7 Gold
+* Cost = 5,900 Coins 
+
+
+
+
+3. Chaos-garb (+68 DEF, +47 HP) → 26 Cyclops Eye, 10 Dragons Scale, 9 Shadow Hide 
+* Cost = 5,500 Coins 
+
+
+
+
+4. Devastator Armor (+66 DEF, +45 HP) → 24 Adamantium, 10 Cyclops Eye, 9 Drake Meat 
+* Cost = 5,400 Coins 
+
+
+
+
+5. Tectonic-Mail (+72 DEF, +50 HP) → 30 Titanium, 1 Aetherium 
+* Cost = 5,650 Coins 
+
+
+
+
+6. Elemental Shroud (+74 DEF, +52 HP) → 32 Cyclops Eye,  1 Aetherium, 17 Mythril 
+* Cost = 5,750 Coins 
+
+
+
+
+7. Colossal Veil (+78 DEF, +58 HP) → 35 Titanium, 13 Dragon Scales, 11 Shadow Hide 
+* Cost = 5,850 Coins 
+
+
+
+
+8.  Realm-Bound Tunic (+70 DEF, +49 HP) → 30 Dragon Scales, 12 Cyclops Eye, 10 Spirit Venison
+* Cost = 5,600 Coins 
+
+
+
+
+9. Serpentine-Robe (+65 DEF, +44 HP) → 25 Adamantium, 10 Cyclops Eye, 9 Drake Meat 
+* Cost = 5,450 Coins
+
+
+
+
+10.  Vasto-Shell (+76 DEF, +54 HP) → 20 Titanium, 1 Titan Heart, 1 Aetherium 
+* Cost = 5,800 Coins 
+
+
+
+
+
+
+
+
+S-GRADE WEAPONS (ALL 3 Stats. Mythic-Legendary)
+
+
+1. Abjuration (+100 STR, +40 DEX, +30 INT) → 10 Aetherium, 10 Titan Heart, 20 Titanium, 50 Palladium
+* Cost = 10,500 Coins 
+
+
+
+
+2. Genesis (+100 INT, +35 STR, +35 DEX) → 10 Aetherium, 10 Titan Heart, 20 Adamantium, 50 Spirit Venison
+* Cost = 10,400 Coins 
+
+
+
+
+3. Longinus (+100 DEX, +40 STR, +25 INT) → 10 Aetherium, 10 Titan Heart, 20 Cyclops Eye, 50 Gold 
+* Cost = 10,300 Coins 
+
+
+
+
+4. Jingu Bang (+100 DEX, +45 INT, +20 STR) → 10 Aetherium, 10 Titan Heart, 20 Dragon Scales, 50 Mythril 
+* Cost = 10,600 Coins 
+
+
+
+
+5. Ragnarok (+100 STR, +30 DEX, +30 INT) → 10 Aetherium, 10 Titan Heart, 20 Titanium, 50 Shadow Hide 
+* Cost = 10,400 Coins 
+
+
+
+
+6. Godslayer (+100 INT, +30 STR, +30 DEX) → 10 Aetherium, 10 Titan Heart, 20 Adamantium, 50 Spirit Venison 
+* Cost = 10,500 Coins 
+
+
+
+
+7. Durandal (+100 STR, +35 DEX, +20 INT) → 10 Aetherium, 10 Titan Heart, 20 Dragon Scales, 50 Drake Meat 
+* Cost = 10,300 Coins 
+
+
+
+
+8. Excalibur (+100 STR, +25 INT, +35 DEX) → 10 Aetherium, 10 Titan Heart, 20 Dragon Scales, 50 Gold
+* Cost = 10,600 Coins 
+
+
+
+
+9. Bane (+100 DEX, +35 INT, +25 STR) → 10 Aetherium, 10 Titan Heart, 20 Cyclops Eye, 50 Shadow Hide 
+* Cost = 10,350 Coins 
+
+
+
+
+10. Judgment  (+100 INT, +30 STR, +30 DEX) → 10 Aetherium, 10 Titan Heart, 20 Titanium, 50 Mythril 
+* Cost = 10,450 Coins 
+
+
+
+
+
+
+
+
+S-GRADE ARMOR
+
+
+1.  Saturn (+100 DEF, +80 HP) → 10 Aetherium, 10 Titan Heart, 20 Dragon Scales, 50 Gold
+* Cost = 10,600 Coins 
+
+
+
+
+2. Unshadowed (+100 DEF, +70 HP) → 10 Aetherium, 10 Titan Heart, 20 Cyclops Eye, 50 Spirit Venison
+* Cost = 10,300 Coins 
+
+
+
+
+3. Null (+100 DEF, +78 HP) → 10 Aetherium, 10 Titan Heart, 20 Titanium, 50 Shadow Hide
+* Cost = 10,400 Coins 
+
+
+
+
+4. Dominion (+100 DEF, +80 HP) → 10 Aetherium, 10 Titan Heart, 20 Adamantium, 50 Palladium
+* Cost = 10,700 Coins 
+
+
+
+
+5. Godshroud (+100 DEF, +68 HP) → 10 Aetherium, 10 Titan Heart, 20 Dragon Scales, 50 Gold 
+* Cost = 10,500 Coins
+
+
+
+
+6. Oblivion (+100 DEF, +75 HP) → 10 Aetherium, 10 Titan Heart, 20 Cyclops Eye, 50 Shadow Hide
+* Cost = 10,450 Coins 
+
+
+
+
+7. Gungnir (+100 DEF, +76 HP) → 10 Aetherium, 10 Titan Heart, 20 Titanium, 50 Mythril 
+* Cost = 10,550 Coins 
+
+
+
+
+8. Imperium (+100 DEF, +79 HP) → 10 Aetherium, 10 Titan Heart, 20 Dragon Scales, 50 Gold
+* Cost = 10,650 Coins 
+
+
+
+
+9. Worldshell (+100 DEF, +74 HP) → 10 Aetherium, 10 Titan Heart, 20 Adamantium, 50 Spirit Venison
+* Cost = 10,400 Coins 
+
+
+
+
+10. Eternity (+100 DEF, +77 HP) → 10 Aetherium, 10 Titan Heart, 20 Cyclops Eye, 50 Drake Meat
+* Cost = 10,500 Coins 
+
+
+
+
+
+
+________________
+
+
+
+
+
+
+ENCHANTMENTS
+
+
+
+
+
+
+
+
+Enchantments are handled by NPC Enchanters, and they use Runestones and coins to achieve the effect of enhancing gear stats. 
+
+
+
+
+
+
+Alright, this system is very important for long-term economy + grind, so I’ll keep it clean and scalable 👇
+
+
+
+
+FORMULA 
+
+
+
+
+* Enchantment Cost = Runestones (same grade as gear) + Coins
+
+
+* Each enchant adds: +10 to all applicable stats
+
+
+* Max: +5 Enchant Levels per gear
+
+
+* Higher grades (A–S): unlock bonus effects at +3 and +5
+
+
+
+
+
+
+ENCHANTMENT REQUIREMENTS
+
+
+
+
+E–C GRADE (Early–Mid Game)
+
+
+
+
+Enchant Level 
+	Runestones Needed
+	Coins (E - D - C) 
+	Success Rate
+	Level 1
+	2 
+	100 — 200 — 300
+	100%
+	Level 2
+	4
+	200 — 300 — 400
+	95%
+	Level 3
+	6
+	300 — 400 — 500
+	85%
+	Level 4
+	8
+	400 — 500 — 600
+	75%
+	Level 5
+	10
+	500 — 600 — 700
+	65%
+	
+
+
+
+
+
+B–A GRADE (Mid–High Game)
+
+
+
+
+Enchant Level 
+	Runestones Needed
+	Coins ( B - A) 
+	Success Rate 
+	Level 1 
+	4
+	500 — 600
+	100%
+	Level 2 
+	6
+	700 — 900
+	85%
+	Level 3 
+	8
+	900 — 1000
+	70%
+	Level 4 
+	10
+	1000 — 1300
+	55%
+	Level 5
+	12
+	1300 — 1500
+	40%
+	
+
+
+
+
+
+
+
+S GRADE (Endgame)
+
+
+
+
+Enchant Level 
+	Runestones Needed 
+	Coins 
+	Success Rate 
+	Level 1 
+	6
+	700
+	70%
+	Level 2
+	8
+	1000
+	50%
+	Level 3
+	10
+	1500
+	30%
+	Level 4
+	12
+	2500
+	10%
+	Level 5
+	15
+	4000
+	3%
+	
+
+
+
+
+
+ BONUS EFFECTS (A–S GEAR ONLY)
+
+
+Unlock Points:
+
+
++3 Enchant → Minor Effect
+
+
++5 Enchant → Major Effect
+
+
+
+
+🗡️ Weapon Effects Examples
+
+
+Bleed (damage over time)
+
+
+Burn (INT scaling damage)
+
+
+Lifesteal (small % HP return)
+
+
+Crit Boost (+% crit chance)
+
+
+Armor Break (reduce enemy DEF)
+
+
+
+
+🛡️ Armor Effects Examples
+
+
+Damage Reduction (%)
+
+
+HP Regen (per turn/time)
+
+
+Reflect Damage (%)
+
+
+Status Resistance
+
+
+Shield Proc (temporary HP barrier)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+________________
+
+
+
+
+COOKED FOODS
+
+
+
+
+
+
+STRENGTH FOODS (STR Buff)
+
+
+1. Grilled Meat Skewer (Common)
+
+
++5% STR (10 mins)
+→ Meat, Garlic, Apples
+
+
+2. Spiced Steak (Uncommon)
+
+
++10% STR (15 mins)
+→ Meat, Golden Pears, Bitter Root
+
+
+3. Hunter’s Feast (Rare)
+
+
++15% STR (20 mins)
+→ Spirit Plum, Shadow Fish, Meat
+
+
+4. Dragonfire Roast (Legendary)
+
+
++20% STR (30 mins)
+→ Dragonfruit, Black Unagi, Raw Meat
+
+
+5. Eden Banquet (Mythic)
+
+
++25% STR (40 mins)
+→ Eden’s Tear, Cosmic Leviathan, Ying Koi, Moon Grapes
+
+
+
+
+INTELLIGENCE FOODS (INT Buff)
+
+
+1. Herb Fish Soup (Common)
+
+
++5% INT (10 mins)
+→ Trout, Mushroom, Melons
+
+
+2. Glow Stew (Uncommon)
+
+
++10% INT (15 mins)
+→ Glowfish, Moon Grapes
+
+
+3. Mystic Broth (Rare)
+
+
++15% INT (20 mins)
+→ Shadowfish, Spirit Plum, 
+
+
+4. Celestial Sashimi (Legendary)
+
+
++20% INT (30 mins)
+→ Celestial Whale, Celestial Fig, Red Minnow
+
+
+5. Cosmic Infusion (Mythic)
+
+
++25% INT (40 mins)
+→ Cosmic Leviathan, Eden’s Tear,  Spotted Eel, Sunfruit
+
+
+
+
+DEFENSE FOODS (DEF Buff)
+
+
+1. Roasted Carp (Common)
+
+
++5% DEF (10 mins)
+→ Carp, Garlic, Apples
+
+
+2. Ironbody Stew (Uncommon)
+
+
++10% DEF (15 mins)
+→ Silverfin, Bitter Root
+
+
+3. Frosthide Meal (Rare)
+
+
++15% DEF (20 mins)
+→ Ying Koi, Frost Apples
+
+
+4. Titan Shell Dish (Legendary)
+
+
++20% DEF (30 mins)
+→ Black Unagi, Dragonfruit, Coral Snapper
+
+
+5. Eternal Fortress Feast (Mythic)
+
+
++25% DEF (40 mins)
+→ Cosmic Leviathan, Eden’s Tear, Flamefish, Glowfish
+
+
+
+
+DEXTERITY FOODS (DEX Buff)
+
+
+1. Fried Sardine (Common)
+
+
++5% DEX (10 mins)
+→ Sardine, Blueberries, Melons
+
+
+2. Crystal Splash Meal (Uncommon)
+
+
++10% DEX (15 mins)
+→ Red Minnow, Crystal Berries, Sunfruit
+
+
+3. Assassin’s Dish (Rare)
+
+
++15% DEX (20 mins)
+→ Flamefish, Ember Fruit
+
+
+4. Phantom Platter (Legendary)
+
+
++20% DEX (30 mins)
+→ Black Unagi, Celestial Fig, Golden Pears
+
+
+5. Divine Speed Feast (Mythic)
+
+
++25% DEX (40 mins)
+→ Cosmic Leviathan, Eden’s Tear, Ember Fruit, Silverfin
+
+
+
+
+FOOTNOTE
+
+
+* Stronger food = longer duration
+* Food buffs CANNOT stack infinitely
+* Only 1 food can be active at a time, and only 1 per stat active. 
+
+
+
+
+
+
+________________
+
+
+POTIONS 
+
+
+
+
+There are generally two categories of Potions sold by NPCs:
+
+
+* Exploration-related potions. 
+* System-related potions. 
+
+
+
+
+EXPLORATION
+
+
+
+
+Health Potions (Affects health replenishment) 
+
+
+* Minor HP Potion → +20% HP instantly (40-60 Coins) 
+
+
+* Standard HP Potion → +40% (100-150 Coins) 
+
+
+* Greater HP Potion → +70% (250-400 Coins) 
+
+
+
+
+Mana Potions (Affects Mana replenishment) 
+
+
+* Minor Mana Potion → +20% Mana instantly (40-60 Coins) 
+
+
+* Standard Mana Potion → +40% (100-150 Coins)
+
+
+* Greater Mana Potion → +70% (250-400 Coins)
+
+
+
+
+Luck Potion (Affects everything related to gathering resources, monster drop rate) 
+
+
+* Minor Luck Potion: +5% Luck (40-60 Coins) 
+
+
+* Standard Luck Potion: +15% Luck (100-150 Coins) 
+
+
+* Greater Luck Potion: +30% Luck (250-400 Coins) 
+
+
+
+
+Insight Potion (Affects EXP gain.)
+
+
+* Minor EXP Potion: +5% EXP gain (40-60 Coins) 
+
+
+* Standard EXP Potion: +15% EXP gain (100-150 Coins) 
+
+
+* Greater EXP Potion: +20 EXP gain (250-400 Coins)
+
+
+
+
+
+
+
+
+SYSTEM 
+
+
+
+
+* Class Reset Potion: Allows players to reset class, and thus, skilltree. Keeps stat points that have been gathered prior. (Cost = 5000 Coins) 
+
+
+
+
+* Race Rebirth Potion: Allows players to change their race. (Cost = 10,000 Coins) 
+
+
+
+
+* Divine Shift Potion: Allows players to change their Deity. However, this results in a reset of “Faith level” too. (Cost = 15,000 Coins) 
+
+
+
+
+* Stat Reset Potion: Allows players to reset their stat points, for new redistribution across all attributes. (Cost = 2000 Coins) 
+
+
+
+
+* Companion Change Potion: Allows players to select a new companion. This resets the companion’s level. (Cost = 6000 Coins) 
+
+
+
+
+
+
+FOOTNOTE 
+
+
+* Only HP and Mana potions are stackable and can be used indefinitely during exploration. 
+* EXP and Luck potions can only be used once a day, and they last 3 hours. 
+
+
+
+
+
+
+________________
+
+
+
+
+FACTIONS 
+
+
+
+
+For factions, we have two alignments:
+
+
+* Good/Neutral factions
+* Evil/Secretive factions
+
+
+
+
+Here are the list of all factions:
+
+
+
+
+
+
+GOOD/NEUTRAL 
+
+
+
+
+The Veil of Dusk
+(Assassins / Shadows / Secrecy)
+
+
+*  Motive: Operate from the shadows to eliminate threats, influence power, and maintain a hidden balance.
+
+
+* Core Idea: “Not all justice is seen.”
+
+
+* Activities: Assassination contracts, Espionage missions, Information brokering. 
+
+
+* Vibe: Dark, secretive, feared
+
+
+
+
+
+
+The Aethel Archive
+(Knowledge / Scholars / Magic Study)
+
+
+* Motive: Preserve, study, and expand all knowledge — especially forbidden or ancient truths.
+
+
+* Core Idea: “Knowledge is the only true power.”
+
+
+* Activities: Research missions, Artifact recovery, Deciphering ancient ruins
+
+
+* Vibe: Calm, intelligent, slightly mysterious
+
+
+
+
+The Iron Covenant
+(Warriors / Honor / Strength)
+
+
+* Motive: Promote strength, discipline, and honor through combat and conquest.
+
+
+* Core Idea: “Only the strong shape the world.”
+
+
+* Activities: Combat trials, Monster hunting contracts, Territory defense
+
+
+* Vibe: Proud, aggressive, honorable
+
+
+
+
+The Green Pact
+(Nature / Balance / Life)
+
+
+* Motive: Protect nature and maintain balance between civilization and the wild.
+
+
+* Core Idea: “All things must remain in balance.”
+
+
+* Activities: Protect forests and wildlife, Restore corrupted lands, Gather rare natural resources
+
+
+* Vibe: Peaceful but dangerous when provoked
+
+
+
+
+The Gold Syndicate
+(Wealth / Trade / Influence)
+
+
+* Motive: Control the flow of wealth, trade, and economic power across the world.
+
+
+* Core Idea: “Gold rules where swords fail.”
+
+
+* Activities: Trade deals, Market manipulation, Resource monopolies
+
+
+* Vibe: Calculated, opportunistic
+
+
+
+
+
+
+EVIL/SECRETIVE 
+
+
+
+
+
+
+The Obsidian Order
+(Forbidden Power / Chaos / Dark Forces)
+
+
+* Motive: Harness forbidden powers, including corrupted and eldritch forces, to transcend mortal limits.
+
+
+* Core Idea: “Power has no morality — only users.”
+
+
+* Activities:, Dark rituals, Corruption studies, research on abominable creatures 
+
+
+* Vibe: Dangerous, unpredictable, secretive
+
+
+
+
+
+
+The Crimson Hand
+(Chaos / Blood / Ruthless Power)
+
+
+* Motive: Power through violence, domination, and fear. They believe the world belongs to those strong enough to take it.
+
+
+* Core Idea: “Mercy is weakness.”
+
+
+* Activities: Raids on settlements, Hunting powerful players or targets, Collecting “trophies” from kills
+
+
+*  Vibe: Brutal, Aggressive, Unpredictable 
+
+
+
+
+
+
+________________
+
+
+COMPANIONS
+
+
+
+
+Companions are magical pets players unlock upon reaching the “Follower” rank. They are allowed to choose one of ten pets:
+
+
+
+
+Emberling
+
+
+Type: Fire sprite
+Effect: +10% STR
+
+
+
+
+Bubbloon
+
+
+Type: Water blob
+Effect: +10% Mana pool
+
+
+
+
+Spriglet
+
+
+Type: Nature spirit
+Effect: +5% HP regen per turn (combat)
+
+
+
+
+Pebblin
+
+
+Type: Rock creature
+Effect: +10% DEF
+
+
+
+
+ Zappit
+
+
+Type: Lightning critter
+Effect: +10% DEX
+
+
+
+
+Duskit
+
+
+Type: Shadow pet
+Effect: +10% crit chance (or bonus damage trigger)
+
+
+
+
+Glimmer
+
+
+Type: Light fairy
+Effect: +15% healing received
+
+
+
+
+Trackit
+
+
+Type: Fox-like scout
+Effect: +10% resource find rate
+
+
+
+
+Whispling
+
+
+Type: Spirit eye
+Effect: +10% EXP gain
+
+
+
+
+Nibblit
+
+
+Type: Mischievous creature
+Effect: 5% chance to lifesteal corresponding damage dealt upon hit
+
+
+
+
+PET GROWTH 
+
+
+Companions feed on Foraging, as well as Fishing resources. The EXP gain from resources for Profession is also the same for pets. Basically:
+
+
+Common — 10 EXP
+Uncommon — 25 EXP
+Rare — 60 EXP
+Legendary — 150 EXP
+Mythic — 500 EXP
+
+
+…
+This is the EXP level spike for every companion (Every new level adds a +5% to the base bonus):
+
+
+* 1 — 2 = 1000 EXP
+* 2 — 3 = 1800 EXP
+* 3 — 4 = 3000 EXP
+* 4 — 5 = 4200  EXP 
+* 5 — 6 = 5700  EXP 
+* 6 — 7 = 7000 EXP 
+* 7 — 8 = 9600 EXP 
+* 8 — 9 = 12000 EXP
+* 9 — 10 = 15000 EXP
+
+
+
+
+
+
+
+
+________________
+
+
+
+
+QUESTS 
+
+
+
+
+There's going to be two kinds of quests. “Daily quests” which involve day to day tasks that aren't difficult, and generalized enough for any player to complete. We also have “Story quests” which ties to the plot of the RP itself. 
+
+
+
+
+
+
+ DAILY QUEST BOARD 
+
+
+(Rewards for completing each daily quest should increase based on the player's rank. EXP multiplies by 2, and resources increase in grade and quantity) 
+
+
+
+
+
+
+Hunter’s Routine
+
+
+* Defeat 20 monsters 
+* Rewards: +10 EXP, +1 common resource, +50 Coins
+
+
+
+
+
+
+Gatherer’s Duty
+
+
+* Collect 20 resources (any profession) 
+* Rewards: +10 EXP, +1 minor potion, +50 Coins
+
+
+
+
+Market Hustle
+
+
+* Sell any 5 items on the market
+* Rewards: +10 EXP, +1 common food, +60 Coins
+
+
+
+
+Prepared Mind
+
+
+* Use 2 potions
+* Rewards: +10 EXP, +1 common resource, +50 Coins 
+
+
+
+
+Gusto
+
+
+* Consume two foods. 
+* Rewards: +10 EXP, +1 minor potion, + 50 Coins
+
+
+
+
+Explorer’s Path
+
+
+* Visit 3 different locations
+* Rewards: +20 EXP, +2 common resources, +80 Coins
+
+
+
+
+Elite Challenge
+
+
+* Defeat 1 higher-grade enemy (e.g., above your current comfort zone)
+* Rewards: +20 EXP, +2 common resources, +100 Coins 
+
+
+
+
+
+
+FOOTNOTE
+
+
+* Completing all daily quests gives an additional 200 Coins. 
+
+
+
+
+________________
+
+
+RANDOM ROLEPLAY EVENTS/MECHANICS
+
+
+
+
+
+
+
+
+RANDOM WORLD EVENTS
+
+
+
+
+These trigger while: Exploring, Traveling, Gathering
+
+
+
+
+*  “You’ve Been Robbed”
+
+
+Lose 5–15% of carried gold
+
+
+
+
+*  “A Kind Stranger”
+
+
+NPC gifts you: Food/Potion/Small gold
+
+
+
+
+* “Lost Traveler”
+
+
+Help them to gain bond with that particular NPC. 
+
+
+
+
+
+
+*  “Hidden Loot”
+
+
+Discover hidden stash: In it may contain gold, resources. 
+
+
+
+
+* “You've been Ambushed!”
+
+
+Sudden monster attack. 
+
+
+
+
+
+
+
+
+TITLE SYSTEM 
+
+
+Players earn titles based on actions that affect a large number of NPCs or a wide region of the map. Titles give status in the roleplay aspect of the game. For example:
+
+
+* Savior of Whitecrest Village 
+
+
+* Slayer of Profanities
+
+
+
+
+
+
+
+
+NPC RELATIONSHIP SYSTEM
+
+
+NPCs remember players. Build your bond with them by helping out or conversing. 
+
+
+Levels:
+
+
+* Hostile
+
+
+* Neutral
+
+
+* Friendly
+
+
+* Trusted
+
+
+* Revered
+
+
+
+
+Most NPCs generally start as being neutral with players. Benefits of increasing bond with NPC:  Discounts, special quests, Gifts, Special dialogue. 
+
+
+Robbing, or not helping an NPC will result in your bond with them dropping to hostility. It may also result in them filing a complaint with the authorities, and you getting arrested. Getting arrested make you lose a portion of your inventory. 
+
+
+
+
+
+
+
+
+MORAL / CHOICE EVENTS
+
+
+Let players decide:
+
+
+“Stranger is being attacked!”
+
+
+* Help victim → gain bond
+
+
+* Ignore → nothing
+
+
+* Join bandit → gain gold but lose bond
+
+
+
+
+
+
+
+
+PROFESSION RANDOM EVENTS
+
+
+* Mining
+
+
+“Rich Vein Found” → bonus ores
+
+
+
+
+* Fishing
+
+
+“Golden Catch” → rare fish
+
+
+
+
+* Foraging
+
+
+“Bloom Surge” → double resources
+
+
+
+
+* Hunting
+
+
+“Alpha Beast Appears” → stronger enemy, better loot
+
+
+
+
+
+
+
+
+
+
+GAME MECHANICS
+
+
+
+
+
+
+* Locations on the map should be clickable.
+
+
+* A pop-up that shows "Traveling..." should exist when moving to another location or region.
+
+
+* In a location, all NPCs should be alighted, with their names. Clicking one should have such interface:
+[Bond With NPC] 
+[Speak] [Gift]
+
+
+
+
+* Similarly, all active players in a location should be identified. 
+
+
+* Clicking a players name should have such pop-up:
+
+
+[Speak] [Trade] [Duel] 
+
+
+
+
+* Speaking automatically tags the player to whatever message you send. Trade means you enter a trade interface. Duel means you enter a battle interface. 
+
+
+* A players message in an RP chat bot should have such heading:
+[Player's Name] 
+[Player's Title] 
+[Player's level and Rank]

@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Choose Your Divinity — Forge of Legends</title>
+<link rel="stylesheet" href="../css/global.css"/>
+<link rel="stylesheet" href="../css/create-character.css"/>
+<style>
+  .deity-pick-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 14px;
+    margin-bottom: 28px;
+  }
+  .deity-pick-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: rgba(255,255,255,0.02);
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+  .deity-pick-card:hover { border-color: var(--border-bright); background: rgba(201,168,76,0.03); }
+  .deity-pick-card.selected { border-color: var(--gold); background: rgba(201,168,76,0.07); }
+  .deity-pick-card.selected::after {
+    content: '✓';
+    position: absolute;
+    top: 12px; right: 14px;
+    color: var(--gold);
+    font-family: var(--ff-mono);
+    font-size: 0.75rem;
+  }
+  .deity-pick-icon {
+    width: 100%;
+    aspect-ratio: 3 / 4;
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+    background: var(--ink3);
+    display: flex;
+    align-items: stretch;
+    justify-content: stretch;
+    padding: 0;
+    margin-bottom: 0;
+    border-radius: var(--radius);
+    font-size: 1.6rem;
+  }
+  .deity-pick-icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center;
+    display: block;
+    transition: transform 0.3s ease;
+    padding: 0;
+  }
+  .deity-pick-card:hover .deity-pick-icon img { transform: scale(1.05); }
+  .deity-pick-name  { font-family: var(--ff-display); font-size: 0.9rem; letter-spacing: 0.12em; color: var(--gold); margin-bottom: 3px; }
+  .deity-pick-title { font-size: 0.78rem; color: var(--gold-dim); font-style: italic; margin-bottom: 10px; }
+  .deity-pick-divider { height: 1px; background: var(--border); margin-bottom: 10px; }
+  .deity-pick-row   { display: flex; gap: 6px; margin-bottom: 5px; align-items: flex-start; }
+  .deity-pick-row-label { font-family: var(--ff-mono); font-size: 0.55rem; letter-spacing: 0.12em; color: var(--text-dim); text-transform: uppercase; min-width: 70px; flex-shrink: 0; padding-top: 2px; }
+  .deity-pick-row-val   { font-size: 0.78rem; color: var(--text); line-height: 1.4; }
+  .deity-pick-blessing  { font-size: 0.75rem; color: var(--teal-bright); font-style: italic; margin-top: 8px; }
+  .deity-pick-selected-info {
+    background: rgba(201,168,76,0.06);
+    border: 1px solid var(--gold-dim);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    margin-bottom: 20px;
+    display: none;
+    align-items: center;
+    gap: 14px;
+  }
+  .deity-pick-selected-info.show { display: flex; }
+  .deity-pick-selected-icon  { font-size: 2rem; flex-shrink: 0; }
+  .deity-pick-selected-name  { font-family: var(--ff-display); font-size: 0.85rem; color: var(--gold); letter-spacing: 0.1em; }
+  .deity-pick-selected-sub   { font-size: 0.78rem; color: var(--text-dim); font-style: italic; margin-top: 2px; }
+
+  /* Override container width for deity grid */
+  .create-container { max-width: 900px; }
+
+  /* Prevent horizontal overflow globally */
+  html, body { overflow-x: hidden; max-width: 100vw; }
+  .create-page { overflow-x: hidden; padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); box-sizing: border-box; }
+  .create-card { overflow-x: hidden; box-sizing: border-box; width: 100%; }
+  .deity-pick-card { box-sizing: border-box; width: 100%; overflow-wrap: break-word; word-break: break-word; }
+
+  /* ── Tablet ── */
+  @media (max-width: 768px) {
+    .deity-pick-grid  { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .create-container { max-width: 100%; }
+  }
+
+  /* ── Mobile ── */
+  @media (max-width: 540px) {
+    .deity-pick-grid  { grid-template-columns: 1fr; gap: 10px; }
+    .create-page      { padding: 20px 12px 48px !important; }
+    .create-container { max-width: 100%; }
+    .create-card      { padding: 18px 14px !important; }
+    .deity-pick-card  { padding: 14px 12px; }
+    .deity-pick-icon  { font-size: 1.5rem; margin-bottom: 6px; }
+    .deity-pick-name  { font-size: 0.8rem; letter-spacing: 0.08em; }
+    .deity-pick-title { font-size: 0.7rem; }
+    .deity-pick-row-label { min-width: 60px; font-size: 0.52rem; }
+    .deity-pick-row-val   { font-size: 0.75rem; }
+    .deity-pick-blessing  { font-size: 0.7rem; }
+    .deity-pick-selected-info { padding: 10px 12px; gap: 10px; flex-wrap: wrap; }
+    .deity-pick-selected-icon { font-size: 1.4rem; }
+    .deity-pick-selected-name { font-size: 0.75rem; }
+    .deity-pick-selected-sub  { font-size: 0.68rem; }
+    .page-heading h2  { font-size: clamp(1.1rem, 6vw, 1.6rem); }
+    .page-heading p   { font-size: 0.82rem; }
+    .step-hint        { font-size: 0.8rem; }
+    .btn-primary      { font-size: 0.68rem; }
+  }
+
+  /* ── Very small ── */
+  @media (max-width: 360px) {
+    .create-page      { padding: 16px 10px 40px !important; }
+    .create-card      { padding: 14px 10px !important; }
+    .deity-pick-card  { padding: 12px 10px; }
+    .deity-pick-name  { font-size: 0.72rem; }
+    .deity-pick-row-val { font-size: 0.7rem; }
+  }
+</style>
+</head>
+<body>
+
+<div class="bg-glow"></div>
+<div class="bg-texture"></div>
+
+<div class="loading-overlay" id="loading">
+  <div class="loading-title">FORGE OF LEGENDS</div>
+  <div class="loading-dots">
+    <div class="loading-dot"></div>
+    <div class="loading-dot"></div>
+    <div class="loading-dot"></div>
+  </div>
+</div>
+
+<div class="create-page">
+  <div class="create-container">
+
+    <div class="page-heading anim-fadedown">
+      <h2>CHOOSE YOUR DIVINITY</h2>
+      <p>You are a god. Choose which divine force you embody.</p>
+    </div>
+
+    <div class="create-card anim-fadeup anim-delay-1">
+
+      <p class="step-hint" style="margin-bottom:20px">
+        Each deity has fixed authorities, a unique blessing for their worshippers, and specific advancement ingredients. Choose carefully — this cannot be changed.
+      </p>
+
+      <!-- Selected summary bar -->
+      <div class="deity-pick-selected-info" id="selected-info">
+        <div class="deity-pick-selected-icon" id="sel-icon">—</div>
+        <div>
+          <div class="deity-pick-selected-name" id="sel-name">—</div>
+          <div class="deity-pick-selected-sub"  id="sel-sub">—</div>
+        </div>
+      </div>
+
+      <!-- Deity grid -->
+      <div class="deity-pick-grid">
+
+        <div class="deity-pick-card" data-deity="Sah'run" onclick="pickDeity(this)">
+          <div class="deity-pick-icon"><img src="https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/deity-images%2Fsah'run.jpeg?alt=media&token=a9ba07ac-26ad-405e-a773-3959a9dd5d9c" alt="Sah'run"/></div>
+          <div class="deity-pick-name">SAH'RUN</div>
+          <div class="deity-pick-title">God of Flames</div>
+          <div class="deity-pick-divider"></div>
+          <div class="deity-pick-row"><span class="deity-pick-row-label">Authorities</span><span class="deity-pick-row-val">Flames, Luminance, Hellfire</span></div>
+          <div class="deity-pick-row"><span class="deity-pick-row-label">Ingredients</span><span class="deity-pick-row-val">Heart of the Red Phoenix, Gem of Luminance</span></div>
+          <div class="deity-pick-blessing">⚡ Worshipper Blessing: Flame of Forge — 3% enemy forge material drops</div>
+        </div>
+
+        <div class="deity-pick-card" data-deity="Alistor" onclick="pickDeity(this)">
+          <div class="deity-pick-icon"><img src="https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/deity-images%2Falistor.jpeg?alt=media&token=00925b01-6a3f-4844-a833-99aabd61ca45" alt="Alistor"/></div>
+          <div class="deity-pick-name">ALISTOR</div>
+          <div class="deity-pick-title">God of Darkness</div>
+          <div class="deity-pick-divider"></div>
+          <div class="deity-pick-row"><span class="deity-pick-row-label">Authorities</span><span class="deity-pick-row-val">Darkness, Slumber, Secrets</span></div>
+          <div class="deity-pick-row"><span class="deity-pick-row-label">Ingredients</span><span class="deity-pick-row-val">The Void-Eye, Orb of Silence</span></div>
+          <div class="deity-pick-blessing">⚡ Worshipper Blessing: Veil-step — 3% reduced robbery chance</div>
+        </div>
+
+        <div class="deity-pick-card" data-deity="Elionidas" onclick="pickDeity(this)">
+          <div class="deity-pick-icon"><img src="https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/deity-images%2Felionidas.jpeg?alt=media&token=3076c6f2-1e25-4664-8a50-668c834b62f8" alt="Elionidas"/></div>
+          <div class="deity-pick-name">ELIONIDAS</div>
+          <div class="deity-pick-title">God of Abundance</div>
+          <div class="deity-pick-divider"></div>
+          <div class="deity-pick-row"><span class="deity-pick-row-label">Authorities</span><span class="deity-pick-row-val">Fate, Blessings, Riches</span></div>
+          <div class="deity-pick-row"><span class="deity-pick-row-label">Ingredients</span><span class="deity-pick-row-val">Crown of Fortune, Tears of The Endless Goldfish</span></div>
+          <div class="deity-pick-blessing">⚡ Worshipper Blessing: Fortune's Drift — 3% precious loot find</div>
+        </div>
+
+        <div class="deity-pick-card" data-deity="Mah'run" onclick="pickDeity(this)">
+          <div class="deity-pick-icon"><img src="https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/deity-images%2Fmah'run.jpeg?alt=media&token=7169560d-b36d-4009-9344-4703d5dca35b" alt="Mah'run"/></div>
+          <div class="deity-pick-name">MAH'RUN</div>
+          <div class="deity-pick-title">Goddess of Stars</div>
+          <div class="deity-pick-divider"></div>
+          <div class="deity-pick-row"><span class="deity-pick-row-label">Authorities</span><span class="deity-pick-row-val">Stars, Cosmos, Guidance</span></div>
+          <div class="deity-pick-row"><span class="deity-pick-row-label">Ingredients</span><span class="deity-pick-row-val">Core of a Fallen Star, Fruit of World Tree</span></div>
+          <div class="deity-pick-blessing">⚡ Worshipper Blessing: +3% rare event encounters</div>
+        </div>
+
+        <div class="deity-pick-card" data-deity="Freyja" onclick="pickDeity(this)">
+          <div class="deity-pick-icon"><img src="https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/deity-images%2Ffreyja.jpeg?alt=media&token=434371f1-7d82-4d87-b7bb-4545fe37b5e6" alt="Freyja"/></div>
+          <div class="deity-pick-name">FREYJA</div>
+          <div class="deity-pick-title">Goddess of Love</div>
+          <div class="deity-pick-divider"></div>
+          <div class="deity-pick-row"><span class="deity-pick-row-label">Authorities</span><span class="deity-pick-row-val">Love, Souls, Desire</span></div>
+          <div class="deity-pick-row"><span class="deity-pick-row-label">Ingredients</span><span class="deity-pick-row-val">Divine Heart Essence, Forgotten Desire Seed</span></div>
+          <div class="deity-pick-blessing">⚡ Worshipper Blessing: +3% NPC gift chance</div>
+        </div>
+
+        <div class="deity-pick-card" data-deity="Arion" onclick="pickDeity(this)">
+          <div class="deity-pick-icon"><img src="https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/deity-images%2Farion.jpeg?alt=media&token=1fe0f371-aed9-4666-a02b-06cb10800af3" alt="Arion"/></div>
+          <div class="deity-pick-name">ARION</div>
+          <div class="deity-pick-title">God of Justice</div>
+          <div class="deity-pick-divider"></div>
+          <div class="deity-pick-row"><span class="deity-pick-row-label">Authorities</span><span class="deity-pick-row-val">Justice, Balance, Retribution</span></div>
+          <div class="deity-pick-row"><span class="deity-pick-row-label">Ingredients</span><span class="deity-pick-row-val">Scales of Equilibrium, Adonai Sword</span></div>
+          <div class="deity-pick-blessing">⚡ Worshipper Blessing: Balances good/bad encounter ratio</div>
+        </div>
+
+        <div class="deity-pick-card" data-deity="Veil" onclick="pickDeity(this)">
+          <div class="deity-pick-icon"><img src="https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/deity-images%2Fveil.jpeg?alt=media&token=e7fcf690-c559-4337-9012-dff063db7742" alt="Veil"/></div>
+          <div class="deity-pick-name">VEIL</div>
+          <div class="deity-pick-title">God of Knowledge</div>
+          <div class="deity-pick-divider"></div>
+          <div class="deity-pick-row"><span class="deity-pick-row-label">Authorities</span><span class="deity-pick-row-val">Knowledge, Memory, Secrets</span></div>
+          <div class="deity-pick-row"><span class="deity-pick-row-label">Ingredients</span><span class="deity-pick-row-val">Ink of Time, Eye of All-knowing</span></div>
+          <div class="deity-pick-blessing">⚡ Worshipper Blessing: +3% EXP from all activities</div>
+        </div>
+
+      </div>
+
+      <div class="form-error" id="create-error" style="margin-bottom:12px"></div>
+      <button class="btn-primary" id="btn-ascend">ASCEND TO GODHOOD</button>
+
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  let _selectedDeity = null;
+
+  function pickDeity(el) {
+    document.querySelectorAll('.deity-pick-card').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+    _selectedDeity = el.dataset.deity;
+
+    // Update summary bar
+    const icon  = el.querySelector('.deity-pick-icon').textContent;
+    const name  = el.querySelector('.deity-pick-name').textContent;
+    const title = el.querySelector('.deity-pick-title').textContent;
+    document.getElementById('sel-icon').textContent = icon;
+    document.getElementById('sel-name').textContent = name;
+    document.getElementById('sel-sub').textContent  = title;
+    document.getElementById('selected-info').classList.add('show');
+    document.getElementById('create-error').textContent = '';
+  }
+</script>
+
+<script type="module">
+  import { auth, db } from "../firebase/firebase.js";
+  import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+  import { doc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+  const DEITY_DATA = {
+    "Sah'run":   { icon:"🔥", title:"God of Flames",    authorities:"Flames, Luminance, Hellfire",   blessing:"Flame of Forge",  blessingDesc:"3% enemy forge material drops",      advIngredients:["Heart of the Red Phoenix","Gem of Luminance"],         worshipMaterials:["Volcanic Roots","Devil-Spring Water","Ash of Elder Trees"] },
+    "Alistor":   { icon:"🌑", title:"God of Darkness",  authorities:"Darkness, Slumber, Secrets",    blessing:"Veil-step",       blessingDesc:"3% reduced robbery chance",           advIngredients:["The Void-Eye","Orb of Silence"],                        worshipMaterials:["Ephemeral Footprints","Oil-stained Feathers","Whispering Purple Sands"] },
+    "Elionidas": { icon:"🪙", title:"God of Abundance", authorities:"Fate, Blessings, Riches",       blessing:"Fortune's Drift", blessingDesc:"3% precious loot find chance",        advIngredients:["Crown of Fortune","Tears of The Endless Goldfish"],     worshipMaterials:["Golden Wheat Sheaves","Miracle Coins","Ancient Mint Seeds"] },
+    "Mah'run":   { icon:"⭐", title:"Goddess of Stars", authorities:"Stars, Cosmos, Guidance",       blessing:"Astral Sight",    blessingDesc:"+3% rare event encounters",           advIngredients:["Core of a Fallen Star","Fruit of World Tree"],          worshipMaterials:["Starlight Dust","Moon Petals","Crystallized Night Dews"] },
+    "Freyja":    { icon:"💗", title:"Goddess of Love",  authorities:"Love, Souls, Desire",           blessing:"Heart's Favour",  blessingDesc:"+3% NPC gift chance",                 advIngredients:["Divine Heart Essence","Forgotten Desire Seed"],         worshipMaterials:["Crimson Toad Moss","Branch of Soul Tree","Bloom Petals"] },
+    "Arion":     { icon:"⚖️", title:"God of Justice",   authorities:"Justice, Balance, Retribution", blessing:"Balanced Scales", blessingDesc:"Balances good/bad encounter ratio",   advIngredients:["Scales of Equilibrium","Adonai Sword"],                 worshipMaterials:["Broken Shackles","Iron Oaths","Verdict Quill"] },
+    "Veil":      { icon:"📖", title:"God of Knowledge", authorities:"Knowledge, Memory, Secrets",    blessing:"Seeker's Mind",   blessingDesc:"+3% EXP from all activities",         advIngredients:["Ink of Time","Eye of All-knowing"],                     worshipMaterials:["Ancient Scroll Fragments","White Mystic Woods","Truths"] },
+  };
+
+  let _uid = null;
+
+  onAuthStateChanged(auth, (user) => {
+    if (!user) { window.location.href = "auth.html"; return; }
+    _uid = user.uid;
+    document.getElementById("loading")?.classList.add("hidden");
+    setTimeout(() => document.getElementById("loading")?.remove(), 400);
+  });
+
+  document.getElementById("btn-ascend").addEventListener("click", async () => {
+    const errEl = document.getElementById("create-error");
+    errEl.textContent = "";
+
+    if (!_selectedDeity) {
+      errEl.textContent = "Choose your divinity first."; return;
+    }
+
+    const btn = document.getElementById("btn-ascend");
+    btn.disabled = true; btn.textContent = "ASCENDING...";
+
+    const d = DEITY_DATA[_selectedDeity];
+
+    // Build starter inventory
+    const inventory = [];
+    (d.worshipMaterials || []).forEach(mat =>
+      inventory.push({ name: mat, icon:"✨", type:"material", qty: 10 })
+    );
+    (d.advIngredients || []).forEach(ing =>
+      inventory.push({ name: ing, icon:"💎", type:"material", qty: 5 })
+    );
+    inventory.push({ name:"Greater HP Potion",   icon:"🧪", type:"consumable", qty: 20 });
+    inventory.push({ name:"Greater Mana Potion", icon:"💧", type:"consumable", qty: 20 });
+    inventory.push({ name:"Greater Luck Potion", icon:"🍀", type:"consumable", qty: 10 });
+
+    const charDoc = {
+      uid:          _uid,
+      name:         _selectedDeity,
+      isDeity:      true,
+
+      // Deity identity — all auto-set from their choice
+      charClass:    _selectedDeity,
+      deity:        _selectedDeity,
+      deityTitle:   d.title,
+      authorities:  d.authorities,
+      blessing:     d.blessing,
+      blessingDesc: d.blessingDesc,
+      advancementIngredients: d.advIngredients,
+      worshipMaterials:       d.worshipMaterials,
+
+      // Deities are beyond mortal classification
+      race:         "Divine",
+      raceAttr:     "Beyond mortal classification",
+      classRole:    d.title,
+      sex:          null,
+      age:          null,
+      bio:          null,
+      profession:   null,
+      faction:      null,
+      companion:    null,
+
+      // Deities exist everywhere — no fixed location
+      kingdom:      "All Kingdoms",
+      continent:    "All Continents",
+      region:       "The Divine Realm",
+      location:     "The Divine Realm",
+
+      // Deities are Eternal rank with godlike stats per doc
+      rank:         "Eternal",
+      level:        1000,
+      xp:           0,
+      xpMax:        99999,
+      hp:           9999,
+      hpMax:        9999,
+      mana:         9999,
+      manaMax:      9999,
+      gold:         99999,
+      stats:        { str:100, int:100, def:100, dex:100 },
+      statPoints:   0,
+      faithLevel:   0,
+      reputation:   0,
+      titles:       ["The Divine", d.title],
+      inventory,
+      equipment:    { weapon: null, armor: null },
+      createdAt:    serverTimestamp(),
+    };
+
+    try {
+      await setDoc(doc(db, "characters", _uid), charDoc);
+      window.location.href = "deity-dashboard.html";
+    } catch(err) {
+      console.error(err);
+      errEl.textContent = "Failed to save. Try again.";
+      btn.disabled = false; btn.textContent = "ASCEND TO GODHOOD";
+    }
+  });
+</script>
+</body>
+</html>

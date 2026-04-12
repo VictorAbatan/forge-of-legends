@@ -1,0 +1,387 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuth() { return request.auth != null; }
+    function isOwner(uid) { return isAuth() && request.auth.uid == uid; }
+    function isVerified() { return isAuth() && request.auth.token.email_verified == true; }
+    function hasField(field) { return field in request.resource.data; }
+    function isDeity() {
+      return isVerified()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'deity';
+    }
+
+    match /users/{uid} {
+      allow read:   if isAuth();
+      allow create: if isOwner(uid);
+      allow update: if isOwner(uid);
+      allow delete: if false;
+    }
+
+    match /characters/{uid} {
+      allow read:   if isAuth();
+      allow create: if isOwner(uid);
+      allow update: if isOwner(uid);
+      allow delete: if false;
+    }
+
+    match /factions/{factionId} {
+      allow read: if isAuth();
+      allow create, update, delete: if isDeity();
+    }
+
+    match /factionLeaders/{leaderId} {
+      allow read: if isAuth();
+      allow create, update, delete: if isDeity();
+    }
+
+    match /invite_codes/{code} {
+      allow read:   if true;
+      allow create: if false;
+      allow delete: if false;
+      allow update: if isAuth() && resource.data.used == false;
+    }
+
+    match /chats/{locationId} {
+      allow read, list: if isDeity();
+    }
+
+    match /chats/{locationId}/messages/{msgId} {
+      allow read:   if isAuth();
+      allow create: if isAuth()
+        && hasField('uid')
+        && hasField('text')
+        && hasField('charName')
+        && hasField('timestamp')
+        && request.resource.data.text.size() <= 1000
+        && (
+             request.resource.data.uid == request.auth.uid
+          || request.resource.data.uid == 'system'
+          || isDeity()
+          || (
+               request.resource.data.isNpc == true
+            && request.resource.data.isAutoReply == true
+          )
+        );
+      allow update: if isAuth() && (
+        resource.data.uid == request.auth.uid
+        || resource.data.uid == 'system'
+      );
+      allow delete: if isAuth() && (
+        resource.data.uid == request.auth.uid
+        || isDeity()
+      );
+    }
+
+    match /general-chat/{docId}/messages/{msgId} {
+      allow read:   if isAuth();
+      allow create: if isAuth()
+        && hasField('uid')
+        && hasField('text')
+        && hasField('charName')
+        && hasField('timestamp')
+        && (
+             request.resource.data.uid == request.auth.uid
+          || request.resource.data.uid == 'system'
+          || isDeity()
+        )
+        && request.resource.data.text.size() <= 1000;
+      allow update: if isAuth() && (
+        resource.data.uid == request.auth.uid
+        || resource.data.uid == 'system'
+      );
+      allow delete: if isAuth() && (
+        resource.data.uid == request.auth.uid
+        || isDeity()
+      );
+    }
+
+    match /presence/{locationId}/players/{uid} {
+      allow read:   if isAuth();
+      allow create: if isOwner(uid);
+      allow update: if isOwner(uid);
+      allow delete: if isOwner(uid);
+    }
+
+    match /marketplace/{listingId} {
+      allow read: if isAuth();
+      allow create: if isAuth()
+        && hasField('sellerUid')
+        && hasField('itemName')
+        && hasField('pricePerUnit')
+        && hasField('qty')
+        && request.resource.data.sellerUid == request.auth.uid
+        && request.resource.data.pricePerUnit > 0
+        && request.resource.data.qty > 0;
+      allow update: if isAuth()
+        && (
+          request.auth.uid == resource.data.sellerUid
+          ||
+          (
+            request.resource.data.qty >= 0
+            && request.resource.data.qty <= resource.data.qty
+          )
+        );
+      allow delete: if isAuth();
+    }
+
+    match /marketListings/{listingId} {
+      allow read: if isAuth();
+      allow create: if isAuth()
+        && hasField('sellerUid')
+        && hasField('itemName')
+        && hasField('pricePerUnit')
+        && hasField('qty')
+        && request.resource.data.sellerUid == request.auth.uid
+        && request.resource.data.pricePerUnit > 0
+        && request.resource.data.qty > 0;
+      allow update, delete: if false;
+    }
+
+    match /dailyQuests/{uid} {
+      allow read:   if isOwner(uid);
+      allow create: if isOwner(uid);
+      allow update: if isOwner(uid);
+      allow delete: if false;
+    }
+
+    match /battles/{uid} {
+      allow read:   if isOwner(uid);
+      allow create: if isOwner(uid);
+      allow update: if isOwner(uid);
+      allow delete: if isOwner(uid);
+    }
+
+    match /activity/{uid}/events/{eventId} {
+      allow read:   if isOwner(uid);
+      allow create: if isOwner(uid)
+        && hasField('icon')
+        && hasField('message')
+        && hasField('timestamp');
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    match /worldEvents/{eventId} {
+      allow read:   if isAuth();
+      allow create: if isDeity();
+      allow update: if isDeity();
+      allow delete: if isDeity();
+    }
+
+    match /divineVisions/{uid}/messages/{msgId} {
+      allow read:   if (isAuth() && request.auth.uid == uid) || isDeity();
+      allow create: if isDeity();
+      allow update: if isAuth() && request.auth.uid == uid;
+      allow delete: if isAuth() && request.auth.uid == uid;
+    }
+
+    match /storyQuests/{questId} {
+      allow read:   if isAuth();
+      allow create: if isDeity();
+      allow update: if isDeity() || (
+        isAuth()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['completedBy'])
+      );
+      allow delete: if isDeity();
+    }
+
+    match /questSubmissions/{subId} {
+      allow read: if isAuth() && (
+        resource.data.uid == request.auth.uid
+        || isDeity()
+      );
+      allow list: if isAuth();
+      allow create: if isAuth()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.questId is string
+        && request.resource.data.playerName is string;
+      allow update: if isAuth() && (
+        (
+          resource.data.uid == request.auth.uid
+          && request.resource.data.status == 'pending'
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'submittedAt', 'note', 'activitySnapshot'])
+        )
+        ||
+        (
+          isDeity()
+          && request.resource.data.status in ['approved', 'rejected']
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'reviewedAt', 'reward'])
+        )
+      );
+      allow delete: if false;
+    }
+
+    match /factionQuestSubmissions/{subId} {
+      allow read: if isAuth() && (
+        resource.data.uid == request.auth.uid
+        || isDeity()
+      );
+      allow list: if isAuth();
+      allow create: if isAuth()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.questId is string
+        && request.resource.data.playerName is string;
+      allow update: if isAuth() && (
+        (
+          resource.data.uid == request.auth.uid
+          && request.resource.data.status == 'pending'
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'submittedAt', 'note', 'activitySnapshot'])
+        )
+        ||
+        (
+          isDeity()
+          && request.resource.data.status in ['approved', 'rejected']
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'reviewedAt', 'reward'])
+        )
+      );
+      allow delete: if false;
+    }
+
+    match /npcs/{locationId}/list/{npcId} {
+      allow read:   if isAuth();
+      allow create: if isDeity();
+      allow update: if isDeity();
+      allow delete: if isDeity();
+    }
+
+    match /quests/{questId} {
+      allow read:   if isAuth();
+      allow create: if isDeity();
+      allow update: if isAuth();
+      allow delete: if isDeity();
+    }
+
+    match /parties/{partyId} {
+      allow read:   if isAuth();
+      allow create: if isAuth();
+      allow update: if isAuth();
+      allow delete: if isAuth();
+    }
+
+    match /pvpChallenges/{challengeId} {
+      allow read: if isAuth() && (
+        resource.data.challengerId == request.auth.uid
+        || resource.data.targetId == request.auth.uid
+        || (resource.data.participants is list && request.auth.uid in resource.data.participants)
+      );
+      allow list: if isAuth();
+      allow create: if isAuth()
+        && request.resource.data.challengerId == request.auth.uid
+        && request.resource.data.targetId is string
+        && request.resource.data.challengerId is string
+        && request.resource.data.status is string;
+      allow update: if isAuth() && (
+        resource.data.challengerId == request.auth.uid
+        || resource.data.targetId == request.auth.uid
+      );
+      allow delete: if isAuth() && (
+        resource.data.challengerId == request.auth.uid
+        || isDeity()
+      );
+    }
+
+    match /chatDuels/{duelId} {
+      allow read, list: if isAuth();
+
+      allow create: if isAuth()
+        && request.resource.data.challengerId == request.auth.uid
+        && request.resource.data.targetId is string
+        && request.resource.data.status == 'pending'
+        && request.resource.data.participants is list
+        && request.auth.uid in request.resource.data.participants;
+
+      allow update: if isAuth() && (
+        resource.data.challengerId == request.auth.uid
+        || resource.data.targetId == request.auth.uid
+        || isDeity()
+      )
+        && request.resource.data.challengerId == resource.data.challengerId
+        && request.resource.data.targetId == resource.data.targetId
+        && request.resource.data.participants == resource.data.participants;
+
+      allow delete: if isDeity();
+    }
+
+    match /trades/{tradeId} {
+      allow read, list: if isAuth();
+
+      allow create: if isAuth()
+        && request.resource.data.initiatorId == request.auth.uid
+        && request.resource.data.targetId is string
+        && request.resource.data.status == 'pending';
+
+      allow update: if isAuth() && (
+          resource.data.initiatorId == request.auth.uid
+          || resource.data.targetId == request.auth.uid
+          || isDeity()
+        )
+        && request.resource.data.initiatorId == resource.data.initiatorId
+        && request.resource.data.targetId    == resource.data.targetId;
+
+      allow delete: if isDeity();
+    }
+
+    match /factionMissions/{missionId} {
+      allow read:   if isAuth();
+      allow create: if isDeity();
+      allow update: if isDeity();
+      allow delete: if isDeity();
+    }
+
+    match /faction_chats/{docId} {
+      allow read: if isAuth();
+      allow create: if isAuth()
+        && hasField('faction')
+        && hasField('sender')
+        && hasField('text')
+        && hasField('timestamp')
+        && hasField('uid')
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.text.size() <= 200;
+      allow update: if isAuth() && resource.data.uid == request.auth.uid;
+      allow delete: if isAuth() && resource.data.uid == request.auth.uid;
+    }
+
+    match /notifications/{notificationId} {
+      allow read, update, delete: if isAuth() && resource.data.uid == request.auth.uid;
+
+      allow create: if isAuth() && (
+        request.resource.data.uid is string && request.resource.data.uid == request.auth.uid
+        || (
+          request.resource.data.uid is string
+          && request.resource.data.fromUid == request.auth.uid
+          && request.resource.data.type in [
+            'duel-challenge', 'duel-challenge-accepted', 'duel-challenge-declined',
+            'pvp-challenge',  'pvp-challenge-accepted',  'pvp-challenge-declined',
+            'trade-request',  'trade-accepted',          'trade-declined',
+            'trade-complete', 'trade-cancelled'
+          ]
+        )
+        || isDeity()
+      );
+    }
+
+    match /mentions/{uid} {
+      allow read, update, delete: if isOwner(uid);
+      allow create: if isOwner(uid);
+    }
+
+    match /bosses/{bossId} {
+      allow read:   if isAuth();
+      allow create: if isDeity();
+      allow update: if isDeity();
+      allow delete: if isDeity();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

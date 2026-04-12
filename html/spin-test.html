@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+body { background: #0D0B08; display:flex; justify-content:center; align-items:center; height:100vh; }
+.sigil-wrap {
+  width: 100px; height: 100px;
+  animation: reveal 1s ease both;
+}
+@keyframes reveal {
+  from { opacity:0; transform:scale(0.8); }
+  to   { opacity:1; transform:scale(1); }
+}
+.ring {
+  animation: spin 8s linear infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+</style>
+</head>
+<body>
+<div class="sigil-wrap">
+  <svg viewBox="0 0 100 100" fill="none">
+    <!-- Star + rings all spin together -->
+    <g class="ring">
+      <circle cx="50" cy="50" r="46" stroke="rgba(201,168,76,0.4)" stroke-width="1"/>
+      <circle cx="50" cy="50" r="46" stroke="rgba(201,168,76,0.2)" stroke-width="0.5" stroke-dasharray="3 8"/>
+      <circle cx="50" cy="50" r="38" stroke="rgba(201,168,76,0.2)" stroke-width="0.5"/>
+      <path d="M50 10 L56 34 L80 34 L62 50 L70 74 L50 60 L30 74 L38 50 L20 34 L44 34 Z"
+            stroke="#C9A84C" stroke-width="1" fill="rgba(201,168,76,0.08)" stroke-linejoin="round"/>
+    </g>
+    <!-- Dot outside the group — always fixed at centre -->
+    <circle cx="50" cy="50" r="3" fill="#C9A84C"/>
+  </svg>
+</div>
+</body>
+</html>

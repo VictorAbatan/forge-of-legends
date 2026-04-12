@@ -1,0 +1,2063 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Dashboard — Forge of Legends</title>
+<link rel="stylesheet" href="../css/global.css"/>
+<link rel="stylesheet" href="../css/dashboard.css"/>
+<link rel="stylesheet" href="../css/duel.css"/>
+<link rel="stylesheet" href="../css/trade.css"/>
+<style>
+/* ── Duel forfeit button ───────────────────────── */
+.duel-forfeit-row {
+  display: flex;
+  justify-content: center;
+  padding: 6px 12px 10px;
+}
+.duel-forfeit-btn {
+  background: transparent;
+  border: 1px solid #6b3a3a;
+  color: #c07070;
+  font-size: 0.75rem;
+  padding: 4px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.15s, background 0.15s;
+}
+.duel-forfeit-btn:hover {
+  opacity: 1;
+  background: rgba(180, 60, 60, 0.18);
+}
+/* Override global pulse on loading title */
+.loading-title { animation: none !important; }
+/* Deity view switch button in sidebar */
+.deity-switch-btn {
+  display: block; text-align: center; padding: 8px 12px; margin-bottom: 6px;
+  font-family: var(--ff-mono); font-size: 0.58rem; letter-spacing: 0.08em;
+  color: var(--gold-dim); border: 1px solid var(--border);
+  border-radius: var(--radius); transition: all 0.2s; text-decoration: none;
+}
+.deity-switch-btn:hover { border-color: var(--border-bright); color: var(--gold); }
+</style>
+</head>
+<body>
+
+<div class="loading-overlay" id="loading">
+  <div class="loading-title">FORGE OF LEGENDS</div>
+  <div class="loading-dots">
+    <div class="loading-dot"></div>
+    <div class="loading-dot"></div>
+    <div class="loading-dot"></div>
+  </div>
+</div>
+
+<!-- AVATAR MODAL -->
+<div class="avatar-modal" id="avatar-modal" style="display:none">
+  <div class="avatar-modal-box">
+    <div class="avatar-modal-title">CHANGE AVATAR</div>
+    <!-- Live preview -->
+    <div style="display:flex;justify-content:center;margin-bottom:16px">
+      <div class="avatar-preview-circle" id="avatar-preview-circle"></div>
+    </div>
+    <div class="avatar-modal-section">Choose a preset</div>
+    <div class="avatar-presets-grid" id="avatar-presets"></div>
+    <div class="avatar-modal-section">Or upload your own</div>
+    <label class="avatar-upload-btn" for="avatar-file-input">📁 Click to upload image (JPG, PNG, max 2MB)</label>
+    <input type="file" id="avatar-file-input" accept="image/*" style="display:none"/>
+    <div class="avatar-modal-actions">
+      <button class="btn-primary" onclick="saveAvatar()" id="btn-save-avatar">SAVE AVATAR</button>
+      <button class="btn-secondary" onclick="closeAvatarModal()">CANCEL</button>
+    </div>
+  </div>
+</div>
+
+<!-- TRAVEL MODAL -->
+<div class="travel-modal" id="travel-modal" style="display:none">
+  <div class="travel-modal-box">
+    <div class="travel-modal-title">TRAVEL</div>
+    <div class="travel-modal-dest" id="travel-modal-dest">Traveling to —</div>
+    <div class="travel-modal-details">
+      <div class="travel-detail"><div class="travel-detail-label">Cost</div><div class="travel-detail-value" id="travel-modal-cost">—</div></div>
+      <div class="travel-detail"><div class="travel-detail-label">Travel Time</div><div class="travel-detail-value" id="travel-modal-time">—</div></div>
+    </div>
+    <div class="travel-modal-actions">
+      <button class="btn-primary" id="btn-confirm-travel" onclick="confirmTravel()">DEPART</button>
+      <button class="btn-secondary" onclick="closeTravelModal()">CANCEL</button>
+    </div>
+    <div class="form-error" id="travel-error" style="margin-top:8px"></div>
+  </div>
+</div>
+
+<!-- FULLSCREEN MAP MODAL -->
+<div class="map-fullscreen-modal" id="map-fullscreen-modal" style="display:none">
+  <div class="map-fs-header">
+    <span class="map-fs-title">✦ WORLD MAP</span>
+    <button class="map-fs-close" onclick="closeMapFullscreen()">✕ CLOSE</button>
+  </div>
+  <div class="map-fs-body" id="map-fs-body">
+    <div class="map-fs-container" id="map-fs-container">
+      <img class="map-fs-img"
+           src="https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fworld-map.jpeg?alt=media&token=b2ac09b2-fa4f-48fb-ae3d-c065a98d2c3b"
+           alt="World Map" draggable="false" id="map-fs-img"/>
+      <!-- Pins are cloned here dynamically -->
+    </div>
+  </div>
+  <div class="map-fs-hint">Pinch to zoom · Drag to pan · Tap a pin for details</div>
+</div>
+
+<!-- BUY CONFIRM MODAL -->
+<div class="confirm-modal" id="buy-modal" style="display:none">
+  <div class="confirm-modal-box">
+    <div class="confirm-modal-icon" id="buy-modal-icon">📦</div>
+    <div class="confirm-modal-title" id="buy-modal-name">Item</div>
+    <div class="confirm-modal-desc" id="buy-modal-desc">Purchase this item?</div>
+    <input type="number" id="buy-qty-input" min="1" max="1" value="1" class="confirm-modal-qty" style="display:none;" />
+    <div class="confirm-modal-actions">
+      <button class="btn-primary" id="btn-confirm-buy" onclick="confirmBuy()">BUY</button>
+      <button class="btn-secondary" onclick="closeBuyModal()">CANCEL</button>
+    </div>
+    <div class="form-error" id="buy-error" style="margin-top:8px"></div>
+  </div>
+</div>
+
+<!-- SELL MODAL -->
+<div class="sell-modal" id="sell-modal" style="display:none">
+  <div class="sell-modal-box">
+    <div class="sell-modal-title">LIST ITEM FOR SALE</div>
+    <div class="field-group" style="margin-bottom:14px">
+      <label class="field-label">Select Item</label>
+      <select class="field-input field-input-select" id="sell-item-select" style="cursor:pointer"><option value="">Choose from inventory...</option></select>
+    </div>
+    <div class="field-group" style="margin-bottom:14px">
+      <label class="field-label">Quantity</label>
+      <div class="stepper-group">
+        <input class="field-input stepper-input" type="number" id="sell-qty" min="1" value="1"/>
+        <div class="stepper-btns">
+          <button type="button" class="stepper-btn stepper-up" tabindex="-1" onclick="stepInput('sell-qty',1)">▲</button>
+          <button type="button" class="stepper-btn stepper-down" tabindex="-1" onclick="stepInput('sell-qty',-1)">▼</button>
+        </div>
+      </div>
+    </div>
+    <div class="field-group" style="margin-bottom:20px">
+      <label class="field-label">Price Per Unit (Gold Coins)</label>
+      <div class="stepper-group">
+        <input class="field-input stepper-input" type="number" id="sell-price" min="1" placeholder="Enter price..." inputmode="numeric" pattern="[0-9]*" tabindex="0" />
+        <div class="stepper-btns">
+          <button type="button" class="stepper-btn stepper-up" tabindex="-1" onclick="stepInput('sell-price',1)">▲</button>
+          <button type="button" class="stepper-btn stepper-down" tabindex="-1" onclick="stepInput('sell-price',-1)">▼</button>
+        </div>
+      </div>
+    </div>
+    <div class="form-error" id="sell-error" style="margin-bottom:8px"></div>
+    <div style="display:flex;gap:10px">
+      <button class="btn-primary" onclick="confirmSell()">LIST FOR SALE</button>
+      <button class="btn-secondary" onclick="closeSellModal()">CANCEL</button>
+    </div>
+  </div>
+</div>
+
+<!-- QUOTA SUBMIT MODAL -->
+<div class="confirm-modal" id="quota-modal" style="display:none">
+  <div class="confirm-modal-box" style="width:420px;text-align:left">
+    <div class="confirm-modal-title" style="text-align:center;margin-bottom:16px" id="quota-modal-title">SUBMIT MATERIALS</div>
+    <div id="quota-modal-body"></div>
+    <div class="confirm-modal-actions" style="margin-top:20px;display:flex;gap:10px;justify-content:center" id="quota-modal-actions"></div>
+  </div>
+</div>
+
+<!-- CRAFTING MODAL (Forging Animation) -->
+<div id="crafting-modal" class="crafting-modal" style="display:none">
+  <div class="crafting-modal-content">
+    <div class="forging-animation">
+      <div class="anvil"></div>
+      <div class="hammer">
+        <div class="hammer-head"></div>
+        <div class="hammer-handle"></div>
+      </div>
+      <div class="spark">
+        <div class="spark-dot"></div>
+        <div class="spark-dot"></div>
+        <div class="spark-dot"></div>
+        <div class="spark-dot"></div>
+        <div class="spark-dot"></div>
+      </div>
+    </div>
+    <div id="crafting-result-message" class="crafting-result-message" style="display:none"></div>
+  </div>
+</div>
+
+<div class="dashboard-page">
+
+  <!-- Mobile nav overlay (blur backdrop) -->
+  <div class="nav-overlay" id="nav-overlay" onclick="closeNav()"></div>
+
+  <!-- Mobile sticky header (only visible on mobile) -->
+  <div class="mobile-header" id="mobile-header">
+    <button class="nav-toggle" id="nav-toggle" onclick="toggleNav()" aria-label="Toggle navigation">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M4 6 C4 6 12 6 20 6" stroke="#C9A84C" stroke-width="1.5" stroke-linecap="round"/>
+        <path d="M4 12 C6 12 10 10 14 12 C18 14 20 12 20 12" stroke="#C9A84C" stroke-width="1.5" stroke-linecap="round"/>
+        <path d="M4 18 C4 18 12 18 20 18" stroke="#C9A84C" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+    </button>
+    <div class="mobile-header-title">FORGE OF LEGENDS</div>
+    <div class="mobile-header-char" id="mobile-header-char">—</div>
+    <div id="notification-bell-mobile" class="notification-bell mobile-bell" onclick="window.showNotifications()" title="Notifications">
+      <span>🔔</span>
+      <span id="notification-badge-mobile" class="notification-badge" style="display:none;">0</span>
+    </div>
+  </div>
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-name">FORGE OF LEGENDS</div>
+      <div class="sidebar-logo-sub">ROLEPLAY PLATFORM</div>
+    </div>
+    <div class="sidebar-char">
+      <div class="char-avatar" id="sb-avatar" onclick="openAvatarModal()" style="cursor:pointer;overflow:hidden" title="Change avatar"></div>
+      <div class="char-name" id="sb-name">Loading...</div>
+      <div class="char-meta" id="sb-meta">Wanderer · Level 1</div>
+      <div class="xp-bar-wrap">
+        <div class="xp-label"><span>EXP</span><span id="sb-xp">0 / 100</span></div>
+        <div class="xp-bar"><div class="xp-fill" id="sb-xpfill" style="width:0%"></div></div>
+      </div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-section-label">Navigate</div>
+      <div class="nav-item active" data-panel="home"       onclick="switchPanel('home')">      <span class="nav-icon">⚡</span> Overview</div>
+      <div class="nav-item"        data-panel="character"  onclick="switchPanel('character')"> <span class="nav-icon">📜</span> Character</div>
+      <div class="nav-item"        data-panel="skills"     onclick="switchPanel('skills')">    <span class="nav-icon">�</span> Skills</div>
+      <div class="nav-item"        data-panel="inventory"  onclick="switchPanel('inventory')"> <span class="nav-icon">🎒</span> Inventory</div>
+      <div class="nav-item"        data-panel="map"        onclick="switchPanel('map')">       <span class="nav-icon">🗺️</span> World Map</div>
+      <div class="nav-item"        data-panel="chat"       onclick="switchPanel('chat')" style="position:relative">      <span class="nav-icon">💬</span> RP Chat<span class="mention-badge" id="nav-mention-badge" style="display:none">0</span></div>
+      <div class="nav-item"        data-panel="profession" onclick="switchPanel('profession')"><span class="nav-icon">⛏️</span> Profession</div>
+      <div class="nav-item"        data-panel="market"     onclick="switchPanel('market')">    <span class="nav-icon">🏪</span> Market</div>
+      <div class="nav-item"        data-panel="quests"     onclick="switchPanel('quests')">    <span class="nav-icon">�</span> Quests</div>
+      <div class="nav-item"        data-panel="activity"   onclick="switchPanel('activity')"> <span class="nav-icon">📡</span> Activity</div>
+      <div class="nav-item" data-panel="worlddev" onclick="switchPanel('worlddev')"><span class="nav-icon">🌍</span> World Development</div>
+      <div class="nav-item" data-panel="battle"   onclick="switchPanel('battle')">  <span class="nav-icon">⚔️</span> Battle</div>
+      <div class="nav-item" data-panel="crafting" onclick="switchPanel('crafting')"><span class="nav-icon">⚗️</span> Crafting</div>
+      <div class="nav-item" data-panel="faction"    onclick="switchPanel('faction')">   <span class="nav-icon">🛡️</span> Faction</div>
+      <div class="nav-item" data-panel="companion" onclick="switchPanel('companion')"><span class="nav-icon">🐾</span> Companion</div>
+      <!-- COMPANION PANEL moved to main-content below -->
+    </nav>
+    <div class="sidebar-footer">
+      <a href="deity-dashboard.html" class="deity-switch-btn" id="btn-deity-view" style="display:none">⚡ DEITY VIEW</a>
+      <button class="btn-logout" id="btn-logout" onclick="window._leaveWorld()">LEAVE WORLD</button>
+    </div>
+  </aside>
+
+
+  <main class="main-content">
+
+    <!-- WORLD DEVELOPMENT PANEL (moved from sidebar) -->
+    <div class="panel" id="panel-worlddev">
+      <div class="panel-header"><h2>WORLD DEVELOPMENT</h2><p>Major events and changes shaped by the gods.</p></div>
+      <div class="event-list" id="worlddev-panel-list">
+        <p style="color:var(--text-dim);font-style:italic;font-size:0.95rem">No world developments yet.</p>
+      </div>
+    </div>
+
+    <!-- COMPANION PANEL (moved here from sidebar) -->
+    <div class="panel" id="panel-companion">
+      <div class="panel-header">
+        <h2>COMPANIONS</h2>
+        <p>Magical pets that grant unique bonuses. Unlocked at Follower rank.</p>
+      </div>
+      <div id="companion-panel-container"></div>
+    </div>
+
+    <!-- Notification Bell (desktop) -->
+    <div id="notification-bell" class="notification-bell" onclick="window.showNotifications()" title="Notifications">
+      <span id="notification-bell-icon">🔔</span>
+      <span id="notification-badge" class="notification-badge" style="display:none;">0</span>
+    </div>
+
+    <!-- ══════════════ FACTION ══════════════ -->
+    <div class="panel" id="panel-faction">
+      <div class="panel-header">
+        <h2>FACTIONS</h2>
+        <p>Discover the great factions of the world. Choose your allegiance wisely.</p>
+      </div>
+      <!-- Faction quests collapsible -->
+            <!-- Faction quests header (static, visible above collapsible) -->
+            <div class="faction-quest-header" style="margin-bottom:0.5em;margin-top:0.5em;">
+              <span style="font-size:1.15em;">📝</span>
+              <span>FACTION QUESTS</span>
+            </div>
+      <div class="fq-dropdown" id="fq-dropdown">
+        <button class="fq-dropdown-toggle" onclick="window.toggleFactionQuestsDropdown()">
+          <span class="fq-arrow" id="faction-quests-toggle-arrow">▼</span>
+        </button>
+        <div class="fq-dropdown-body" id="faction-quests-list" style="display:none;">
+          <!-- Rendered by JS -->
+        </div>
+      </div>
+      <div id="faction-list-section">
+        <!-- Faction cards rendered by JS -->
+      </div>
+    </div>
+
+    <!-- OVERVIEW -->
+    <div class="panel active" id="panel-home">
+      <div class="panel-header"><h2>OVERVIEW</h2><p id="panel-welcome">Welcome to the Forge, traveller.</p></div>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-label">Rank</div><div class="stat-value" style="font-size:1.1rem;margin-top:4px" id="stat-rank">Wanderer</div><div class="stat-sub" id="stat-level">Level 1</div></div>
+        <div class="stat-card"><div class="stat-label">Gold</div><div class="stat-value" id="stat-gold">100</div><div class="stat-sub">coins</div></div>
+        <div class="stat-card"><div class="stat-label">Health</div><div class="stat-value" id="stat-hp">100</div><div class="stat-sub" id="stat-hp-max">/ 100</div></div>
+        <div class="stat-card"><div class="stat-label">Mana</div><div class="stat-value" id="stat-mana">50</div><div class="stat-sub" id="stat-mana-max">/ 50</div></div>
+        <div class="stat-card"><div class="stat-label">Location</div><div class="stat-value" style="font-size:0.8rem;margin-top:6px" id="stat-loc">—</div><div class="stat-sub" id="stat-continent">—</div></div>
+        <div class="stat-card"><div class="stat-label">Stat Points</div><div class="stat-value" id="stat-points">20</div><div class="stat-sub">unallocated</div></div>
+      </div>
+      <div class="two-col">
+        <div class="card">
+          <div class="card-title">WORLD DEVELOPMENT</div>
+          <div class="event-list" id="world-development-list">
+            <p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">No world developments yet.</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">DAILY QUESTS</div>
+          <div class="quest-item"><div class="quest-name">Hunter's Routine</div><div class="quest-reward">Defeat 20 monsters ↳ +10 EXP, +50 Coins</div></div>
+          <div class="quest-item"><div class="quest-name">Gatherer's Duty</div><div class="quest-reward">Collect 20 resources ↳ +10 EXP, 1 Minor Potion</div></div>
+          <div class="quest-item"><div class="quest-name">Explorer's Path</div><div class="quest-reward">Visit 3 locations ↳ +20 EXP, +80 Coins</div></div>
+          <div style="margin-top:14px"><button class="btn-secondary" style="width:100%;font-size:0.65rem" onclick="switchPanel('quests')">VIEW FULL QUEST BOARD</button></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CHARACTER -->
+    <div class="panel" id="panel-character">
+      <div class="panel-header"><h2>CHARACTER</h2><p>Your identity in the Forge of Legends</p></div>
+      <div class="profile-layout">
+        <div class="profile-left">
+          <div class="profile-avatar-card">
+            <div class="avatar-upload-wrap" onclick="openAvatarModal()">
+              <div class="avatar-img" id="prof-avatar-img"></div>
+              <div class="avatar-overlay"><span class="avatar-overlay-text">CHANGE<br/>AVATAR</span></div>
+            </div>
+            <div class="profile-charname" id="prof-name">—</div>
+            <div class="profile-title" id="prof-title">Wanderer</div>
+            <span class="profile-badge" id="prof-rank-badge">Rank: Wanderer</span>
+          </div>
+          <div class="profile-detail-card"><div class="profile-detail-label">Race</div><div class="profile-detail-value" id="prof-race">—</div><div class="profile-detail-sub" id="prof-race-attr">—</div></div>
+          <div class="profile-detail-card"><div class="profile-detail-label">Class</div><div class="profile-detail-value gold" id="prof-class">—</div><div class="profile-detail-sub" id="prof-class-role">—</div></div>
+          <span class="deity-label">DEITY</span>
+          <div class="deity-card">
+            <div class="deity-art" id="prof-deity-art" style="display:none;"></div>
+            <div class="deity-label-wrap">
+              <div class="deity-label" id="prof-deity">—</div>
+              <div class="deity-label-sub" id="prof-deity-title">—</div>
+            </div>
+          </div>
+          <div class="profile-detail-card"><div class="profile-detail-label">Blessing</div><div class="profile-detail-value" id="prof-blessing">—</div><div class="profile-detail-sub" id="prof-blessing-desc">—</div></div>
+          <div class="profile-detail-card"><div class="profile-detail-label">Kingdom</div><div class="profile-detail-value" id="prof-kingdom">—</div><div class="profile-detail-sub" id="prof-continent">—</div></div>
+          <div class="profile-detail-card"><div class="profile-detail-label">Profession</div><div class="profile-detail-value" id="prof-profession">None yet</div></div>
+          <div class="profile-detail-card"><div class="profile-detail-label">Faction</div><div class="profile-detail-value" id="prof-faction">None yet</div></div>
+          <div class="profile-detail-card"><div class="profile-detail-label">Companion</div><div class="profile-detail-value" id="prof-companion">None yet</div><div class="profile-detail-sub">Unlocks at Follower rank</div></div>
+        </div>
+        <div class="profile-right">
+          <div class="card" style="margin-bottom:12px">
+            <div class="card-title">STATS <span id="points-badge" class="points-badge"><span id="s-points">20</span> points available</span></div>
+            <p class="stat-alloc-hint" id="alloc-hint">You have unallocated stat points. Distribute them below.</p>
+            <div class="stat-alloc-grid">
+              <div class="stat-alloc-row"><div class="stat-alloc-info"><span class="stat-alloc-name">Strength</span><span class="stat-alloc-desc">Melee / non-magic damage</span></div><div class="stat-alloc-controls"><button class="stat-btn" onclick="allocStat('str',-1)">−</button><span class="stat-alloc-val" id="a-str">10</span><button class="stat-btn" onclick="allocStat('str',1)">+</button></div></div>
+              <div class="stat-alloc-row"><div class="stat-alloc-info"><span class="stat-alloc-name">Intelligence</span><span class="stat-alloc-desc">Magic damage</span></div><div class="stat-alloc-controls"><button class="stat-btn" onclick="allocStat('int',-1)">−</button><span class="stat-alloc-val" id="a-int">10</span><button class="stat-btn" onclick="allocStat('int',1)">+</button></div></div>
+              <div class="stat-alloc-row"><div class="stat-alloc-info"><span class="stat-alloc-name">Defense</span><span class="stat-alloc-desc">Damage reduction</span></div><div class="stat-alloc-controls"><button class="stat-btn" onclick="allocStat('def',-1)">−</button><span class="stat-alloc-val" id="a-def">10</span><button class="stat-btn" onclick="allocStat('def',1)">+</button></div></div>
+              <div class="stat-alloc-row"><div class="stat-alloc-info"><span class="stat-alloc-name">Dexterity</span><span class="stat-alloc-desc">Melee damage &amp; turn order</span></div><div class="stat-alloc-controls"><button class="stat-btn" onclick="allocStat('dex',-1)">−</button><span class="stat-alloc-val" id="a-dex">10</span><button class="stat-btn" onclick="allocStat('dex',1)">+</button></div></div>
+            </div>
+            <button class="btn-primary" id="btn-save-stats" style="margin-top:16px;display:none" onclick="saveStats()">SAVE STAT ALLOCATION</button>
+          </div>
+          <div class="card" style="margin-bottom:12px">
+            <div class="card-title">VITALS &amp; PROGRESSION</div>
+            <table class="stats-table">
+              <tr><td>Health</td><td id="s-hp">100 / 100</td></tr>
+              <tr><td>Mana</td><td id="s-mana">50 / 50</td></tr>
+              <tr><td>Gold</td><td id="s-gold">100</td></tr>
+              <tr><td>EXP</td><td id="s-xp">0 / 100</td></tr>
+              <tr><td>Faith Level</td><td id="s-faith">0</td></tr>
+              <tr><td>Reputation</td><td id="s-rep">0</td></tr>
+            </table>
+          </div>
+          <div class="card" style="margin-bottom:12px">
+            <div class="card-title">EQUIPMENT</div>
+            <div class="equip-slots">
+              <div class="equip-slot">
+                <div class="equip-slot-label">Weapon</div>
+                <div style="display:flex;align-items:center;gap:8px;justify-content:center">
+                  <div class="equip-slot-value" id="equip-weapon">— None —</div>
+                  <button class="btn-secondary" style="font-size:0.65rem;padding:4px 10px;" onclick="openEquipModal('weapon')">Change</button>
+                </div>
+              </div>
+              <div class="equip-slot">
+                <div class="equip-slot-label">Armor</div>
+                <div style="display:flex;align-items:center;gap:8px;justify-content:center">
+                  <div class="equip-slot-value" id="equip-armor">— None —</div>
+                  <button class="btn-secondary" style="font-size:0.65rem;padding:4px 10px;" onclick="openEquipModal('armor')">Change</button>
+                </div>
+              </div>
+            <!-- EQUIP MODAL -->
+            <div class="equip-modal" id="equip-modal" style="display:none">
+              <div class="equip-modal-box">
+                <div class="equip-modal-title" id="equip-modal-title">Equip Item</div>
+                <div class="equip-modal-list" id="equip-modal-list">
+                  <!-- Items will be injected here -->
+                </div>
+                <div class="equip-modal-actions">
+                  <button class="btn-primary" id="btn-equip-confirm" disabled>Equip</button>
+                  <button class="btn-secondary" onclick="closeEquipModal()">Cancel</button>
+                </div>
+                <div class="form-error" id="equip-modal-error" style="margin-top:8px"></div>
+              </div>
+            </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title">BACKGROUND</div>
+            <div class="profile-bio-row"><span class="profile-bio-label">Name</span><span id="prof-name-display">—</span><button class="btn-ghost" style="margin-left:auto;font-size:0.6rem" onclick="toggleNameEdit()">✏️ Edit</button></div>
+            <div id="name-edit-row" style="display:none;margin-bottom:10px">
+              <p style="font-family:var(--font-mono);font-size:0.6rem;color:var(--gold-dim);margin-bottom:8px" id="name-change-hint">First change is free · 100 gold thereafter · 30-day cooldown</p>
+              <div style="display:flex;gap:8px;align-items:center">
+                <input class="field-input" type="text" id="new-name-input" maxlength="30" placeholder="New character name..." style="flex:1;padding:8px 12px;font-size:0.9rem"/>
+                <button class="btn-primary" style="width:auto;padding:8px 16px;font-size:0.65rem" onclick="saveNameChange()">SAVE</button>
+                <button class="btn-secondary" style="padding:8px 12px;font-size:0.65rem" onclick="toggleNameEdit()">✕</button>
+              </div>
+              <div class="form-error" id="name-change-error" style="margin-top:4px"></div>
+            </div>
+            <div class="profile-bio-row"><span class="profile-bio-label">Sex</span><span id="prof-sex">—</span></div>
+            <div class="profile-bio-row"><span class="profile-bio-label">Age</span><span id="prof-age">—</span></div>
+            <div style="margin-top:12px">
+              <div class="profile-bio-row" style="margin-bottom:6px"><span class="profile-bio-label">Bio</span><button class="btn-ghost" style="margin-left:auto;font-size:0.6rem" onclick="toggleBioEdit()">✏️ Edit</button></div>
+              <p style="font-size:0.88rem;color:var(--text-dim);font-style:italic;line-height:1.7" id="prof-bio">No history written yet.</p>
+              <div id="bio-edit-row" style="display:none;margin-top:8px">
+                <textarea class="field-input" id="new-bio-input" rows="4" maxlength="500" placeholder="Describe your character..." style="font-size:0.88rem"></textarea>
+                <div style="display:flex;gap:8px;margin-top:8px">
+                  <button class="btn-primary" style="width:auto;padding:8px 16px;font-size:0.65rem" onclick="saveBioChange()">SAVE BIO</button>
+                  <button class="btn-secondary" style="padding:8px 12px;font-size:0.65rem" onclick="toggleBioEdit()">CANCEL</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SKILLS -->
+    <div class="panel" id="panel-skills">
+      <div class="panel-header"><h2>SKILL TREE</h2><p id="skills-subtitle">Unlock skills as you ascend through the ranks.</p></div>
+      <div class="skills-legend">
+        <span class="skill-legend-item"><span class="skill-dot unlocked"></span> Unlocked</span>
+        <span class="skill-legend-item"><span class="skill-dot locked"></span> Locked</span>
+        <span class="skill-legend-item"><span class="skill-dot basic"></span> Basic (Wanderer)</span>
+        <span class="skill-legend-item"><span class="skill-dot inter"></span> Intermediate (Follower)</span>
+        <span class="skill-legend-item"><span class="skill-dot advanced"></span> Advanced (Disciple)</span>
+      </div>
+      <div id="skill-tree-container"></div>
+
+      <!-- ══ STANCES ══ -->
+      <div class="stances-section" id="stances-section" style="margin-top:32px">
+        <div class="stances-header">
+          <div>
+            <div class="stances-title">⚔ STANCES</div>
+            <div class="stances-subtitle">Build up to 3 custom skill sets. Choose one before entering any battle.</div>
+          </div>
+        </div>
+
+        <!-- Stance Editor Modal -->
+        <div class="stance-editor-overlay" id="stance-editor-overlay" style="display:none">
+          <div class="stance-editor-box">
+            <div class="stance-editor-title" id="stance-editor-title">EDIT STANCE</div>
+            <div class="stance-editor-namewrap">
+              <label class="stance-editor-label">STANCE NAME</label>
+              <input class="stance-editor-name-input" id="stance-name-input" type="text" maxlength="24" placeholder="e.g. Glass Cannon..."/>
+            </div>
+            <div class="stance-editor-label" style="margin-bottom:8px">SELECT SKILLS <span class="stance-editor-hint">(choose up to 4)</span></div>
+            <div class="stance-skill-pool" id="stance-skill-pool"></div>
+            <div class="stance-editor-actions">
+              <button class="btn-primary" onclick="saveStanceEdit()">SAVE STANCE</button>
+              <button class="btn-secondary" onclick="closeStanceEditor()">CANCEL</button>
+            </div>
+            <div class="form-error" id="stance-editor-error" style="margin-top:8px"></div>
+          </div>
+        </div>
+
+        <!-- The 3 stance cards -->
+        <div class="stances-grid" id="stances-grid">
+          <!-- Rendered by JS -->
+        </div>
+
+        <!-- Active stance display (shown when one is selected) -->
+        <div class="stance-active-bar" id="stance-active-bar" style="display:none">
+          <span class="stance-active-label">ACTIVE STANCE:</span>
+          <span class="stance-active-name" id="stance-active-name">—</span>
+          <button class="stance-clear-btn" onclick="clearActiveStance()">✕ CLEAR</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- INVENTORY -->
+    <div class="panel" id="panel-inventory">
+      <div class="panel-header"><h2>INVENTORY</h2><p>Items gathered on your journey</p></div>
+      <div class="inv-tabs">
+        <button class="inv-tab active" onclick="filterInv(this,'all')">All</button>
+        <button class="inv-tab" onclick="filterInv(this,'consumable')">Consumables</button>
+        <button class="inv-tab" onclick="filterInv(this,'material')">Materials</button>
+        <button class="inv-tab" onclick="filterInv(this,'equipment')">Equipment</button>
+        <button class="inv-tab" onclick="filterInv(this,'quest')">Quest Items</button>
+      </div>
+      <div class="card" style="margin-bottom:16px"><div class="inventory-grid" id="inventory-grid"></div></div>
+      <div class="card">
+        <div class="card-title">DEITY ADVANCEMENT INGREDIENTS <span style="font-family:var(--font-mono);font-size:0.58rem;color:var(--text-dim);float:right;font-weight:400">Required for rank ascension</span></div>
+        <div id="deity-ingredients"></div>
+      </div>
+    </div>
+
+    <!-- WORLD MAP -->
+    <div class="panel" id="panel-map">
+      <div class="panel-header"><h2>WORLD MAP</h2><p>Four continents. Countless legends waiting to be written.</p></div>
+
+      <!-- Travel status bar -->
+      <div class="travel-status" id="travel-status">
+        <div class="travel-status-icon">🚶</div>
+        <div class="travel-status-info">
+          <div class="travel-status-label">Currently Traveling To</div>
+          <div class="travel-status-dest" id="travel-dest-name">—</div>
+          <div class="travel-progress"><div class="travel-progress-fill" id="travel-progress-fill" style="width:0%"></div></div>
+        </div>
+        <div class="travel-timer" id="travel-timer-display">—</div>
+      </div>
+
+      <!-- Layered map container -->
+      <div id="layered-map-container" style="width:100%;height:560px;border-radius:var(--radius);overflow:hidden;"></div>
+    </div>
+
+
+    <!-- RP CHAT -->
+    <div class="panel" id="panel-chat">
+      <div class="panel-header"><h2>RP CHAT</h2><p>Roleplay and chat with others in your current location</p></div>
+
+      <!-- Location bar -->
+      <div class="chat-location-bar">
+        <span class="chat-location-icon" id="chat-loc-icon">📍</span>
+        <div>
+          <div class="chat-location-name" id="chat-loc-name">Loading location...</div>
+          <div class="chat-location-sub">Only players in the same location can see this chat</div>
+        </div>
+        <span class="chat-online" id="chat-online">● Online</span>
+      </div>
+
+      <!-- RP / General tabs -->
+      <div class="chat-tabs">
+        <button class="chat-tab active" id="tab-rp"      onclick="switchChatTab('rp')">📍 Location Chat</button>
+        <button class="chat-tab"        id="tab-general" onclick="switchChatTab('general')">🌍 General</button>
+      </div>
+
+      <!-- Active players / NPCs sidebar -->
+      <div class="chat-players-bar" id="chat-players-bar">
+        <div class="chat-sidebar-toggle" id="chat-sidebar-toggle">
+          <!-- Filled by JS: "All Players" / "All NPCs" toggle buttons -->
+          <button class="sidebar-tab-btn active" onclick="window._switchSidebarTab('players')">All Players</button>
+          <button class="sidebar-tab-btn"        onclick="window._switchSidebarTab('npcs')">All NPCs</button>
+        </div>
+        <div class="chat-players-list" id="chat-players-list"></div>
+        <div class="chat-npcs-list"    id="chat-npcs-list" style="display:none"></div>
+      </div>
+
+      <!-- Messages -->
+      <div class="chat-window">
+        <!-- Mention jump button (hidden by default) -->
+        <div id="mention-jump-btn" class="mention-jump-btn" style="display:none;">
+          <span>@</span>
+          <span id="mention-jump-badge" class="mention-jump-badge" style="display:none;">1</span>
+        </div>
+        <div class="chat-messages" id="chat-messages">
+          <div class="chat-empty"><span>✦</span><span>The world awaits your words...</span></div>
+        </div>
+        <div class="chat-input-area">
+          <div id="replying-to" class="replying-to" style="display:none;"></div>
+          <div class="chat-input-inner">
+            <textarea class="chat-input" id="chat-input" placeholder="Speak your truth into the world..." rows="1"
+              onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();window._sendChat?.()}"></textarea>
+            <button class="chat-send-btn" onclick="window._sendChat?.()">SEND</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Player action menu -->
+      <div class="player-popup" id="player-action-popup" style="display:none" onclick="closePlayerPopup()">
+        <div class="player-popup-inner" onclick="event.stopPropagation()">
+          <div class="player-popup-actions">
+            <button class="popup-action-btn" onclick="playerAction('speak')">💬 Speak</button>
+            <button class="popup-action-btn" onclick="playerAction('trade')">🔄 Trade</button>
+            <button class="popup-action-btn" onclick="playerAction('duel')">⚔️ Duel</button>
+          </div>
+        </div>
+      </div>
+
+
+    </div>
+
+    <!-- PROFESSION -->
+    <div class="panel" id="panel-profession">
+      <div class="panel-header"><h2>PROFESSION</h2><p>Your craft in the world — gather resources and grow your mastery</p></div>
+      <div id="profession-pick-section">
+        <p style="font-size:0.9rem;color:var(--text-dim);font-style:italic;margin-bottom:20px">Choose one profession. This determines what resources you can gather.</p>
+        <div class="profession-grid">
+          <div class="profession-card" data-prof="Miner"     onclick="selectProfession(this,'Miner')">
+            <div class="profession-icon">⛏️</div>
+            <div class="profession-name">MINER</div>
+            <div class="profession-desc">Explore caves and underground networks to excavate precious ores and runestones.</div>
+            <div class="profession-confirm-row" id="prof-confirm-miner" style="display:none"><button class="btn-primary profession-confirm-btn" id="btn-choose-profession" onclick="event.stopPropagation();confirmProfession()">CONFIRM</button></div>
+          </div>
+          <div class="profession-card" data-prof="Forager"   onclick="selectProfession(this,'Forager')">
+            <div class="profession-icon">🌿</div>
+            <div class="profession-name">FORAGER</div>
+            <div class="profession-desc">Forest exploration to acquire all sorts of fruits and wild finds.</div>
+            <div class="profession-confirm-row" id="prof-confirm-forager" style="display:none"><button class="btn-primary profession-confirm-btn" onclick="event.stopPropagation();confirmProfession()">CONFIRM</button></div>
+          </div>
+          <div class="profession-card" data-prof="Angler"    onclick="selectProfession(this,'Angler')">
+            <div class="profession-icon">🎣</div>
+            <div class="profession-name">ANGLER</div>
+            <div class="profession-desc">Cast your line and reel in aquatic resources from rivers, lakes and seas.</div>
+            <div class="profession-confirm-row" id="prof-confirm-angler" style="display:none"><button class="btn-primary profession-confirm-btn" onclick="event.stopPropagation();confirmProfession()">CONFIRM</button></div>
+          </div>
+          <div class="profession-card" data-prof="Herbalist" onclick="selectProfession(this,'Herbalist')">
+            <div class="profession-icon">🌱</div>
+            <div class="profession-name">HERBALIST</div>
+            <div class="profession-desc">Gather special roots, branches and herbs used in potions and rituals.</div>
+            <div class="profession-confirm-row" id="prof-confirm-herbalist" style="display:none"><button class="btn-primary profession-confirm-btn" onclick="event.stopPropagation();confirmProfession()">CONFIRM</button></div>
+          </div>
+          <div class="profession-card" data-prof="Hunter"    onclick="selectProfession(this,'Hunter')">
+            <div class="profession-icon">🏹</div>
+            <div class="profession-name">HUNTER</div>
+            <div class="profession-desc">Hunt animals for their meat, bones, hides and other valuable drops.</div>
+            <div class="profession-confirm-row" id="prof-confirm-hunter" style="display:none"><button class="btn-primary profession-confirm-btn" onclick="event.stopPropagation();confirmProfession()">CONFIRM</button></div>
+          </div>
+        </div>
+      </div>
+      <div id="profession-active-section" style="display:none">
+        <div class="prof-exp-section">
+          <div class="prof-exp-header">
+            <div><div class="prof-exp-name" id="active-prof-name">—</div><div style="font-size:0.78rem;color:var(--text-dim);font-style:italic;margin-top:2px" id="active-prof-desc">—</div></div>
+            <div class="prof-exp-level" id="active-prof-level">Level 0</div>
+          </div>
+          <div class="prof-exp-bar-wrap">
+            <div class="prof-exp-bar"><div class="prof-exp-fill" id="prof-exp-fill" style="width:0%"></div></div>
+            <div class="prof-exp-label"><span id="prof-exp-current">0</span><span id="prof-exp-max">/ 100 EXP</span></div>
+          </div>
+          <div class="prof-find-rates">
+            <div class="prof-find-rates-title">Resource Find Rates at Current Level</div>
+            <div class="rarity-bars">
+              <div class="rarity-row"><span class="rarity-label">Common</span><div class="rarity-bar-outer"><div class="rarity-bar-fill common" id="rate-common" style="width:80%"></div></div><span class="rarity-pct" id="pct-common">80%</span></div>
+              <div class="rarity-row"><span class="rarity-label">Uncommon</span><div class="rarity-bar-outer"><div class="rarity-bar-fill uncommon" id="rate-uncommon" style="width:20%"></div></div><span class="rarity-pct" id="pct-uncommon">20%</span></div>
+              <div class="rarity-row"><span class="rarity-label">Rare</span><div class="rarity-bar-outer"><div class="rarity-bar-fill rare" id="rate-rare" style="width:0%"></div></div><span class="rarity-pct" id="pct-rare">0%</span></div>
+              <div class="rarity-row"><span class="rarity-label">Legendary</span><div class="rarity-bar-outer"><div class="rarity-bar-fill legendary" id="rate-legendary" style="width:0%"></div></div><span class="rarity-pct" id="pct-legendary">0%</span></div>
+              <div class="rarity-row"><span class="rarity-label">Mythic</span><div class="rarity-bar-outer"><div class="rarity-bar-fill mythic" id="rate-mythic" style="width:0%"></div></div><span class="rarity-pct" id="pct-mythic">0%</span></div>
+            </div>
+          </div>
+          <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+            <div style="font-family:var(--font-mono);font-size:0.6rem;letter-spacing:0.12em;color:var(--text-dim);text-transform:uppercase;margin-bottom:8px">Resource Find Count Per Outing</div>
+            <div style="font-size:0.85rem;color:var(--text-dim)" id="prof-find-count">—</div>
+          </div>
+          <!-- Weekly Profession Quota -->
+          <div style="margin-top:24px;padding-top:16px;border-top:2px solid var(--border)">
+            <div style="font-family:var(--font-mono);font-size:0.7rem;letter-spacing:0.12em;color:var(--text-dim);text-transform:uppercase;margin-bottom:8px">WEEKLY PROFESSION QUOTA</div>
+            <div id="quota-desc" style="font-size:0.9rem;color:var(--text-dim);margin-bottom:8px">Submit required materials by rarity each week to maintain your profession level.</div>
+            <div id="quota-table" style="margin-bottom:8px"></div>
+            <div id="quota-progress-msg" style="font-size:0.85rem;color:var(--text-dim);margin-bottom:8px"></div>
+            <button class="btn-primary" id="btn-submit-quota" onclick="window.submitProfessionQuota?.()" style="max-width:220px;margin-bottom:8px">SUBMIT MATERIALS</button>
+            <div id="quota-penalty-msg" style="font-size:0.85rem;color:#c94c4c;display:none"></div>
+            <div id="quota-bonus-msg" style="font-size:0.85rem;color:#70c090;display:none"></div>
+          </div>
+          <!-- Gather button -->
+          <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+            <button class="btn-primary" id="btn-gather" onclick="window._doGather?.()" style="max-width:220px">
+              ⛏️ GATHER RESOURCES
+            </button>
+            <div class="gather-log" id="gather-log" style="margin-top:14px;display:none"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MARKET -->
+    <div class="panel" id="panel-market">
+      <div class="panel-header"><h2>MARKETPLACE</h2><p>Buy from NPC vendors or trade with other players</p></div>
+      <div class="market-tabs">
+        <button class="market-tab active" onclick="switchMarketTab(this,'npc')">NPC Vendors</button>
+        <button class="market-tab" onclick="switchMarketTab(this,'player')">Player Market</button>
+      </div>
+      <div id="market-npc">
+        <div id="npc-market-success-msg" class="market-success-msg" style="display:none;"></div>
+        <div class="npc-vendor-grid">
+          <div class="vendor-card">
+            <div class="vendor-card-header"><span class="vendor-icon">🔨</span><div><div class="vendor-name">BLACKSMITH</div><div class="vendor-role">Converts ores into gear</div></div></div>
+            <div class="vendor-items">
+              <div class="vendor-item"><span class="vendor-item-name">Rusted Greatsword</span><span class="vendor-item-price">220 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Rusted Greatsword','⚔️',220,'weapon')">BUY</button></div>
+              <div class="vendor-item"><span class="vendor-item-name">Iron Dagger</span><span class="vendor-item-price">200 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Iron Dagger','🗡️',200,'weapon')">BUY</button></div>
+              <div class="vendor-item"><span class="vendor-item-name">Crude Bow</span><span class="vendor-item-price">210 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Crude Bow','🏹',210,'weapon')">BUY</button></div>
+              <div class="vendor-item"><span class="vendor-item-name">Leather Vest</span><span class="vendor-item-price">200 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Leather Vest','🥋',200,'armor')">BUY</button></div>
+              <div class="vendor-item"><span class="vendor-item-name">Iron Plate</span><span class="vendor-item-price">230 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Iron Plate','🛡️',230,'armor')">BUY</button></div>
+            </div>
+          </div>
+          <div class="vendor-card">
+            <div class="vendor-card-header"><span class="vendor-icon">⚗️</span><div><div class="vendor-name">ALCHEMIST</div><div class="vendor-role">Potions &amp; elixirs</div></div></div>
+            <div class="vendor-items">
+              <div class="vendor-item"><span class="vendor-item-name">Minor HP Potion</span><span class="vendor-item-price">50 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Minor HP Potion','🧪',50,'consumable')">BUY</button></div>
+              <div class="vendor-item"><span class="vendor-item-name">Standard HP Potion</span><span class="vendor-item-price">125 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Standard HP Potion','🧪',125,'consumable')">BUY</button></div>
+              <div class="vendor-item"><span class="vendor-item-name">Minor Mana Potion</span><span class="vendor-item-price">50 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Minor Mana Potion','💧',50,'consumable')">BUY</button></div>
+              <div class="vendor-item"><span class="vendor-item-name">Minor Luck Potion</span><span class="vendor-item-price">50 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Minor Luck Potion','🍀',50,'consumable')">BUY</button></div>
+              <div class="vendor-item"><span class="vendor-item-name">Minor EXP Potion</span><span class="vendor-item-price">50 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Minor EXP Potion','✨',50,'consumable')">BUY</button></div>
+            </div>
+          </div>
+          <div class="vendor-card">
+            <div class="vendor-card-header"><span class="vendor-icon">🍳</span><div><div class="vendor-name">COOK</div><div class="vendor-role">Stat-boosting foods</div></div></div>
+            <div class="vendor-items">
+              <div class="vendor-item"><span class="vendor-item-name">Grilled Meat Skewer</span><span class="vendor-item-price">30 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Grilled Meat Skewer','🍖',30,'consumable')">BUY</button></div>
+              <div class="vendor-item"><span class="vendor-item-name">Herb Fish Soup</span><span class="vendor-item-price">30 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Herb Fish Soup','🍲',30,'consumable')">BUY</button></div>
+              <div class="vendor-item"><span class="vendor-item-name">Roasted Carp</span><span class="vendor-item-price">30 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Roasted Carp','🐟',30,'consumable')">BUY</button></div>
+              <div class="vendor-item"><span class="vendor-item-name">Fried Sardine</span><span class="vendor-item-price">25 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Fried Sardine','🐟',25,'consumable')">BUY</button></div>
+            </div>
+          </div>
+          <div class="vendor-card">
+            <div class="vendor-card-header"><span class="vendor-icon">🔮</span><div><div class="vendor-name">MYSTIC VENDOR</div><div class="vendor-role">Rare system potions</div></div></div>
+            <div class="vendor-items">
+              <div class="vendor-item"><span class="vendor-item-name">Stat Reset Potion</span><span class="vendor-item-price">2,000 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Stat Reset Potion','🔄',2000,'consumable')">BUY</button></div>
+              <div class="vendor-item"><span class="vendor-item-name">Class Reset Potion</span><span class="vendor-item-price">5,000 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Class Reset Potion','⚗️',5000,'consumable')">BUY</button></div>
+              <div class="vendor-item"><span class="vendor-item-name">Race Rebirth Potion</span><span class="vendor-item-price">10,000 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Race Rebirth Potion','🌀',10000,'consumable')">BUY</button></div>
+              <div class="vendor-item"><span class="vendor-item-name">Divine Shift Potion</span><span class="vendor-item-price">15,000 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Divine Shift Potion','✨',15000,'consumable')">BUY</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="market-player" style="display:none">
+        <div id="player-market-success-msg" class="market-success-msg" style="display:none;"></div>
+        <div class="player-market-header">
+          <p style="font-size:0.85rem;color:var(--text-dim);font-style:italic">Buy and sell items with other players</p>
+          <button class="btn-primary" style="width:auto;padding:10px 24px" onclick="openSellModal()">+ LIST ITEM</button>
+        </div>
+        <div class="player-market-search" style="margin-bottom:12px;display:flex;gap:8px;align-items:center">
+          <input id="market-search-input" type="text" placeholder="Search for material or item..." class="market-search-themed" oninput="window.filterPlayerMarketListings()"/>
+        </div>
+        <div style="font-size:0.85rem;color:var(--text-dim);margin-bottom:8px">
+          <b>Price Brackets:</b> Common: 8–12 🪙, Uncommon: 18–25 🪙, Rare: 45–65 🪙, Legendary: 120–180 🪙, Mythic: 350–500 🪙, Food: 25–1200 🪙, Potions: 40–400 🪙
+        </div>
+        <div class="player-market-listings" id="player-listings">
+          <div class="listing-empty">No items listed yet. Be the first to sell something!</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- QUESTS -->
+    <div class="panel" id="panel-quests">
+      <div class="panel-header"><h2>QUEST BOARD</h2><p>Complete all daily quests for a bonus of +200 Coins</p></div>
+      <div class="quest-board-grid">
+        <div class="card">
+          <div class="card-title">DAILY QUESTS <span class="quest-reset-timer">Resets daily</span></div>
+          <div class="daily-quest-list" id="daily-quest-list">
+            <div class="daily-quest-item" data-quest="hunter"><div class="dq-check"></div><div class="dq-info"><div class="dq-name">Hunter's Routine</div><div class="dq-desc">Defeat 20 monsters</div><div class="dq-reward">↳ +10 EXP · +50 Coins · 1 Common Resource</div></div></div>
+            <div class="daily-quest-item" data-quest="gatherer"><div class="dq-check"></div><div class="dq-info"><div class="dq-name">Gatherer's Duty</div><div class="dq-desc">Collect 20 resources (any profession)</div><div class="dq-reward">↳ +10 EXP · +50 Coins · 1 Minor Potion</div></div></div>
+            <div class="daily-quest-item" data-quest="market"><div class="dq-check"></div><div class="dq-info"><div class="dq-name">Market Hustle</div><div class="dq-desc">Sell any 5 items on the market</div><div class="dq-reward">↳ +10 EXP · +60 Coins · 1 Common Food</div></div></div>
+            <div class="daily-quest-item" data-quest="potions"><div class="dq-check"></div><div class="dq-info"><div class="dq-name">Prepared Mind</div><div class="dq-desc">Use 2 potions</div><div class="dq-reward">↳ +10 EXP · +50 Coins · 1 Common Resource</div></div></div>
+            <div class="daily-quest-item" data-quest="food"><div class="dq-check"></div><div class="dq-info"><div class="dq-name">Gusto</div><div class="dq-desc">Consume two foods</div><div class="dq-reward">↳ +10 EXP · +50 Coins · 1 Minor Potion</div></div></div>
+            <div class="daily-quest-item" data-quest="explorer"><div class="dq-check"></div><div class="dq-info"><div class="dq-name">Explorer's Path</div><div class="dq-desc">Visit 3 different locations</div><div class="dq-reward">↳ +20 EXP · +80 Coins · 2 Common Resources</div></div></div>
+            <div class="daily-quest-item" data-quest="elite"><div class="dq-check"></div><div class="dq-info"><div class="dq-name">Elite Challenge</div><div class="dq-desc">Defeat 1 higher-grade enemy</div><div class="dq-reward">↳ +20 EXP · +100 Coins · 2 Common Resources</div></div></div>
+            <div class="quest-bonus-bar" id="quest-bonus-bar"><span>Complete all 7 daily quests for</span><span class="quest-bonus-reward">+200 Bonus Coins</span></div>
+          </div>
+          <div class="quest-completed-all" id="quest-completed-all">🎉 All daily quests complete! +200 Bonus Coins awarded.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">STORY QUESTS</div>
+          <div class="story-quests-section" id="story-quests-list">
+            <!-- Story quests will be rendered here by JS -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════ BATTLE ══════════════ -->
+
+    <!-- ACTIVITY FEED -->
+    <div class="panel" id="panel-activity">
+      <div class="panel-header"><h2>ACTIVITY FEED</h2><p>Events and happenings from your travels</p></div>
+      <div class="card">
+        <div class="card-title">RECENT EVENTS <span style="font-family:var(--font-mono);font-size:0.55rem;color:var(--text-dim);float:right;font-weight:400">Updates in real time as you explore</span></div>
+        <div id="activity-feed-list" style="display:flex;flex-direction:column;gap:6px;padding:4px 0;">
+          <div style="color:#555;font-size:12px;font-style:italic;padding:8px">No activity yet. Start exploring!</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════ BATTLE ══════════════ -->
+    <div class="panel" id="panel-battle">
+
+      <div class="panel-header">
+        <h2>BATTLE</h2>
+        <p id="battle-subtitle">Choose a battle mode and challenge monsters, bosses, or other players!</p>
+        <div id="battle-mode-selector" style="margin-top:18px;display:flex;gap:12px;justify-content:center">
+          <button class="btn-secondary" id="btn-mode-farming" onclick="window.setBattleMode('farming')">Farming</button>
+          <button class="btn-secondary" id="btn-mode-boss" onclick="window.setBattleMode('boss')">Boss Raid</button>
+        </div>
+      </div>
+
+      <!-- Encounter popup -->
+      <div id="encounter-popup" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9999;align-items:center;justify-content:center;">
+        <div style="background:var(--ink2);border:1.5px solid var(--border);border-radius:18px;padding:28px 28px;max-width:460px;width:92%;text-align:center;box-shadow:0 8px 40px #0008;">
+          <div id="encounter-monster-info">
+            <div style="font-size:0.7rem;letter-spacing:3px;color:var(--ash);text-transform:uppercase;margin-bottom:12px;">⚠ Monster Detected</div>
+            <div id="encounter-monster-emoji" style="width:100%;height:220px;margin:0 auto 14px;border-radius:14px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--ink3);border:2px solid var(--gold-dim);box-shadow:0 0 24px rgba(201,168,76,0.18)">👹</div>
+            <div id="encounter-monster-name" style="font-size:1.3rem;font-weight:700;color:var(--gold);margin-bottom:4px;">—</div>
+            <div id="encounter-monster-grade" style="font-size:0.85rem;font-weight:600;margin-bottom:4px;">Grade —</div>
+            <div id="encounter-monster-hp" style="font-size:0.8rem;color:var(--text-dim);margin-bottom:24px;">HP: —</div>
+            <!-- Step 1: FIGHT / RUN -->
+            <div id="encounter-action-btns" style="display:flex;flex-direction:column;gap:10px;">
+              <button class="btn-primary" onclick="window._confirmFight()">⚔️ FIGHT</button>
+              <button class="btn-secondary" style="opacity:0.7" onclick="window._closeEncounterPopup()">🐔 RUN AWAY (COWARD)</button>
+            </div>
+            <!-- Step 2: Inline stance picker removed; now uses global stance modal -->
+          </div>
+          <div id="encounter-loading" style="display:none;flex-direction:column;align-items:center;gap:18px;padding:10px 0;">
+            <div style="font-size:2.8rem" id="encounter-loading-emoji">⚔️</div>
+            <div style="font-size:1.1rem;font-weight:700;color:var(--gold);letter-spacing:2px;" id="encounter-loading-title">ENTERING BATTLEGROUND...</div>
+            <div style="width:100%;height:6px;background:rgba(255,255,255,0.08);border-radius:99px;overflow:hidden;margin-top:4px;">
+              <div id="encounter-loading-bar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--gold-dim),var(--gold));border-radius:99px;transition:width 0.15s linear;"></div>
+            </div>
+            <div style="font-size:0.78rem;color:var(--text-dim);font-style:italic;" id="encounter-loading-sub">Preparing the arena...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- STANCE SELECTION MODAL -->
+      <div id="stance-select-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.82);backdrop-filter:blur(4px);z-index:10000;align-items:center;justify-content:center;">
+        <div class="stance-select-box">
+          <div class="stance-select-mode-tag" id="stance-select-mode-tag">FARMING</div>
+          <div class="stance-select-title">CHOOSE YOUR STANCE</div>
+          <div class="stance-select-subtitle" id="stance-select-subtitle">Select a skill set before entering battle.</div>
+          <!-- No stances state -->
+          <div id="stance-select-empty" style="display:none;text-align:center;padding:20px 0 8px">
+            <div style="font-size:2rem;margin-bottom:10px">⚔️</div>
+            <div style="font-size:0.88rem;color:var(--text-dim);margin-bottom:18px;line-height:1.6">You haven't created any Stances yet.<br/>Go to <b style="color:var(--gold)">Skills</b> to build your first one.</div>
+            <button class="btn-primary" style="max-width:200px;margin:0 auto" onclick="window._stanceModalGoToSkills()">GO TO SKILLS</button>
+          </div>
+          <!-- Stances list -->
+          <div id="stance-select-list" class="stance-select-list"></div>
+          <div style="margin-top:16px;text-align:center">
+            <button class="btn-ghost" style="font-size:0.68rem;letter-spacing:0.08em;color:var(--text-dim)" onclick="window._closeStanceModal()">✕ CANCEL</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dead state -->
+      <div class="battle-dead-banner" id="battle-dead-banner" style="display:none">
+        <div class="battle-dead-icon">💀</div>
+        <div class="battle-dead-title">YOU HAVE FALLEN</div>
+        <div class="battle-dead-desc">You can resurrect after 24 hours. Half your inventory has been lost.</div>
+        <div class="battle-dead-timer" id="battle-dead-timer">—</div>
+        <button class="btn-primary" style="max-width:200px;margin-top:16px" id="btn-resurrect" onclick="attemptResurrect()">RESURRECT</button>
+      </div>
+
+      <!-- Zone select (Farming) -->
+      <div id="battle-zone-select">
+        <p style="font-size:0.88rem;color:var(--text-dim);font-style:italic;margin-bottom:4px">
+          Travel to a monster zone on the map, then come here to fight.
+        </p>
+        <div id="farming-location-hint" style="font-family:var(--font-mono);font-size:0.65rem;color:var(--gold-dim);margin-bottom:18px;letter-spacing:0.05em">📍 LOCATION: —</div>
+
+        <div class="zone-continent-header"><span class="zone-cont-badge">❄️ NORTHERN — FROSTVEIL</span></div>
+        <div class="zone-grid" style="margin-bottom:20px">
+          <div class="zone-card" data-grade="E" data-zone="Frostfang Valley" data-continent="Frostveil" onclick="selectZone(this,'E','Frostfang Valley')">
+            <div class="zone-grade grade-e">E</div>
+            <div class="zone-name">Frostfang Valley</div>
+            <div class="zone-desc">Blue-mane Wolves · Five-Fanged Bears</div>
+            <div class="zone-reward">10 EXP · 5-15 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="E" data-zone="Sheen Lake" data-continent="Frostveil" onclick="selectZone(this,'E','Sheen Lake')">
+            <div class="zone-grade grade-e">E</div>
+            <div class="zone-name">Sheen Lake</div>
+            <div class="zone-desc">Groundhog Turtles · Twin-faced Serpents</div>
+            <div class="zone-reward">10 EXP · 5-15 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="D" data-zone="Misty Hollow" data-continent="Frostveil" onclick="selectZone(this,'D','Misty Hollow')">
+            <div class="zone-grade grade-d">D</div>
+            <div class="zone-name">Misty Hollow</div>
+            <div class="zone-desc">Mist Phantom · Ice Ifrit · Water Wraith</div>
+            <div class="zone-reward">25 EXP · 15-40 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="C" data-zone="Dark Cathedral" data-continent="Frostveil" onclick="selectZone(this,'C','Dark Cathedral')">
+            <div class="zone-grade grade-c">C</div>
+            <div class="zone-name">Dark Cathedral</div>
+            <div class="zone-desc">Condemned Knight · Revenant Bishop · Penitent Priest</div>
+            <div class="zone-reward">60 EXP · 40-100 Gold</div>
+          </div>
+        </div>
+
+        <div class="zone-continent-header"><span class="zone-cont-badge">🌿 WESTERN — VERDANTIS</span></div>
+        <div class="zone-grid" style="margin-bottom:20px">
+          <div class="zone-card" data-grade="E" data-zone="Whispering Forest" data-continent="Verdantis" onclick="selectZone(this,'E','Whispering Forest')">
+            <div class="zone-grade grade-e">E</div>
+            <div class="zone-name">Whispering Forest</div>
+            <div class="zone-desc">Red-mane Wolves · Vicious Gremlins</div>
+            <div class="zone-reward">10 EXP · 5-15 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="E" data-zone="Golden Plains" data-continent="Verdantis" onclick="selectZone(this,'E','Golden Plains')">
+            <div class="zone-grade grade-e">E</div>
+            <div class="zone-name">Golden Plains</div>
+            <div class="zone-desc">Scavengers · Rampage Bulls</div>
+            <div class="zone-reward">10 EXP · 5-15 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="D" data-zone="Element Valley" data-continent="Verdantis" onclick="selectZone(this,'D','Element Valley')">
+            <div class="zone-grade grade-d">D</div>
+            <div class="zone-name">Element Valley</div>
+            <div class="zone-desc">Lightning Shrouds · Rock Golems · Flame Spirits</div>
+            <div class="zone-reward">25 EXP · 15-40 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="C" data-zone="Defiled Sanctum" data-continent="Verdantis" onclick="selectZone(this,'C','Defiled Sanctum')">
+            <div class="zone-grade grade-c">C</div>
+            <div class="zone-name">Defiled Sanctum</div>
+            <div class="zone-desc">Skeletal Beast · Ghoul Blatherer · Cursed Fiend</div>
+            <div class="zone-reward">60 EXP · 40-100 Gold</div>
+          </div>
+        </div>
+
+        <div class="zone-continent-header"><span class="zone-cont-badge zone-cont-danger">🔥 EASTERN — VORTHAK (DANGER)</span></div>
+        <div class="zone-grid" style="margin-bottom:20px">
+          <div class="zone-card" data-grade="B" data-zone="Ashen Wastes" data-continent="Vorthak" onclick="selectZone(this,'B','Ashen Wastes')">
+            <div class="zone-grade grade-b">B</div>
+            <div class="zone-name">Ashen Wastes</div>
+            <div class="zone-desc">Dark Sphinx · Blue Phoenix · Fallen Cyclops</div>
+            <div class="zone-reward">150 EXP · 100-250 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="B" data-zone="Infernal Reach" data-continent="Vorthak" onclick="selectZone(this,'B','Infernal Reach')">
+            <div class="zone-grade grade-b">B</div>
+            <div class="zone-name">Infernal Reach</div>
+            <div class="zone-desc">Cerberus · Blood Kraken</div>
+            <div class="zone-reward">150 EXP · 100-250 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="A" data-zone="Ruined Sanctum" data-continent="Vorthak" onclick="selectZone(this,'A','Ruined Sanctum')">
+            <div class="zone-grade grade-a">A</div>
+            <div class="zone-name">Ruined Sanctum</div>
+            <div class="zone-desc">Profane Priest · Corrupted Sage · Demonic Herald</div>
+            <div class="zone-reward">400 EXP · 250-600 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="A" data-zone="Blighted World" data-continent="Vorthak" onclick="selectZone(this,'A','Blighted World')">
+            <div class="zone-grade grade-a">A</div>
+            <div class="zone-name">Blighted World</div>
+            <div class="zone-desc">Abomination · Devil Centurion</div>
+            <div class="zone-reward">400 EXP · 250-600 Gold</div>
+          </div>
+        </div>
+
+        <div class="zone-continent-header"><span class="zone-cont-badge zone-cont-endgame">☠️ SOUTHERN — NYX ABYSS (ENDGAME)</span></div>
+        <div class="zone-grid" style="margin-bottom:20px">
+          <div class="zone-card" data-grade="S" data-zone="Void Chasm" data-continent="NyxAbyss" onclick="selectZone(this,'S','Void Chasm')">
+            <div class="zone-grade grade-s">S</div>
+            <div class="zone-name">Void Chasm</div>
+            <div class="zone-desc">Void Lurker · Oblivion Eye</div>
+            <div class="zone-reward">1200 EXP · 600-1500 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="S" data-zone="Abyssal Depths" data-continent="NyxAbyss" onclick="selectZone(this,'S','Abyssal Depths')">
+            <div class="zone-grade grade-s">S</div>
+            <div class="zone-name">Abyssal Depths</div>
+            <div class="zone-desc">Abyssal Eater · Chaoswalker</div>
+            <div class="zone-reward">1200 EXP · 600-1500 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="S" data-zone="Fallen Heaven" data-continent="NyxAbyss" onclick="selectZone(this,'S','Fallen Heaven')">
+            <div class="zone-grade grade-s">S</div>
+            <div class="zone-name">Fallen Heaven</div>
+            <div class="zone-desc">Godless Thing</div>
+            <div class="zone-reward">1200 EXP · 600-1500 Gold</div>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:12px;margin-top:8px;flex-wrap:wrap;align-items:center">
+          <button class="btn-primary" style="max-width:180px" id="btn-start-battle" onclick="startBattle()" disabled>⚔️ FIGHT</button>
+          <button class="btn-secondary" style="max-width:180px" id="btn-start-auto-battle" onclick="startAutoBattle()" disabled>🔄 AUTO-BATTLE</button>
+          <div id="zone-pool-status" style="display:none;font-family:var(--font-mono);font-size:0.65rem;color:var(--gold-dim)"></div>
+        </div>
+      </div>
+
+      <!-- Pool Exhausted Banner -->
+      <div id="zone-pool-exhausted" style="display:none;background:rgba(192,59,43,0.12);border:1px solid #c03b2b;border-radius:var(--radius);padding:20px 18px;margin-bottom:20px;text-align:center">
+        <div style="font-family:var(--font-display);font-size:1rem;color:#e07060;letter-spacing:0.08em;margin-bottom:6px">⚠️ MONSTER POOL EXHAUSTED</div>
+        <div style="font-size:0.82rem;color:var(--text-dim);margin-bottom:4px">You've cleared all monsters in <strong id="pool-exhausted-zone-name" style="color:var(--gold)">this zone</strong>.</div>
+        <div style="font-family:var(--font-mono);font-size:0.72rem;color:var(--text-dim);margin-bottom:16px">Monsters respawn in: <span id="pool-respawn-timer" style="color:#e07060;font-weight:700">10:00</span></div>
+        <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+          <button class="btn-secondary" style="font-size:0.72rem;padding:8px 16px" onclick="window._poolExhaustedChoice('wait')">⏳ Wait Here</button>
+          <button class="btn-secondary" style="font-size:0.72rem;padding:8px 16px" onclick="window._poolExhaustedChoice('change')">🗺️ Change Zone</button>
+          <button class="btn-secondary" style="font-size:0.72rem;padding:8px 16px" onclick="window._poolExhaustedChoice('stop')">🛑 Stop Farming</button>
+        </div>
+      </div>
+
+      <!-- Boss Raid UI (showBossSelect renders into this) -->
+      <div id="boss-raid-ui" style="display:none"></div>
+
+      <!-- Boss Raid Arena (shown during active raid) -->
+      <div id="boss-raid-arena" style="display:none;position:relative">
+        <div class="raid-boss-display">
+          <div id="raid-boss-emoji-avatar" style="font-size:3.2rem;flex-shrink:0">👹</div>
+          <div style="flex:1">
+            <div style="font-family:var(--font-display);font-size:1rem;color:var(--gold)" id="raid-boss-arena-name">—</div>
+            <div style="font-family:var(--font-mono);font-size:0.6rem;color:var(--text-dim);margin-bottom:6px" id="raid-boss-abilities-hint">—</div>
+            <div class="battle-bar-wrap">
+              <div class="battle-bar-label"><span>BOSS HP</span><span id="raid-boss-hp-text">—</span></div>
+              <div class="battle-bar monster-hp-bar"><div class="battle-bar-fill hp-fill" id="raid-boss-hp-fill" style="width:100%"></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="raid-party-combat-list" id="raid-party-rows"></div>
+        <div class="battle-log" id="raid-log" style="height:120px">
+          <div class="battle-log-entry">🔥 Raid begins...</div>
+        </div>
+        <div id="raid-turn-actions" class="battle-actions" style="display:none">
+          <button class="battle-action-btn melee" onclick="window.doRaidTurn('melee')">
+            <span class="battle-action-icon">⚔️</span><span>MELEE</span>
+          </button>
+          <button class="battle-action-btn skill" onclick="window.openRaidSkillMenu()">
+            <span class="battle-action-icon">✨</span><span>SKILL</span>
+          </button>
+        </div>
+        <div id="raid-waiting-msg" style="display:none;text-align:center;padding:14px;color:var(--text-dim);font-style:italic;font-size:0.85rem">
+          ⏳ Waiting for another party member...
+        </div>
+        <div class="skill-menu" id="raid-skill-menu" style="display:none">
+          <div class="skill-menu-title">CHOOSE A SKILL <button class="skill-menu-close" onclick="window.closeRaidSkillMenu()">✕</button></div>
+          <div class="skill-menu-list" id="raid-skill-list"></div>
+        </div>
+        <!-- Raid Result — fixed centered modal over the arena -->
+        <div id="raid-result" style="display:none;position:fixed;inset:0;z-index:500;background:rgba(8,8,12,0.88);backdrop-filter:blur(6px);align-items:center;justify-content:center;flex-direction:column;text-align:center;padding:40px 24px">
+          <div id="raid-result-icon" style="font-size:3.5rem;margin-bottom:14px">🏆</div>
+          <div id="raid-result-title" style="font-family:var(--font-display);font-size:1.4rem;color:var(--gold);letter-spacing:0.15em;margin-bottom:18px">—</div>
+          <div id="raid-result-log" style="display:flex;flex-direction:column;gap:8px;margin-bottom:28px;font-size:1rem"></div>
+          <button class="btn-primary" style="max-width:240px" onclick="window.resetBossRaid()">BACK TO RAIDS</button>
+        </div>
+      </div>
+
+
+      <!-- Active battle UI -->
+      <div id="battle-arena" style="display:none">
+        <!-- Monster art banner -->
+        <div id="battle-monster-art-wrap" style="width:100%;border-radius:14px;overflow:hidden;position:relative;margin-bottom:12px;background:var(--ink3);border:2px solid var(--gold-dim);box-shadow:0 0 28px rgba(201,168,76,0.15)">
+          <div id="monster-avatar-emoji" style="width:100%;display:flex;align-items:center;justify-content:center;font-size:4rem">👹</div>
+          <!-- Gradient overlay with name/grade -->
+          <div style="position:absolute;bottom:0;left:0;right:0;padding:14px 16px;background:linear-gradient(transparent,rgba(8,8,12,0.92));display:flex;align-items:flex-end;justify-content:space-between;">
+            <div>
+              <div class="battle-entity-name" id="monster-name" style="font-size:1.05rem;text-shadow:0 1px 4px #000">—</div>
+              <div class="battle-entity-grade" id="monster-grade" style="font-size:0.7rem;margin-top:2px">Grade —</div>
+            </div>
+            <div style="text-align:right">
+              <div class="battle-bar-label" style="justify-content:flex-end;margin-bottom:3px"><span style="color:var(--text-dim);font-size:0.6rem">HP</span><span id="monster-hp-text" style="color:var(--gold);font-size:0.6rem;margin-left:6px">—</span></div>
+              <div class="battle-bar monster-hp-bar" style="width:130px"><div class="battle-bar-fill hp-fill" id="monster-hp-fill" style="width:100%"></div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Player combatant row -->
+        <div class="battle-combatant" style="grid-template-columns:1fr;padding:14px 16px;gap:10px;">
+          <div class="battle-side battle-side-player" style="text-align:left;flex-direction:row;align-items:center;gap:12px">
+            <div class="battle-entity-avatar" id="player-battle-avatar" style="flex-shrink:0"></div>
+            <div style="flex:1">
+              <div class="battle-entity-name" id="battle-player-name">—</div>
+              <div class="battle-entity-grade" id="battle-player-rank">Wanderer</div>
+              <div class="battle-bar-wrap" style="margin-top:6px">
+                <div class="battle-bar-label"><span>HP</span><span id="player-hp-text">—</span></div>
+                <div class="battle-bar"><div class="battle-bar-fill hp-fill" id="player-hp-fill" style="width:100%"></div></div>
+              </div>
+              <div class="battle-bar-wrap" style="margin-top:4px">
+                <div class="battle-bar-label"><span>MP</span><span id="player-mp-text">—</span></div>
+                <div class="battle-bar"><div class="battle-bar-fill mp-fill" id="player-mp-fill" style="width:100%"></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Battle log -->
+        <div class="battle-log" id="battle-log">
+          <div class="battle-log-entry">⚔️ Battle begins...</div>
+        </div>
+
+        <!-- Auto-battle HUD (live mode) -->
+        <div id="auto-battle-hud" style="display:none;background:rgba(201,168,76,0.06);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;margin-bottom:12px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+            <div style="font-family:var(--font-display);font-size:0.72rem;letter-spacing:0.12em;color:var(--gold)">🔄 AUTO-BATTLE ACTIVE</div>
+            <div style="font-family:var(--font-mono);font-size:0.65rem;color:var(--text-dim)">Slain: <span id="auto-kill-count" style="color:var(--gold);font-weight:700">0</span> / <span id="auto-pool-size">?</span></div>
+          </div>
+          <div style="width:100%;height:5px;background:rgba(255,255,255,0.07);border-radius:99px;overflow:hidden;margin-bottom:12px">
+            <div id="auto-pool-fill" style="height:100%;width:0%;background:linear-gradient(90deg,var(--gold-dim),var(--gold));border-radius:99px;transition:width 0.4s ease"></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;font-size:0.74rem;color:var(--text-dim)">
+            <span>⚡ Skill:</span><span id="auto-current-skill" style="color:var(--gold);font-weight:600">—</span>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button id="auto-melee-toggle" class="btn-secondary" style="font-size:0.7rem;padding:7px 14px" onclick="window._toggleAutoBattleMelee()">⚔ MELEE ONLY: OFF</button>
+            <button class="btn-secondary" style="font-size:0.7rem;padding:7px 18px" onclick="window._stopAutoBattle()">🛑 STOP AUTO</button>
+          </div>
+        </div>
+
+        <!-- Auto-battle progress (legacy, hidden) -->
+        <div class="auto-battle-bar" id="auto-battle-bar" style="display:none">
+          <div class="auto-battle-label">Auto-battling...</div>
+          <div class="auto-battle-progress"><div class="auto-battle-fill" id="auto-battle-fill" style="width:0%"></div></div>
+        </div>
+
+        <!-- Actions -->
+        <div class="battle-actions" id="battle-actions">
+          <button class="battle-action-btn melee" onclick="doBattleTurn('melee')" id="btn-melee">
+            <span class="battle-action-icon">⚔️</span>
+            <span>MELEE</span>
+          </button>
+          <button class="battle-action-btn skill" onclick="openSkillMenu()" id="btn-skill">
+            <span class="battle-action-icon">⚔</span>
+            <span>STANCE</span>
+          </button>
+          <button class="battle-action-btn run" onclick="doBattleTurn('flee')" id="btn-run">
+            <span class="battle-action-icon">💨</span>
+            <span>RUN (-10g)</span>
+          </button>
+        </div>
+
+        <!-- Skill menu (hidden by default) -->
+        <div class="skill-menu" id="skill-menu" style="display:none">
+          <div class="skill-menu-title">CHOOSE A SKILL <button class="skill-menu-close" onclick="closeSkillMenu()">✕</button></div>
+          <div class="skill-menu-list" id="skill-menu-list"></div>
+        </div>
+      </div>
+
+      <!-- Battle result -->
+      <div class="battle-result" id="battle-result" style="display:none">
+        <div class="battle-result-icon" id="battle-result-icon">🏆</div>
+        <div class="battle-result-title" id="battle-result-title">Victory!</div>
+        <div class="battle-result-log" id="battle-result-log"></div>
+        <button class="btn-primary" style="max-width:220px;margin-top:16px" onclick="resetBattle()">FIGHT AGAIN</button>
+      </div>
+    </div>
+
+    <!-- ══════════════ CRAFTING ══════════════ -->
+    <div class="panel" id="panel-crafting">
+      <div class="panel-header">
+        <h2>CRAFTING</h2>
+        <p>Submit materials to NPC craftsmen to forge equipment, potions and food</p>
+      </div>
+      <!-- Collapsible Crafting Sections -->
+      <div class="craft-accordion">
+        <!-- Equipment Section -->
+        <div class="accordion-item">
+          <button class="accordion-header" type="button" onclick="toggleAccordion(this)">🛡️ Equipment <span class="accordion-arrow">▼</span></button>
+          <div class="accordion-panel">
+            <div class="accordion-subtabs" id="equipment-grade-tabs">
+              <button class="subtab active" onclick="switchEquipmentGradeTab(this,'E')">Grade E</button>
+              <button class="subtab" onclick="switchEquipmentGradeTab(this,'D')">Grade D</button>
+              <button class="subtab" onclick="switchEquipmentGradeTab(this,'C')">Grade C</button>
+              <button class="subtab" onclick="switchEquipmentGradeTab(this,'B')">Grade B</button>
+              <button class="subtab" onclick="switchEquipmentGradeTab(this,'A')">Grade A</button>
+              <button class="subtab" onclick="switchEquipmentGradeTab(this,'S')">Grade S</button>
+            </div>
+            <div class="recipe-grid" id="recipes-equipment"></div>
+          </div>
+        </div>
+        <!-- Foods Section -->
+        <div class="accordion-item">
+          <button class="accordion-header" type="button" onclick="toggleAccordion(this)">🍳 Foods <span class="accordion-arrow">▼</span></button>
+          <div class="accordion-panel">
+            <div class="accordion-subtabs" id="food-type-tabs">
+              <button class="subtab active" onclick="switchFoodTypeTab(this,'STRENGTH FOODS')">STRENGTH FOODS</button>
+              <button class="subtab" onclick="switchFoodTypeTab(this,'INTELLIGENCE FOODS')">INTELLIGENCE FOODS</button>
+              <button class="subtab" onclick="switchFoodTypeTab(this,'DEFENSE FOODS')">DEFENSE FOODS</button>
+              <button class="subtab" onclick="switchFoodTypeTab(this,'DEXTERITY FOODS')">DEXTERITY FOODS</button>
+            </div>
+            <div class="recipe-grid" id="recipes-food"></div>
+          </div>
+        </div>
+        <!-- Potions Section -->
+        <div class="accordion-item">
+          <button class="accordion-header" type="button" onclick="toggleAccordion(this)">⚗️ Potions <span class="accordion-arrow">▼</span></button>
+          <div class="accordion-panel">
+            <div class="accordion-subtabs" id="potion-type-tabs">
+              <button class="subtab active" onclick="switchPotionTypeTab(this,'HP')">HP</button>
+              <button class="subtab" onclick="switchPotionTypeTab(this,'Mana')">Mana</button>
+              <button class="subtab" onclick="switchPotionTypeTab(this,'Luck')">Luck</button>
+              <button class="subtab" onclick="switchPotionTypeTab(this,'Insight')">Insight</button>
+              <button class="subtab" onclick="switchPotionTypeTab(this,'Other')">Other</button>
+            </div>
+            <div class="recipe-grid" id="recipes-potion"></div>
+          </div>
+        </div>
+        <!-- Enchantments Section -->
+        <div class="accordion-item">
+          <button class="accordion-header" type="button" onclick="toggleAccordion(this)">💎 Enchantments <span class="accordion-arrow">▼</span></button>
+          <div class="accordion-panel">
+            <div class="enchant-form">
+              <div class="field-group" style="margin-bottom:14px">
+                <label class="field-label">Select Equipment to Enchant</label>
+                <select class="field-input field-input-select" id="enchant-item-select" style="cursor:pointer">
+                  <option value="">Choose from inventory...</option>
+                </select>
+              </div>
+              <div class="enchant-info" id="enchant-info" style="display:none">
+                <div class="enchant-info-row"><span>Current Level</span><span id="enchant-current-level">+0</span></div>
+                <div class="enchant-info-row"><span>Success Rate</span><span id="enchant-success-rate">—</span></div>
+                <div class="enchant-info-row"><span>Runestones Needed</span><span id="enchant-stones-needed">—</span></div>
+                <div class="enchant-info-row"><span>Gold Cost</span><span id="enchant-gold-cost">—</span></div>
+              </div>
+              <div class="form-error" id="enchant-error" style="margin-bottom:8px"></div>
+              <button class="btn-primary" style="max-width:220px" id="btn-enchant" onclick="doEnchant()" disabled>✨ ENCHANT</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  // ── Core functions defined FIRST so dashboard.js can call them ──
+  let _tt;
+  window.showToast = function(msg, type='') {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.className = 'toast show ' + type;
+    clearTimeout(_tt); _tt = setTimeout(() => t.classList.remove('show'), 3200);
+  };
+
+  window.renderInventory = function(items) {
+    const grid = document.getElementById('inventory-grid');
+    if (!grid) return;
+    grid.innerHTML = '';
+    if (!items.length) {
+      grid.innerHTML = `<div class="inv-empty">No items here.<div class="inv-empty-sub">Defeat monsters and gather resources to fill your inventory.</div></div>`;
+      return;
+    }
+    items.forEach(item => {
+      const el = document.createElement('div');
+      el.className = 'inv-item';
+      el.innerHTML = `<div class="inv-item-icon">${item.icon||'📦'}</div><div class="inv-item-name">${item.name}</div><div class="inv-item-qty">×${item.qty}</div>`;
+      grid.appendChild(el);
+    });
+    for (let i = 0; i < Math.max(0, 12 - items.length); i++) {
+      const el = document.createElement('div');
+      el.className = 'inv-item';
+      el.style.cssText = 'opacity:0.15;border-style:dashed;cursor:default';
+      el.innerHTML = `<div style="font-size:1rem;color:var(--ash)">+</div>`;
+      grid.appendChild(el);
+    }
+  };
+
+  function toggleNav() {
+    const sidebar = document.querySelector('.sidebar');
+    const overlay = document.getElementById('nav-overlay');
+    const isOpen  = sidebar.classList.toggle('nav-open');
+    overlay.classList.toggle('active', isOpen);
+    document.body.style.overflow = isOpen ? 'hidden' : '';
+  }
+
+  function closeNav() {
+    const sidebar = document.querySelector('.sidebar');
+    const overlay = document.getElementById('nav-overlay');
+    sidebar.classList.remove('nav-open');
+    overlay.classList.remove('active');
+    document.body.style.overflow = '';
+  }
+
+  function switchPanel(name) {
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.nav-item[data-panel]').forEach(n => n.classList.remove('active'));
+    document.getElementById('panel-' + name)?.classList.add('active');
+    document.querySelector(`.nav-item[data-panel="${name}"]`)?.classList.add('active');
+    if (name === 'chat')    window._chatInit?.();
+    if (name === 'market')  window._loadPlayerListings?.();
+    if (name === 'map')     { positionPlayerPin(); initMapInteraction(); }
+    if (name === 'battle')  window._refreshFarmingZones?.();
+    window._onPanelSwitch?.(name);
+    closeNav();
+  }
+
+  // ── Fullscreen map ────────────────────────────────────────
+  function openMapFullscreen() {
+    const modal = document.getElementById('map-fullscreen-modal');
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    initMapGestures();
+  }
+  function closeMapFullscreen() {
+    document.getElementById('map-fullscreen-modal').style.display = 'none';
+    document.body.style.overflow = '';
+    _mapScale = 1; _mapX = 0; _mapY = 0;
+    applyMapTransform();
+  }
+  window.openMapFullscreen  = openMapFullscreen;
+  window.closeMapFullscreen = closeMapFullscreen;
+
+  // Pinch-zoom + pan state
+  let _mapScale = 1, _mapX = 0, _mapY = 0;
+  let _mapLastX = 0, _mapLastY = 0, _mapDragging = false;
+  let _pinchStartDist = 0, _pinchStartScale = 1;
+  const MIN_SCALE = 1, MAX_SCALE = 5;
+
+  function applyMapTransform() {
+    const container = document.getElementById('map-fs-container');
+    if (!container) return;
+    container.style.transform = `translate(${_mapX}px, ${_mapY}px) scale(${_mapScale})`;
+  }
+
+  function initMapGestures() {
+    const body = document.getElementById('map-fs-body');
+    if (!body || body._gesturesInit) return;
+    body._gesturesInit = true;
+
+    // ── Touch: pinch zoom + pan ──
+    body.addEventListener('touchstart', e => {
+      if (e.touches.length === 2) {
+        _pinchStartDist  = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        _pinchStartScale = _mapScale;
+      } else if (e.touches.length === 1) {
+        _mapDragging = true;
+        _mapLastX = e.touches[0].clientX;
+        _mapLastY = e.touches[0].clientY;
+      }
+    }, { passive: true });
+
+    body.addEventListener('touchmove', e => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        const dist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        _mapScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, _pinchStartScale * (dist / _pinchStartDist)));
+        applyMapTransform();
+      } else if (e.touches.length === 1 && _mapDragging) {
+        const dx = e.touches[0].clientX - _mapLastX;
+        const dy = e.touches[0].clientY - _mapLastY;
+        _mapX += dx; _mapY += dy;
+        _mapLastX = e.touches[0].clientX;
+        _mapLastY = e.touches[0].clientY;
+        clampMapPosition();
+        applyMapTransform();
+      }
+    }, { passive: false });
+
+    body.addEventListener('touchend', () => { _mapDragging = false; });
+
+    // ── Mouse: drag to pan ──
+    body.addEventListener('mousedown', e => {
+      _mapDragging = true;
+      _mapLastX = e.clientX; _mapLastY = e.clientY;
+      body.style.cursor = 'grabbing';
+    });
+    body.addEventListener('mousemove', e => {
+      if (!_mapDragging) return;
+      _mapX += e.clientX - _mapLastX;
+      _mapY += e.clientY - _mapLastY;
+      _mapLastX = e.clientX; _mapLastY = e.clientY;
+      clampMapPosition();
+      applyMapTransform();
+    });
+    body.addEventListener('mouseup',   () => { _mapDragging = false; body.style.cursor = 'grab'; });
+    body.addEventListener('mouseleave',() => { _mapDragging = false; body.style.cursor = 'grab'; });
+
+    // ── Mouse wheel zoom ──
+    body.addEventListener('wheel', e => {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? 0.9 : 1.1;
+      _mapScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, _mapScale * delta));
+      clampMapPosition();
+      applyMapTransform();
+    }, { passive: false });
+  }
+
+  function clampMapPosition() {
+    // When zoomed in, limit pan so map doesn't disappear off screen
+    const body = document.getElementById('map-fs-body');
+    if (!body) return;
+    const rect = body.getBoundingClientRect();
+    const maxX = (rect.width  * (_mapScale - 1)) / 2;
+    const maxY = (rect.height * (_mapScale - 1)) / 2;
+    _mapX = Math.min(maxX, Math.max(-maxX, _mapX));
+    _mapY = Math.min(maxY, Math.max(-maxY, _mapY));
+  }
+
+  // Double-tap to reset zoom
+  let _lastTap = 0;
+  document.getElementById('map-fs-body')?.addEventListener('touchend', () => {
+    const now = Date.now();
+    if (now - _lastTap < 300) {
+      _mapScale = 1; _mapX = 0; _mapY = 0;
+      applyMapTransform();
+    }
+    _lastTap = now;
+  });
+  // ── Map zoom & pan ────────────────────────────────────────
+  _mapScale = 1; _mapX = 0; _mapY = 0;
+  let _isDragging = false, _dragStartX = 0, _dragStartY = 0, _dragOriginX = 0, _dragOriginY = 0;
+
+  function applyMapTransform() {
+    const inner = document.getElementById('world-map-inner');
+    if (!inner) return;
+    _mapScale = Math.min(4, Math.max(1, _mapScale));
+    const wrap = document.getElementById('world-map-container');
+    const maxX = wrap ? (wrap.offsetWidth  * (_mapScale - 1)) / 2 : 0;
+    const maxY = wrap ? (wrap.offsetHeight * (_mapScale - 1)) / 2 : 0;
+    _mapX = Math.min(maxX, Math.max(-maxX, _mapX));
+    _mapY = Math.min(maxY, Math.max(-maxY, _mapY));
+    // scale3d forces GPU compositing — keeps image crisp at all zoom levels
+    inner.style.transform = `scale3d(${_mapScale},${_mapScale},1) translate(${_mapX / _mapScale}px, ${_mapY / _mapScale}px)`;
+    inner.style.transformOrigin = 'center center';
+  }
+
+  window.mapZoom = function(delta) { _mapScale += delta; applyMapTransform(); };
+  window.mapZoomReset = function() { _mapScale = 1; _mapX = 0; _mapY = 0; applyMapTransform(); };
+
+  function initMapInteraction() {
+    const wrap = document.getElementById('world-map-container');
+    if (!wrap || wrap._mapInited) return;
+    wrap._mapInited = true;
+
+    // ── Mouse drag ──────────────────────────────────────────
+    wrap.addEventListener('mousedown', e => {
+      if (e.target.closest('.map-pin, .map-zoom-controls')) return;
+      _isDragging = true;
+      _dragStartX = e.clientX; _dragStartY = e.clientY;
+      _dragOriginX = _mapX;    _dragOriginY = _mapY;
+      wrap.style.cursor = 'grabbing';
+      e.preventDefault();
+    });
+    window.addEventListener('mousemove', e => {
+      if (!_isDragging) return;
+      _mapX = _dragOriginX + (e.clientX - _dragStartX);
+      _mapY = _dragOriginY + (e.clientY - _dragStartY);
+      applyMapTransform();
+    });
+    window.addEventListener('mouseup', () => {
+      _isDragging = false;
+      wrap.style.cursor = _mapScale > 1 ? 'grab' : 'default';
+    });
+
+    // ── Mouse wheel zoom ────────────────────────────────────
+    wrap.addEventListener('wheel', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      mapZoom(e.deltaY < 0 ? 0.2 : -0.2);
+    }, { passive: false });
+
+    // ── Touch: pinch zoom + pan ─────────────────────────────
+    wrap.addEventListener('touchstart', e => {
+      e.stopPropagation();
+      if (e.touches.length === 2) {
+        _pinchStartDist  = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        _pinchStartScale = _mapScale;
+      } else if (e.touches.length === 1) {
+        _isDragging  = true;
+        _dragStartX  = e.touches[0].clientX;
+        _dragStartY  = e.touches[0].clientY;
+        _dragOriginX = _mapX;
+        _dragOriginY = _mapY;
+      }
+    }, { passive: true });
+
+    wrap.addEventListener('touchmove', e => {
+      // Always prevent default on map — stops page from scrolling
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.touches.length === 2) {
+        const dist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        _mapScale = _pinchStartScale * (dist / _pinchStartDist);
+        applyMapTransform();
+      } else if (e.touches.length === 1 && _isDragging) {
+        _mapX = _dragOriginX + (e.touches[0].clientX - _dragStartX);
+        _mapY = _dragOriginY + (e.touches[0].clientY - _dragStartY);
+        applyMapTransform();
+      }
+    }, { passive: false });
+
+    wrap.addEventListener('touchend', () => { _isDragging = false; });
+  }
+  window.initMapInteraction = initMapInteraction;
+
+  function mapPinClick(el) {
+    const isActive = el.classList.contains('active');
+    document.querySelectorAll('.map-pin.active').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.map-pin.flip-down').forEach(p => p.classList.remove('flip-down'));
+    if (!isActive) {
+      el.classList.add('active');
+
+      // Flip tooltip below pin if pin is in top 45% of map
+      const pin = el;
+      const top = parseFloat(pin.style.top);
+      if (top < 45) el.classList.add('flip-down');
+
+      const playerKingdom   = window._charData?.kingdom  || window._charData?.location || '';
+      const costEl          = el.querySelector('.mpt-cost');
+      const travelBtn       = el.querySelector('.mpt-travel-btn');
+      const nameEl          = el.querySelector('.mpt-name');
+      const locationName    = nameEl?.textContent?.replace(/^[^\w]+/, '').trim() || '';
+
+      // Check if player is already at this location
+      const isHere = playerKingdom && locationName &&
+        (playerKingdom.toLowerCase().includes(locationName.toLowerCase().split('—')[0].trim()) ||
+         locationName.toLowerCase().includes(playerKingdom.toLowerCase().split('—')[0].trim()));
+
+      if (travelBtn) {
+        // Capital pin
+        if (isHere) {
+          travelBtn.style.display = 'none';
+          if (costEl) costEl.innerHTML = '📍 <strong style="color:var(--gold)">You are here</strong>';
+        } else {
+          travelBtn.style.display = 'block';
+          // Restore cost text if previously changed
+          const orig = travelBtn.dataset.origCost;
+          if (orig && costEl && costEl.querySelector('strong')) costEl.textContent = orig;
+        }
+      // ── Monster / resource / special zone pin ────────────
+      } else if (costEl) {
+        const contText = el.querySelector('.mpt-cont')?.textContent || '';
+        const isDanger  = el.classList.contains('danger-zone');
+        const isEndgame = el.classList.contains('endgame-zone');
+
+        // All Frostveil locations (capitals + monster zones + special)
+        // Every location that exists in each continent
+        const frostveilLocs = [
+          'Frostspire','Whitecrest','Icerun','Paleglow','Mistveil',
+          'Frostfang Valley','Dark Cathedral','Sheen Lake','Misty Hollow','Forgotten Estuary',
+          'Wisteria Forest','Silver Lake','Hobbit Cave','Arctic Willow','Dream River','Suldan Mine',
+          'Shrine of Secrets','Aurora Basin','Northern Continent','Frostveil'
+        ];
+        const verdantisLocs = [
+          'Solmere','Sunpetal','Basil','Riverend','Verdance',
+          'Whispering Forest','Golden Plains','Element Valley','Defiled Sanctum','Golden River',
+          'Asahi Valley','Moss Stream','Argent Grotto','Shiny Cavern',
+          'Purgatory of Light','Temple of Verdict','Heart Garden','Valley of Overflowing',
+          'Western Continent','Verdantis'
+        ];
+
+        const inFrostveil = frostveilLocs.some(l => playerKingdom.includes(l));
+        const inVerdantis = verdantisLocs.some(l => playerKingdom.includes(l));
+        const sameContinent = (contText.includes('Frostveil') && inFrostveil) ||
+                              (contText.includes('Verdantis') && inVerdantis);
+
+        // Location coordinates for distance-based pricing
+        const locCoords = {
+          'Frostspire — Gladys Kingdom': [49.05,29.74], 'Frostfang Valley': [29.06,15.23],
+          'Dark Cathedral': [34.85,29.84], 'Sheen Lake': [57.27,13.95],
+          'Misty Hollow': [65.75,15.92], 'Forgotten Estuary': [63.91,33.69],
+          'Whitecrest Village': [44.0,26.0], 'Icerun Hamlet': [46.0,22.0],
+          'Paleglow Town': [52.0,22.0], 'Mistveil Town': [55.0,26.0],
+          'Solmere — Elaria Kingdom': [21.04,49.48], 'Whispering Forest': [11.57,39.22],
+          'Golden Plains': [4.67,48.20], 'Element Valley': [12.56,52.25],
+          'Defiled Sanctum': [17.23,59.35], 'Golden River': [27.62,61.62],
+          'Sunpetal Village': [17.0,44.0], 'Basil Village': [18.0,53.0],
+          'Riverend Town': [25.0,54.0], 'Verdance Town': [27.0,47.0],
+        };
+
+        function getDistCost(from, to) {
+          // Find matching coord keys
+          const fromKey = Object.keys(locCoords).find(k => from.includes(k) || k.includes(from.split('—')[0].trim()));
+          const toKey   = Object.keys(locCoords).find(k => to.includes(k)   || k.includes(to.split('—')[0].trim()));
+          if (!fromKey || !toKey) return { cost: 30, time: 30 };
+          const [x1,y1] = locCoords[fromKey];
+          const [x2,y2] = locCoords[toKey];
+          const d = Math.sqrt((x2-x1)**2 + (y2-y1)**2);
+          if (d < 10)  return { cost: 20, time: 10 };
+          if (d < 20)  return { cost: 30, time: 30 };
+          return { cost: 40, time: 60 };
+        }
+
+        if (isHere) {
+          costEl.innerHTML = '📍 <strong style="color:var(--gold)">You are here</strong>';
+          el.querySelector('.mpt-travel-btn-dynamic')?.remove();
+          // Inject Fight Here for monster zones
+          if (el.dataset.zoneType === 'monster' && !el.querySelector('.mpt-fight-btn')) {
+            const fightBtn = document.createElement('button');
+            fightBtn.className = 'mpt-travel-btn mpt-fight-btn';
+            fightBtn.style.cssText = 'margin-top:6px;background:rgba(224,112,96,0.15);border-color:rgba(224,112,96,0.5);color:#e07060;width:100%';
+            fightBtn.textContent = '⚔️ Fight Here';
+            fightBtn.onclick = (e) => {
+              e.stopPropagation();
+              document.querySelectorAll('.map-pin.active').forEach(p => p.classList.remove('active'));
+              switchPanel('battle');
+              window.setBattleMode?.('farming');
+              const zoneName = nameEl?.textContent?.replace(/^[^\w]+/, '').trim() || '';
+              setTimeout(() => window._autoSelectZoneByName?.(zoneName), 80);
+            };
+            costEl.after(fightBtn);
+          }
+        } else if (isDanger) {
+          costEl.textContent = '🪙 250 coins to enter · High rank required';
+        } else if (isEndgame) {
+          costEl.textContent = '🪙 500 coins to enter · Endgame only';
+        } else {
+          const destName = nameEl?.textContent?.replace(/^[^\w]+/, '').trim() || '';
+          const { cost, time } = sameContinent
+            ? getDistCost(playerKingdom, destName)
+            : { cost: 100, time: 300 };
+          const timeLabel = time < 60 ? `${time}s` : `${time/60}m`;
+          costEl.textContent = `🪙 ${cost} coins · ~${timeLabel} travel`;
+
+          el.querySelector('.mpt-travel-btn-dynamic')?.remove();
+          const btn = document.createElement('button');
+          btn.className = 'mpt-travel-btn mpt-travel-btn-dynamic';
+          btn.textContent = 'TRAVEL HERE';
+          btn.onclick = (e) => {
+            e.stopPropagation();
+            const continent = contText.split('·')[0].trim();
+            openTravelModal(destName, continent, cost, time);
+          };
+          costEl.after(btn);
+        }
+      }
+    }
+  }
+  // Close tooltips when clicking elsewhere on map
+  document.getElementById('world-map-container')?.addEventListener('click', function(e) {
+    if (!e.target.closest('.map-pin')) {
+      document.querySelectorAll('.map-pin.active').forEach(p => p.classList.remove('active'));
+    }
+  });
+
+  // ── Position green player pin on map ─────────────────────
+  function positionPlayerPin() {
+    const charData = window._charData;
+    if (!charData) return;
+    const kingdom = charData.kingdom || charData.location || '';
+
+    // Calibrated pin positions — clicked directly on each location via calibrator tool
+    const locationCoords = {
+      'Frostspire — Gladys Kingdom': { x: 49.05, y: 29.74 },
+      'Frostfang Valley':            { x: 29.06, y: 15.23 },
+      'Dark Cathedral':              { x: 34.85, y: 29.84 },
+      'Sheen Lake':                  { x: 57.27, y: 13.95 },
+      'Misty Hollow':                { x: 65.75, y: 15.92 },
+      'Forgotten Estuary':           { x: 63.91, y: 33.69 },
+      'Solmere — Elaria Kingdom':    { x: 21.04, y: 49.48 },
+      'Whispering Forest':           { x: 11.57, y: 39.22 },
+      'Golden Plains':               { x: 4.67,  y: 48.20 },
+      'Element Valley':              { x: 12.56, y: 52.25 },
+      'Defiled Sanctum':             { x: 17.23, y: 59.35 },
+      'Golden River':                { x: 27.62, y: 61.62 },
+      'Ashen Wastes':                { x: 67.60, y: 39.22 },
+      'Infernal Reach':              { x: 86.93, y: 39.61 },
+      'Ruined Sanctum':              { x: 80.22, y: 48.30 },
+      'Blighted World':              { x: 77.52, y: 59.85 },
+      'Void Chasm':                  { x: 33.67, y: 71.63 },
+      'Abyssal Depths':              { x: 43.92, y: 76.47 },
+      'Fallen Heaven':               { x: 52.08, y: 83.51 },
+      // Smaller settlements — clustered near their capital
+      'Whitecrest Village':          { x: 44.0,  y: 26.0  },
+      'Icerun Hamlet':               { x: 46.0,  y: 22.0  },
+      'Paleglow Town':               { x: 52.0,  y: 22.0  },
+      'Mistveil Town':               { x: 55.0,  y: 26.0  },
+      'Sunpetal Village':            { x: 17.0,  y: 44.0  },
+      'Basil Village':               { x: 18.0,  y: 53.0  },
+      'Riverend Town':               { x: 25.0,  y: 54.0  },
+      'Verdance Town':               { x: 27.0,  y: 47.0  },
+    };
+
+    const pin = document.getElementById('map-player-pin');
+    const label = document.getElementById('map-player-label');
+    if (!pin) return;
+
+    // Fuzzy match
+    const match = Object.keys(locationCoords).find(k =>
+      kingdom.toLowerCase().includes(k.toLowerCase()) ||
+      k.toLowerCase().includes(kingdom.toLowerCase().split('—')[0].trim())
+    );
+
+    if (match) {
+      const coords = locationCoords[match];
+      pin.style.left = coords.x + '%';
+      pin.style.top  = coords.y + '%';
+      pin.style.display = 'flex';
+      if (label) label.textContent = charData.name || 'You';
+    } else {
+      pin.style.display = 'none';
+    }
+  }
+  window.positionPlayerPin = positionPlayerPin;
+
+  window._allInvItems = [];
+  function filterInv(btn, type) {
+    document.querySelectorAll('.inv-tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    const items = type === 'all' ? window._allInvItems : window._allInvItems.filter(i => i.type === type);
+    window.renderInventory(items);
+  }
+  window._statPoints   = 20;
+  window._pendingStats = { str:10, int:10, def:10, dex:10 };
+  window._baseStats    = { str:10, int:10, def:10, dex:10 };
+  function allocStat(stat, delta) {
+    const next = window._pendingStats[stat] + delta;
+    if (delta < 0 && next < window._baseStats[stat]) return;
+    if (delta > 0 && window._statPoints <= 0) { window.showToast('No stat points remaining.','error'); return; }
+    window._pendingStats[stat] = next;
+    window._statPoints -= delta;
+    document.getElementById('a-' + stat).textContent = next;
+    document.getElementById('s-points').textContent  = window._statPoints;
+    document.getElementById('stat-points').textContent = window._statPoints;
+    const changed = Object.keys(window._pendingStats).some(k => window._pendingStats[k] !== window._baseStats[k]);
+    document.getElementById('btn-save-stats').style.display = changed ? 'block' : 'none';
+    document.getElementById('alloc-hint').style.display = window._statPoints > 0 ? 'block' : 'none';
+  }
+
+  let _selectedProf = null;
+  function selectProfession(el, name) {
+    document.querySelectorAll('.profession-card').forEach(c => {
+      c.classList.remove('selected');
+      c.querySelector('.profession-confirm-row').style.display = 'none';
+    });
+    el.classList.add('selected');
+    el.querySelector('.profession-confirm-row').style.display = 'block';
+    _selectedProf = name;
+  }
+  function confirmProfession() { window._confirmProfession?.(_selectedProf); }
+
+  function switchMarketTab(btn, tab) {
+    document.querySelectorAll('.market-tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('market-npc').style.display    = tab === 'npc'    ? 'block' : 'none';
+    document.getElementById('market-player').style.display = tab === 'player' ? 'block' : 'none';
+    if (tab === 'player') window._loadPlayerListings?.();
+  }
+
+  let _travelTarget = null;
+  function openTravelModal(dest, continent, cost, seconds) {
+    _travelTarget = { dest, continent, cost, seconds };
+    const mins = seconds >= 60 ? Math.floor(seconds/60) + 'm ' + (seconds%60>0?seconds%60+'s':'') : seconds + 's';
+    document.getElementById('travel-modal-dest').textContent  = `Traveling to ${dest}`;
+    document.getElementById('travel-modal-cost').textContent  = `${cost} coins`;
+    document.getElementById('travel-modal-time').textContent  = mins;
+    document.getElementById('travel-error').textContent = '';
+    document.getElementById('travel-modal').style.display = 'flex';
+  }
+  function closeTravelModal() { document.getElementById('travel-modal').style.display = 'none'; _travelTarget = null; }
+  function confirmTravel()    { if (_travelTarget) window._startTravel?.(_travelTarget); }
+
+  const AVATAR_PRESETS = ['⚔️','🛡️','🔮','🏹','🗡️','✨','🌀','🧝','💀','🐉','🧑','🪖','🧚','🔥','🌑','🪙','⭐','💗','⚖️','📖'];
+  let _selectedPreset = null;
+  let _uploadedFile   = null;
+
+  function updateAvatarPreview(val) {
+    const prev = document.getElementById('avatar-preview-circle');
+    if (!prev) return;
+    const isUrl = val?.startsWith('http') || val?.startsWith('data:');
+    prev.innerHTML = isUrl
+      ? `<img src="${val}" style="width:100%;height:100%;object-fit:cover;border-radius:50%"/>`
+      : `<span style="font-size:2rem">${val}</span>`;
+  }
+
+  function openAvatarModal() {
+    const grid = document.getElementById('avatar-presets');
+    grid.innerHTML = AVATAR_PRESETS.map(e => `<div class="avatar-preset" onclick="selectPreset(this,'${e}')">${e}</div>`).join('');
+    _selectedPreset = null; _uploadedFile = null;
+    // Show current avatar in preview
+    const current = window._charData?.avatarUrl || '⚔️';
+    updateAvatarPreview(current);
+    document.getElementById('avatar-modal').style.display = 'flex';
+    document.getElementById('avatar-file-input').onchange = function(ev) {
+      const file = ev.target.files[0];
+      if (!file) return;
+      if (file.size > 2*1024*1024) { window.showToast('Image must be under 2MB.','error'); return; }
+      _uploadedFile = file; _selectedPreset = null;
+      document.querySelectorAll('.avatar-preset').forEach(p => p.classList.remove('active'));
+      // Show file preview
+      const reader = new FileReader();
+      reader.onload = e => updateAvatarPreview(e.target.result);
+      reader.readAsDataURL(file);
+      window.showToast('Image selected. Click Save Avatar to apply.');
+    };
+  }
+
+  function selectPreset(el, emoji) {
+    document.querySelectorAll('.avatar-preset').forEach(p => p.classList.remove('active'));
+    el.classList.add('active');
+    _selectedPreset = emoji; _uploadedFile = null;
+    updateAvatarPreview(emoji);
+  }
+  function closeAvatarModal() { document.getElementById('avatar-modal').style.display = 'none'; }
+  function saveAvatar() { window._saveAvatar?.(_selectedPreset, _uploadedFile); }
+
+  let _buyTarget = null;
+  function openBuyModal(name, icon, price, type, maxQty = 1) {
+    _buyTarget = { name, icon, price, type, maxQty };
+    document.getElementById('buy-modal-icon').textContent = icon;
+    document.getElementById('buy-modal-name').textContent = name;
+    document.getElementById('buy-modal-desc').textContent = maxQty > 1 
+      ? `Available: ${maxQty} | Price: ${price} gold each | Enter quantity:`
+      : `Purchase for ${price} gold coins?`;
+    document.getElementById('buy-error').textContent = '';
+    const qtyInput = document.getElementById('buy-qty-input');
+    if (maxQty > 1) {
+      qtyInput.style.display = 'block';
+      qtyInput.value = 1;
+      qtyInput.max = maxQty;
+    } else {
+      qtyInput.style.display = 'none';
+    }
+    document.getElementById('buy-modal').style.display = 'flex';
+  }
+  function closeBuyModal()  { document.getElementById('buy-modal').style.display = 'none'; _buyTarget = null; }
+  function confirmBuy() { 
+    if (_buyTarget) {
+      const qtyInput = document.getElementById('buy-qty-input');
+      const qty = qtyInput.style.display !== 'none' ? parseInt(qtyInput.value) || 1 : 1;
+      if (qty < 1 || qty > _buyTarget.maxQty) {
+        document.getElementById('buy-error').textContent = 'Invalid quantity.';
+        return;
+      }
+      _buyTarget.qty = qty;
+      window._buyItem?.(_buyTarget); 
+    }
+  }
+
+  function openSellModal() {
+    const sel = document.getElementById('sell-item-select');
+    sel.innerHTML = '<option value="">Choose from inventory...</option>';
+    window._allInvItems.forEach((item, i) => {
+      const opt = document.createElement('option');
+      opt.value = i; opt.textContent = `${item.name} (×${item.qty})`;
+      sel.appendChild(opt);
+    });
+    if (!window._allInvItems.length) sel.innerHTML = '<option>No items in inventory</option>';
+    document.getElementById('sell-error').textContent = '';
+    document.getElementById('sell-modal').style.display = 'flex';
+  }
+  function closeSellModal() { document.getElementById('sell-modal').style.display = 'none'; }
+  function confirmSell()    { window._sellItem?.(); }
+
+  function sendChatMessage() { window._sendChat?.(); }
+
+  let _activeChatTab = 'rp';
+  function switchChatTab(tab) {
+    _activeChatTab = tab;
+    document.getElementById('tab-rp').classList.toggle('active', tab === 'rp');
+    document.getElementById('tab-general').classList.toggle('active', tab === 'general');
+    const placeholder = tab === 'rp'
+      ? 'Speak your truth into the world...'
+      : 'Chat with players nearby...';
+    document.getElementById('chat-input').placeholder = placeholder;
+    window._switchChatTab?.(tab);
+  }
+  window._getActiveChatTab = () => _activeChatTab;
+
+  let _playerActionTarget = null;
+  function openPlayerPopup(uid, name, el) {
+    _playerActionTarget = { uid, name };
+    const popup = document.getElementById('player-action-popup');
+    // Position near clicked element
+    const rect = el.getBoundingClientRect();
+    const panel = document.getElementById('panel-chat').getBoundingClientRect();
+    popup.style.top  = (rect.bottom - panel.top + 8) + 'px';
+    popup.style.left = Math.min(rect.left - panel.left, panel.width - 200) + 'px';
+    popup.style.display = 'block';
+  }
+  function closePlayerPopup() {
+    document.getElementById('player-action-popup').style.display = 'none';
+    _playerActionTarget = null;
+  }
+  function playerAction(action) {
+    if (!_playerActionTarget) return;
+    const { uid, name } = _playerActionTarget;
+    closePlayerPopup();
+    if (action === 'speak') {
+      const input = document.getElementById('chat-input');
+      input.value = `@${name} `;
+      input.focus();
+    } else if (action === 'trade') {
+      const _ctx   = window.getDuelContext?.() || {};
+      const _tab   = _ctx.tab || window._getActiveChatTab?.() || 'rp';
+      const _locId = _ctx.locationId || '';
+      if (!_locId && _tab !== 'general') {
+        window.showToast?.('Open the chat panel first before trading.', 'error');
+        return;
+      }
+      if (window.inkConfirm) {
+        window.inkConfirm(`Trade with ${name}?\n\nBoth players must confirm before any items move. Spectators can watch.`).then(confirmed => {
+          if (confirmed) {
+            window.initiateTrade?.(uid, name)
+              .catch(e => window.showToast?.(e.message || 'Failed to start trade.', 'error'));
+          }
+        });
+      } else {
+        if (confirm(`Trade with ${name}?`)) {
+          window.initiateTrade?.(uid, name)
+            .catch(e => window.showToast?.(e.message || 'Failed to start trade.', 'error'));
+        }
+      }
+    } else if (action === 'duel') {
+      // Use the EXACT tab + locationId that startChatListener registered.
+      // Re-deriving from _charData.kingdom can produce a different string
+      // (different normalisation timing) → card posts to wrong collection
+      // and never appears in chat. getDuelContext() is the single source of truth.
+      const _ctx      = window.getDuelContext?.() || {};
+      const _duelTab  = _ctx.tab   || window._getActiveChatTab?.() || 'rp';
+      const _duelLocId = _ctx.locationId || '';
+
+      if (!_duelLocId && _duelTab !== 'general') {
+        window.showToast?.('Open the chat panel first, then challenge to a duel.', 'error');
+        return;
+      }
+      // Chat-based public duel — everyone in chat watches live
+      if (window.inkConfirm) {
+        window.inkConfirm(`Challenge ${name} to a PUBLIC duel?\n\nEveryone in chat will watch the fight live!`).then(confirmed => {
+          if (confirmed) {
+            window.initiateChatDuel?.(uid, name, _duelTab, _duelLocId)
+              .catch(() => window.showToast('Failed to send duel challenge.', 'error'));
+          }
+        });
+      } else {
+        if (confirm(`Challenge ${name} to a PUBLIC duel? Everyone in chat will watch!`)) {
+          window.initiateChatDuel?.(uid, name, _duelTab, _duelLocId)
+            .catch(() => window.showToast('Failed to send duel challenge.', 'error'));
+        }
+      }
+    }
+  }
+  window.openPlayerPopup  = openPlayerPopup;
+  window.closePlayerPopup = closePlayerPopup;
+  window.playerAction     = playerAction;
+
+  // Quest checkboxes are now read-only — progress tracked automatically by actions
+  function toggleQuest() { /* no-op: quests auto-complete via _incrementQuest */ }
+
+  // ── Battle UI ──────────────────────────────────────────────
+  let _selectedGrade    = null;
+  let _selectedZoneName = null;
+  let _battleActive     = false;
+
+  function selectZone(el, grade, zoneName) {
+    if (el.classList.contains('zone-locked')) return;
+    document.querySelectorAll('.zone-card:not(.zone-locked)').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+    _selectedGrade    = grade;
+    _selectedZoneName = zoneName;
+    window._selectedZoneName = zoneName;
+    document.getElementById('btn-start-battle').disabled = false;
+    const autoBtn = document.getElementById('btn-start-auto-battle');
+    if (autoBtn) autoBtn.disabled = false;
+    window._updateZonePoolStatus?.(zoneName);
+  }
+
+  function startBattle() {
+    if (_selectedGrade && _selectedZoneName) window._startBattle?.(_selectedGrade, false, _selectedZoneName);
+  }
+  function startAutoBattle() {
+    if (_selectedGrade && _selectedZoneName) window._startAutoBattle?.(_selectedGrade, _selectedZoneName);
+  }
+  function doBattleTurn(action, skill) {
+    if (action === 'flee') {
+      console.log('[DEBUG] Run button clicked');
+    }
+    window._battleTurn?.(action, skill);
+  }
+  function attemptResurrect() { window._resurrect?.(); }
+  function resetBattle() {
+    document.getElementById('battle-zone-select').style.display = 'block';
+    document.getElementById('battle-arena').style.display       = 'none';
+    document.getElementById('battle-result').style.display      = 'none';
+    document.getElementById('auto-battle-hud').style.display    = 'none';
+    document.getElementById('auto-battle-bar').style.display    = 'none';
+    _autoBattleRunning = false;
+    _battleActive = false;
+  }
+
+  function openSkillMenu() {
+    const RANK_ORDER_B = ["Wanderer","Follower","Disciple","Master","Exalted","Crown","Supreme","Legend","Myth","Eternal"];
+    const playerRankIdx = RANK_ORDER_B.indexOf(window._charData?.rank || "Wanderer");
+    const tree  = window.SKILL_TREES?.[window._charData?.charClass] || {};
+    const curMana = window._charData?.mana ?? 0;
+    const tieredSkills = [
+      ...(tree.basic        || []).map(s => ({ name: s.name, tier: 0, tierLabel: "Basic" })),
+      ...(tree.intermediate || []).map(s => ({ name: s.name, tier: 1, tierLabel: "Intermediate" })),
+      ...(tree.advanced     || []).map(s => ({ name: s.name, tier: 2, tierLabel: "Advanced" })),
+    ];
+
+    // Filter to active stance if one is set
+    const activeIdx = window._activeStanceIdx;
+    const stances = (window._charData?.stances || [null, null, null]);
+    const stanceEntry = (activeIdx !== null && stances[activeIdx]?.skills?.length)
+      ? stances[activeIdx] : null;
+    const stanceSkills = stanceEntry ? new Set(stanceEntry.skills) : null;
+
+    const menuList = document.getElementById('skill-menu-list');
+    if (menuList && window.SKILL_DATA) {
+      const stanceBadge = stanceEntry
+        ? `<div class="skill-menu-stance-badge">⚔ ${stanceEntry.name}</div>` : '';
+      const filtered = stanceSkills ? tieredSkills.filter(s => stanceSkills.has(s.name)) : tieredSkills;
+      menuList.innerHTML = stanceBadge + filtered.map(({ name: s, tier, tierLabel }) => {
+        const sk = window.SKILL_DATA[s] || {};
+        const cost = sk.mana || 0;
+        const rankUnlocked = playerRankIdx >= tier;
+        const canAfford    = curMana >= cost;
+        const usable       = rankUnlocked && canAfford;
+        const manaLabel    = cost === 0
+          ? `<span style="color:#4caf8a;font-size:0.68rem">Free</span>`
+          : `<span style="color:${canAfford?'#6ab0f5':'#e05555'};font-size:0.68rem">${cost} MP</span>`;
+        const lockLabel = !rankUnlocked
+          ? `<span style="color:#888;font-size:0.65rem">🔒 ${tierLabel}</span>` : '';
+        return `
+          <div class="skill-menu-item${usable ? '' : ' skill-locked-mana'}"
+               style="opacity:${usable?'1':'0.4'};cursor:${usable?'pointer':'not-allowed'}"
+               ${usable ? `onclick="doBattleTurn('skill','${s}');closeSkillMenu()"` : ''}>
+            <span class="skill-menu-item-name">${s}</span>
+            <span style="display:flex;gap:6px;align-items:center">${manaLabel}${lockLabel}</span>
+          </div>`;
+      }).join('') || '<div style="color:var(--text-dim);font-style:italic;padding:12px;font-size:0.82rem">No skills in this stance.</div>';
+    }
+    document.getElementById('skill-menu').style.display    = 'block';
+    document.getElementById('battle-actions').style.display = 'none';
+  }
+  function closeSkillMenu() {
+    document.getElementById('skill-menu').style.display    = 'none';
+    document.getElementById('battle-actions').style.display = 'flex';
+  }
+
+  // ── Crafting UI ────────────────────────────────────────────
+  function switchCraftTab(btn, npc) {
+    document.querySelectorAll('.crafting-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.craft-section').forEach(s => s.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('craft-' + npc).classList.add('active');
+    if (npc === 'enchanter') window._loadEnchanter?.();
+  }
+
+  function doEnchant() { window._doEnchant?.(); }
+
+
+
+</script>
+<script>
+// Failsafe: Always log when RUN is clicked, even if the button is re-rendered
+document.addEventListener('DOMContentLoaded', function() {
+  function runDebugListener(e) {
+    if (e.target && e.target.closest && e.target.closest('#btn-run')) {
+      console.log('[DEBUG] Run button clicked (global listener)');
+    }
+  }
+  document.body.addEventListener('click', runDebugListener, true);
+});
+</script>
+
+<script type="module">
+  import { initDashboard } from '../js/dashboard.js';
+  import '../js/map.js';
+  import '../js/duel.js';
+  import '../js/trade.js';
+  // Small delay ensures the regular <script> block above has fully executed
+  // and window.showToast / window.renderInventory are defined before dashboard.js runs
+  setTimeout(() => initDashboard(), 0);
+</script>
+</body>
+</html>

@@ -1,0 +1,72 @@
+/*
+  Quest Reward Picker Styles
+  Add to global.css or deity-dashboard.css for best effect
+*/
+
+.reward-picker-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.reward-picker-tab {
+  background: var(--ash-dark, #222);
+  color: var(--gold, #C9A84C);
+  border: none;
+  border-radius: 6px 6px 0 0;
+  padding: 6px 16px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 1rem;
+  transition: background 0.15s;
+}
+.reward-picker-tab.active {
+  background: var(--gold, #C9A84C);
+  color: #222;
+}
+.reward-picker-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+  min-height: 36px;
+}
+.reward-item-btn {
+  background: var(--ash, #333);
+  color: var(--text, #fff);
+  border: 1px solid var(--border, #444);
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 0.98rem;
+  transition: background 0.15s, border 0.15s;
+}
+.reward-item-btn:hover {
+  background: var(--gold, #C9A84C);
+  color: #222;
+  border-color: var(--gold, #C9A84C);
+}
+.reward-picker-selected {
+  margin-top: 6px;
+  font-size: 0.97rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.reward-qty-input {
+  width: 40px;
+  margin: 0 4px;
+  border-radius: 4px;
+  border: 1px solid var(--border, #444);
+  padding: 2px 4px;
+  font-size: 0.97rem;
+}
+.reward-remove-btn {
+  background: none;
+  border: none;
+  color: #c00;
+  font-size: 1.1em;
+  cursor: pointer;
+  margin-left: 2px;
+  vertical-align: middle;
+}

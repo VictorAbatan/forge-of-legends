@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <link rel="stylesheet" href="../css/quest-reward-picker.css">
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Deity Console — Forge of Legends</title>
+<link rel="stylesheet" href="../css/global.css"/>
+<link rel="stylesheet" href="../css/deity-dashboard.css"/>
+<style>
+/* ── Override global pulse on loading title ── */
+.loading-title { animation: none !important; }
+/* Quest submissions panel */
+.dq-submissions-panel { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 10px; }
+.dq-submissions-title {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--gold-dim);
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dq-submissions-title:hover { color: var(--gold); }
+.dq-sub-chevron { font-size: 0.9rem; }
+.dq-submissions-list { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.dq-sub-empty { font-size: 0.82rem; color: var(--text-dim); font-style: italic; padding: 4px 0; }
+.dq-sub-item {
+  background: var(--ink3);
+  border-radius: 7px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+}
+.dq-sub-player { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; flex-wrap: wrap; }
+.dq-sub-name { font-weight: 700; font-size: 0.9rem; color: var(--text-light); }
+.dq-sub-rank { font-size: 0.78rem; color: var(--text-dim); }
+.dq-sub-status { font-size: 0.75rem; font-family: var(--font-mono); font-weight: 700; margin-left: auto; text-transform: uppercase; }
+.dq-sub-time { font-size: 0.76rem; color: var(--text-dim); margin-bottom: 8px; }
+.dq-sub-actions { display: flex; gap: 8px; }
+.dq-submissions-badge {
+  background: rgba(201,168,76,0.2);
+  color: var(--gold);
+  border: 1px solid var(--gold-dim);
+  border-radius: 8px;
+  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  padding: 2px 8px;
+  margin-left: auto;
+}
+.deity-mini-btn.success {
+  background: rgba(80,160,80,0.15);
+  border-color: #7ec87e;
+  color: #7ec87e;
+}
+.deity-mini-btn.success:hover { background: rgba(80,160,80,0.28); }
+/* ── Deity chat tabs ── */
+.dchat-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+.dchat-tab {
+  flex: 1;
+  padding: 7px 12px;
+  background: var(--ink3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-family: var(--ff-display);
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: background 0.18s, color 0.18s, border-color 0.18s;
+}
+.dchat-tab.active {
+  background: rgba(201,168,76,0.12);
+  border-color: var(--gold-dim);
+  color: var(--gold);
+}
+.dchat-tab:hover:not(.active) {
+  background: var(--ink2);
+  color: var(--text-light);
+}
+/* ── Three-column grid for boss stats ── */
+.three-col {
+  display: grid;
+  grid-template-columns: repeat(3,1fr);
+  gap: 10px;
+}
+/* ── Boss list cards ── */
+.boss-card {
+  background: var(--ink3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+.boss-card-icon { font-size: 2rem; min-width: 40px; text-align: center; }
+.boss-card-info { flex: 1; min-width: 0; }
+.boss-card-name { font-family: var(--ff-display); font-size: 1rem; color: var(--gold); font-weight: 700; margin-bottom: 2px; }
+.boss-card-desc { font-size: 0.82rem; color: var(--text-dim); margin-bottom: 6px; }
+.boss-card-stats { font-size: 0.78rem; font-family: var(--font-mono); color: var(--ash-light); margin-bottom: 6px; }
+.boss-card-abilities { font-size: 0.78rem; color: var(--text-dim); }
+.boss-card-abilities li { margin-bottom: 2px; }
+.boss-card-actions { display: flex; flex-direction: column; gap: 6px; }
+.boss-active-badge {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 6px;
+  margin-left: 8px;
+  background: rgba(126,200,126,0.15);
+  border: 1px solid #7ec87e44;
+  color: #7ec87e;
+}
+/* ── Ability builder slots ── */
+.ability-slot {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  background: var(--ink1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.ability-slot-name {
+  padding: 6px 10px;
+  background: var(--ink3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-light);
+  font-size: 0.86rem;
+  font-family: var(--ff-display);
+  outline: none;
+  width: 100%;
+}
+.ability-slot-name:focus { border-color: var(--gold-dim); }
+.ability-slot-type {
+  padding: 6px 8px;
+  background: var(--ink3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-light);
+  font-size: 0.8rem;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  outline: none;
+  min-width: 110px;
+}
+.ability-slot-type:focus { border-color: var(--gold-dim); }
+.ability-slot-remove {
+  background: none;
+  border: 1px solid #55555580;
+  border-radius: 6px;
+  color: #888;
+  font-size: 0.85rem;
+  padding: 4px 8px;
+  cursor: pointer;
+  line-height: 1;
+  transition: border-color 0.15s, color 0.15s;
+}
+.ability-slot-remove:hover { border-color: #e05555; color: #e05555; }
+/* Boss card ability pills */
+.boss-ability-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(201,168,76,0.08);
+  border: 1px solid rgba(201,168,76,0.2);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 0.72rem;
+  color: var(--text-light);
+  font-family: var(--font-mono);
+  margin: 2px 3px 2px 0;
+}
+.boss-ability-pill-type {
+  color: var(--gold-dim);
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 0.65rem;
+}
+.boss-inactive-badge {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 6px;
+  margin-left: 8px;
+  background: rgba(160,160,160,0.1);
+  border: 1px solid #88888844;
+  color: #aaa;
+}
+</style>
+</head>
+<body>
+
+<div class="loading-overlay" id="loading">
+  <div class="loading-title">FORGE OF LEGENDS</div>
+  <div class="loading-dots"><div class="loading-dot"></div><div class="loading-dot"></div><div class="loading-dot"></div></div>
+</div>
+
+<!-- ══ MOBILE OVERLAY ══ -->
+<div class="nav-overlay" id="nav-overlay" onclick="closeNav()"></div>
+
+<!-- ══ CREATE QUEST MODAL ══ -->
+<div class="deity-modal" id="quest-modal" style="display:none">
+  <div class="deity-modal-box">
+    <div class="deity-modal-title">📜 DROP A QUEST</div>
+    <p class="deity-modal-desc">Issue a quest directly into the world. Players will see it in their Quests panel.</p>
+    <div class="field-group" style="margin-bottom:12px">
+      <label class="field-label">Quest Type</label>
+      <div class="vision-type-grid" style="grid-template-columns:repeat(3,1fr)">
+        <div class="vision-type-card selected" data-qtype="story"      onclick="selectQuestType(this,'story')">     <div class="vision-type-icon">📖</div><div class="vision-type-name">Story</div></div>
+        <!-- World Dev and Faction quest types removed -->
+      </div>
+    </div>
+    <div class="field-group" style="margin-bottom:12px">
+      <label class="field-label">Quest Title</label>
+      <input class="field-input" type="text" id="quest-title" maxlength="80" placeholder="e.g. The Fallen Shrine of Arion"/>
+    </div>
+    <div class="field-group" style="margin-bottom:12px">
+      <label class="field-label">Description / Lore</label>
+      <textarea class="field-input" id="quest-desc" rows="4" maxlength="600" placeholder="Describe the quest, its lore, and objectives..."></textarea>
+    </div>
+    <div class="field-group" style="margin-bottom:12px">
+      <label class="field-label">Objectives (one per line)</label>
+      <textarea class="field-input" id="quest-objectives" rows="3" placeholder="e.g.&#10;Collect 5 Void Crystals&#10;Speak to the Elder at Thornwall"></textarea>
+    </div>
+    <div class="two-col" style="margin-bottom:12px">
+      <div class="field-group">
+        <label class="field-label">Reward — Gold</label>
+        <input class="field-input" type="number" id="quest-reward-gold" min="0" placeholder="0"/>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Reward — EXP</label>
+        <input class="field-input" type="number" id="quest-reward-exp" min="0" placeholder="0"/>
+      </div>
+    </div>
+    <div class="field-group" style="margin-bottom:12px">
+      <label class="field-label">Reward — Items</label>
+      <div id="quest-reward-picker"></div>
+      <textarea class="field-input" id="quest-reward-items" rows="2" style="display:none" placeholder="e.g.&#10;Void Crystal, 1"></textarea>
+    </div>
+    <div class="field-group" style="margin-bottom:16px">
+      <label class="field-label">Expires In (hours, leave blank = no expiry)</label>
+      <input class="field-input" type="number" id="quest-expires" min="1" placeholder="e.g. 72"/>
+    </div>
+    <div class="form-error" id="quest-error" style="margin-bottom:8px"></div>
+    <div style="display:flex;gap:10px">
+      <button class="btn-primary" onclick="doDropQuest()">DROP QUEST</button>
+      <button class="btn-secondary" onclick="closeModal('quest-modal')">CANCEL</button>
+    </div>
+  </div>
+</div>
+
+<div class="deity-modal" id="vision-modal" style="display:none">
+  <div class="deity-modal-box">
+    <div class="deity-modal-title">✦ SEND DIVINE VISION</div>
+    <p class="deity-modal-desc">Your message will appear as a divine vision to the chosen worshipper.</p>
+    <div class="field-group" style="margin-bottom:12px">
+      <label class="field-label">Recipient</label>
+      <div id="vision-target-display" class="modal-recipient-display" style="display:none"></div>
+      <select class="field-input" id="vision-target" style="cursor:pointer"><option value="">Select a worshipper...</option></select>
+    </div>
+    <div class="field-group" style="margin-bottom:12px">
+      <label class="field-label">Vision Type</label>
+      <div class="vision-type-grid">
+        <div class="vision-type-card selected" data-type="knowledge" onclick="selectVisionType(this,'knowledge')"><div class="vision-type-icon">📖</div><div class="vision-type-name">Knowledge</div></div>
+        <div class="vision-type-card" data-type="warning"   onclick="selectVisionType(this,'warning')">  <div class="vision-type-icon">⚠️</div><div class="vision-type-name">Warning</div></div>
+        <div class="vision-type-card" data-type="blessing"  onclick="selectVisionType(this,'blessing')"> <div class="vision-type-icon">✨</div><div class="vision-type-name">Blessing</div></div>
+        <div class="vision-type-card" data-type="prank"     onclick="selectVisionType(this,'prank')">    <div class="vision-type-icon">🎭</div><div class="vision-type-name">Prank</div></div>
+      </div>
+    </div>
+    <div class="field-group" style="margin-bottom:16px">
+      <label class="field-label">Message</label>
+      <textarea class="field-input" id="vision-message" rows="4" maxlength="500" placeholder="Write your divine vision..."></textarea>
+    </div>
+    <div class="form-error" id="vision-error" style="margin-bottom:8px"></div>
+    <div style="display:flex;gap:10px">
+      <button class="btn-primary" onclick="doSendVision()">SEND VISION</button>
+      <button class="btn-secondary" onclick="closeModal('vision-modal')">CANCEL</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ BESTOW MODAL ══ -->
+<div class="deity-modal" id="bestow-modal" style="display:none">
+  <div class="deity-modal-box">
+    <div class="deity-modal-title">✦ BESTOW RESOURCES</div>
+    <p class="deity-modal-desc">Grant resources to a worshipper. Bestow in moderation.</p>
+    <div class="field-group" style="margin-bottom:12px">
+      <label class="field-label">Recipient</label>
+      <div id="bestow-target-display" class="modal-recipient-display" style="display:none"></div>
+      <select class="field-input" id="bestow-target" style="cursor:pointer"><option value="">Select a worshipper...</option></select>
+    </div>
+    <div class="field-group" style="margin-bottom:12px">
+      <label class="field-label">Gold to Bestow</label>
+      <input class="field-input" type="number" id="bestow-gold" min="0" max="10000" placeholder="0" value="0"/>
+    </div>
+    <div class="field-group" style="margin-bottom:16px">
+      <label class="field-label">Items (one per line: name, qty)</label>
+      <textarea class="field-input" id="bestow-items" rows="4" placeholder="e.g.&#10;Minor HP Potion, 3&#10;Iron, 5"></textarea>
+    </div>
+    <div class="form-error" id="bestow-error" style="margin-bottom:8px"></div>
+    <div style="display:flex;gap:10px">
+      <button class="btn-primary" onclick="doBestow()">BESTOW</button>
+      <button class="btn-secondary" onclick="closeModal('bestow-modal')">CANCEL</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ CREATE EVENT MODAL ══ -->
+<!-- Create Event modal removed -->
+
+<!-- ══ FAITH MODAL ══ -->
+<div class="deity-modal" id="faith-modal" style="display:none">
+  <div class="deity-modal-box">
+    <div class="deity-modal-title">✦ UPDATE FAITH LEVEL</div>
+    <div class="field-group" style="margin-bottom:12px">
+      <label class="field-label">Worshipper</label>
+      <div id="faith-target-display" class="modal-recipient-display" style="display:none"></div>
+      <select class="field-input" id="faith-target" style="cursor:pointer"><option value="">Select a worshipper...</option></select>
+    </div>
+    <div class="field-group" style="margin-bottom:16px">
+      <label class="field-label">Amount (use negative to decrease)</label>
+      <input class="field-input" type="number" id="faith-amount" value="1" min="-100" max="100"/>
+    </div>
+    <div class="form-error" id="faith-error" style="margin-bottom:8px"></div>
+    <div style="display:flex;gap:10px">
+      <button class="btn-primary" onclick="doUpdateFaith()">UPDATE FAITH</button>
+      <button class="btn-secondary" onclick="closeModal('faith-modal')">CANCEL</button>
+    </div>
+  </div>
+</div>
+
+<div class="deity-page">
+
+  <!-- ══ SIDEBAR ══ -->
+  <aside class="deity-sidebar" id="deity-sidebar">
+    <div class="deity-sidebar-logo">
+      <div class="deity-sidebar-sigil-wrap">
+        <div class="deity-sidebar-sigil" id="deity-sigil-icon">✨</div>
+      </div>
+      <div>
+        <div class="deity-sidebar-name" id="deity-name">DEITY</div>
+        <div class="deity-sidebar-title" id="deity-title-display">God of —</div>
+      </div>
+    </div>
+
+    <div class="deity-sidebar-worshippers">
+      <div class="deity-sidebar-stat-label">WORSHIPPERS</div>
+      <div class="deity-sidebar-stat-value" id="worshipper-count">—</div>
+    </div>
+
+    <nav class="deity-sidebar-nav">
+      <div class="deity-nav-section">CONSOLE</div>
+      <div class="deity-nav-item active" data-panel="overview"    onclick="switchDeityPanel('overview')">   <span class="deity-nav-icon">⚡</span> Overview</div>
+      <div class="deity-nav-item"        data-panel="worshippers" onclick="switchDeityPanel('worshippers')"><span class="deity-nav-icon">👥</span> Worshippers</div>
+      <div class="deity-nav-item"        data-panel="visions"     onclick="switchDeityPanel('visions')">    <span class="deity-nav-icon">👁️</span> Divine Visions</div>
+      <div class="deity-nav-item"        data-panel="worlddev"    onclick="switchDeityPanel('worlddev')">    <span class="deity-nav-icon">🌍</span> World Development</div>
+      <!-- World Events nav item removed -->
+      <div class="deity-nav-item"        data-panel="quests"      onclick="switchDeityPanel('quests')">     <span class="deity-nav-icon">📜</span> Story Quests</div>
+      <div class="deity-nav-item"        data-panel="npcs"        onclick="switchDeityPanel('npcs')">       <span class="deity-nav-icon">🧙</span> NPC Manager</div>
+      <div class="deity-nav-item"        data-panel="chat"        onclick="switchDeityPanel('chat')">       <span class="deity-nav-icon">💬</span> RP Chat</div>
+      <div class="deity-nav-item"        data-panel="bestow"      onclick="switchDeityPanel('bestow')">     <span class="deity-nav-icon">🎁</span> Bestow</div>
+      <div class="deity-nav-item"        data-panel="factions"    onclick="switchDeityPanel('factions')">   <span class="deity-nav-icon">⚔️</span> Factions</div>
+      <div class="deity-nav-item"        data-panel="raids"       onclick="switchDeityPanel('raids')">      <span class="deity-nav-icon">👹</span> Raids</div>
+    </nav>
+
+    <div class="deity-sidebar-footer">
+      <button class="btn-logout" id="btn-logout" onclick="window._leaveWorld()">LEAVE WORLD</button>
+    </div>
+  </aside>
+
+  <!-- ══ MOBILE HEADER ══ -->
+  <div class="deity-mobile-header">
+    <button class="nav-toggle" onclick="toggleNav()">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M4 6 C4 6 12 6 20 6" stroke="#C9A84C" stroke-width="1.5" stroke-linecap="round"/>
+        <path d="M4 12 C6 12 10 10 14 12 C18 14 20 12 20 12" stroke="#C9A84C" stroke-width="1.5" stroke-linecap="round"/>
+        <path d="M4 18 C4 18 12 18 20 18" stroke="#C9A84C" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+    </button>
+    <div class="deity-mobile-title">DEITY CONSOLE</div>
+    <div class="deity-mobile-name" id="deity-mobile-name">—</div>
+  </div>
+
+  <!-- ══ MAIN CONTENT ══ -->
+  <main class="deity-main">
+    <!-- ══ CREATE WORLD DEVELOPMENT MODAL ══ -->
+    <div class="deity-modal" id="worlddev-modal" style="display:none">
+      <div class="deity-modal-box">
+        <div class="deity-modal-title">🌍 CREATE WORLD DEVELOPMENT</div>
+        <p class="deity-modal-desc">Shape the world with a divine event. All players will see this in the World Development panel.</p>
+        <div class="field-group" style="margin-bottom:12px">
+          <label class="field-label">Title</label>
+          <input class="field-input" type="text" id="worlddev-title" maxlength="80" placeholder="e.g. The Eclipse of Fortune"/>
+        </div>
+        <div class="field-group" style="margin-bottom:12px">
+          <label class="field-label">Description</label>
+          <textarea class="field-input" id="worlddev-desc" rows="4" maxlength="600" placeholder="Describe the event, its lore, and effects..."></textarea>
+        </div>
+        <div class="field-group" style="margin-bottom:16px; position:relative;">
+          <label class="field-label">Location <span style="color:#888;font-weight:normal">(optional, autocomplete)</span></label>
+          <input class="field-input" type="text" id="worlddev-location" maxlength="80" placeholder="Start typing a location..." autocomplete="off" oninput="showLocationDropdown()" onfocus="showLocationDropdown()" onblur="hideLocationDropdown()"/>
+          <div id="worlddev-location-dropdown" class="location-dropdown" style="display:none;"></div>
+        </div>
+        <div class="form-error" id="worlddev-error" style="margin-bottom:8px"></div>
+        <div style="display:flex;gap:10px">
+          <button class="btn-primary" id="add-development-btn" onclick="doCreateWorldDevelopment()">Add Development</button>
+          <button class="btn-secondary" onclick="closeModal('worlddev-modal')">CANCEL</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- WORLD DEVELOPMENT PANEL -->
+    <div class="deity-panel" id="deity-panel-worlddev">
+      <div class="panel-header"><h2>WORLD DEVELOPMENT</h2><p>Shape the world with divine events and changes</p></div>
+      <div id="world-development-panel-content">
+        <button class="btn-primary" id="create-world-development-btn" style="display:none;margin-bottom:18px" onclick="openDeityModal('worlddev-modal')">+ CREATE WORLD DEVELOPMENT</button>
+        <div id="world-development-not-worthy" style="display:none;color:#e05555;font-size:1.1rem;font-weight:600;margin-bottom:18px;text-align:center">YOU SIMPLY ARE NOT WORTHY</div>
+        <div id="world-development-list"><p style="color:var(--text-dim);font-style:italic;font-size:0.95rem">No world developments yet.</p></div>
+      </div>
+    </div>
+
+    <!-- OVERVIEW -->
+    <div class="deity-panel active" id="deity-panel-overview">
+      <div class="panel-header"><h2>OVERVIEW</h2><p id="deity-welcome">The world watches.</p></div>
+      <div class="deity-stat-grid">
+        <div class="deity-stat-card"><div class="deity-stat-label">Deity</div><div class="deity-stat-value" id="ov-deity-name">—</div><div class="deity-stat-sub" id="ov-deity-title">—</div></div>
+        <div class="deity-stat-card"><div class="deity-stat-label">Worshippers</div><div class="deity-stat-value" id="ov-worshipper-count">—</div><div class="deity-stat-sub">total</div></div>
+        <!-- Active Events stat card removed -->
+        <div class="deity-stat-card"><div class="deity-stat-label">Visions Sent</div><div class="deity-stat-value" id="ov-visions-sent">0</div><div class="deity-stat-sub">this session</div></div>
+      </div>
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-title">QUICK ACTIONS</div>
+        <div class="deity-action-grid">
+          <div class="deity-action-card" onclick="openDeityModal('vision-modal')"> <div class="deity-action-icon">👁️</div><div class="deity-action-name">Send Vision</div>   <div class="deity-action-desc">Send a divine vision to a worshipper</div></div>
+          <div class="deity-action-card" onclick="openDeityModal('bestow-modal')"> <div class="deity-action-icon">🎁</div><div class="deity-action-name">Bestow Resources</div><div class="deity-action-desc">Grant items or gold to a worshipper</div></div>
+          <!-- Create Event action card removed -->
+          <div class="deity-action-card" onclick="openDeityModal('faith-modal')">  <div class="deity-action-icon">✨</div><div class="deity-action-name">Update Faith</div>   <div class="deity-action-desc">Adjust a worshipper's faith level</div></div>
+          <div class="deity-action-card" onclick="openDeityModal('quest-modal')">  <div class="deity-action-icon">📜</div><div class="deity-action-name">Drop Quest</div>     <div class="deity-action-desc">Issue a story quest into the world</div></div>
+          <div class="deity-action-card" onclick="switchDeityPanel('npcs')">       <div class="deity-action-icon">🧙</div><div class="deity-action-name">Manage NPCs</div>   <div class="deity-action-desc">Create and control NPCs in any location</div></div>
+          <div class="deity-action-card" onclick="switchDeityPanel('chat')">       <div class="deity-action-icon">💬</div><div class="deity-action-name">RP Chat</div>       <div class="deity-action-desc">Join location chat or speak as an NPC</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <!-- Active World Events overview removed -->
+      </div>
+    </div>
+
+    <!-- WORSHIPPERS -->
+    <div class="deity-panel" id="deity-panel-worshippers">
+      <div class="panel-header"><h2>WORSHIPPERS</h2><p>All players who worship you</p></div>
+      <div style="margin-bottom:16px">
+        <input class="field-input" type="text" id="worshipper-search" placeholder="Search by name..." oninput="filterWorshippers(this.value)" style="max-width:320px"/>
+      </div>
+      <div id="worshipper-list"><p style="color:var(--text-dim);font-style:italic">Loading...</p></div>
+    </div>
+
+    <!-- DIVINE VISIONS -->
+    <div class="deity-panel" id="deity-panel-visions">
+      <div class="panel-header"><h2>DIVINE VISIONS</h2><p>Messages sent to your worshippers</p></div>
+      <button class="btn-primary" style="max-width:220px;margin-bottom:20px" onclick="openDeityModal('vision-modal')">+ SEND NEW VISION</button>
+      <div id="vision-history"><p style="color:var(--text-dim);font-style:italic">No visions sent yet.</p></div>
+    </div>
+
+    <!-- WORLD EVENTS -->
+    <!-- World Events panel removed -->
+
+    <!-- BESTOW -->
+    <div class="deity-panel" id="deity-panel-bestow">
+      <div class="panel-header"><h2>BESTOW RESOURCES</h2><p>Grant resources to your worshippers</p></div>
+      <div class="bestow-warning">⚠️ You are a god — bestow fairly and sparingly. Excessive bestowing breaks game balance.</div>
+      <button class="btn-primary" style="max-width:220px;margin-top:20px" onclick="openDeityModal('bestow-modal')">+ BESTOW RESOURCES</button>
+      <div style="margin-top:24px">
+        <div class="card-title" style="font-family:var(--ff-display);font-size:0.75rem;letter-spacing:0.12em;color:var(--gold);margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--border)">BESTOW HISTORY (THIS SESSION)</div>
+        <div id="bestow-log"><p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">No bestowals yet.</p></div>
+      </div>
+    </div>
+
+    <!-- FACTIONS -->
+    <div class="deity-panel" id="deity-panel-factions">
+      <div class="panel-header"><h2>FACTIONS</h2><p>Manage faction quests as a divine authority</p></div>
+      <div class="card" style="margin-bottom:18px">
+        <div id="faction-leader-claim-form">
+          <div class="card-title">CLAIM FACTION LEADER PROFILE</div>
+          <div class="field-group" style="margin-bottom:10px">
+            <label class="field-label">Faction</label>
+            <select class="field-input" id="faction-leader-select" style="cursor:pointer">
+              <option value="">Select a faction...</option>
+              <option value="The Veil of Dusk">The Veil of Dusk</option>
+              <option value="The Aethel Archive">The Aethel Archive</option>
+              <option value="The Iron Covenant">The Iron Covenant</option>
+              <option value="The Green Pact">The Green Pact</option>
+              <option value="The Gold Syndicate">The Gold Syndicate</option>
+              <option value="The Obsidian Order">The Obsidian Order</option>
+              <option value="The Crimson Hand">The Crimson Hand</option>
+            </select>
+          </div>
+          <div class="field-group" style="margin-bottom:10px">
+            <label class="field-label">Leader Name</label>
+            <input class="field-input" type="text" id="faction-leader-name" maxlength="40" placeholder="Leader name..."/>
+          </div>
+          <div class="field-group" style="margin-bottom:10px">
+            <label class="field-label" for="faction-leader-image-file">Profile Image</label>
+            <label for="faction-leader-image-file" class="custom-file-label" id="faction-leader-image-label" tabindex="0" style="display:inline-block;cursor:pointer;padding:10px 18px;background:linear-gradient(135deg,var(--gold-dim) 0%,var(--gold) 100%);color:var(--ink);font-family:var(--ff-display);font-size:0.85rem;letter-spacing:0.12em;font-weight:600;border-radius:var(--radius);border:none;transition:opacity 0.2s,transform 0.1s;outline:none;">Choose File</label>
+            <input type="file" id="faction-leader-image-file" accept="image/*" style="display:none"/>
+            <span id="faction-leader-image-filename" style="margin-left:12px;color:var(--text-dim);font-size:0.92em;"></span>
+            <img id="faction-leader-image-preview" src="" style="display:none;margin-top:8px;max-width:80px;max-height:80px;border-radius:50%;object-fit:cover;border:2px solid var(--gold)"/>
+          </div>
+          <div class="form-error" id="faction-leader-error" style="margin-bottom:8px"></div>
+          <button class="btn-primary" onclick="window.claimFactionLeaderProfile()">CLAIM LEADER PROFILE</button>
+        </div>
+        <!-- Edit modal will be injected dynamically -->
+      </div>
+      <div class="card" style="margin-bottom:18px">
+        <div class="card-title">CURRENT FACTION LEADERS</div>
+        <div id="faction-leader-list"><p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">No factions claimed yet.</p></div>
+      </div>
+      <!-- Collapsible post form -->
+      <div class="fq-post-collapsible" id="fq-post-collapsible">
+        <button class="fq-post-toggle" id="fq-post-toggle" onclick="window.toggleFqPostForm()">
+          <span>✦ POST FACTION QUEST</span>
+          <span class="fq-post-arrow" id="fq-post-arrow">▼</span>
+        </button>
+        <div class="fq-post-body" id="fq-post-body">
+          <div class="field-group" style="margin-bottom:12px">
+            <label class="field-label">Faction</label>
+            <input class="field-input" type="text" id="faction-quest-faction" readonly style="background:rgba(255,255,255,0.04);color:var(--gold);font-weight:bold" placeholder="Faction will auto-fill" />
+          </div>
+          <div class="field-group" style="margin-bottom:12px">
+            <label class="field-label">Quest Title</label>
+            <input class="field-input" type="text" id="fq-title" maxlength="60" placeholder="e.g. The Blood Rite of Dusk"/>
+          </div>
+          <div class="field-group" style="margin-bottom:12px">
+            <label class="field-label">Description / Lore</label>
+            <textarea class="field-input" id="fq-desc" rows="4" maxlength="600" placeholder="Describe the quest, its lore, and what members must do..."></textarea>
+          </div>
+          <div class="two-col" style="margin-bottom:12px">
+            <div class="field-group">
+              <label class="field-label">Reward — Gold</label>
+              <input class="field-input" type="number" id="fq-reward-gold" min="0" placeholder="0"/>
+            </div>
+            <div class="field-group">
+              <label class="field-label">Reward — EXP</label>
+              <input class="field-input" type="number" id="fq-reward-exp" min="0" placeholder="0"/>
+            </div>
+          </div>
+          <div class="field-group" style="margin-bottom:12px">
+            <label class="field-label">Reward — Items</label>
+            <div id="fq-reward-picker"></div>
+            <textarea class="field-input" id="fq-reward-items" rows="2" style="display:none" placeholder="e.g.&#10;Void Crystal, 1"></textarea>
+          </div>
+          <div class="form-error" id="faction-quest-error" style="margin-bottom:8px"></div>
+          <button class="btn-primary" onclick="doPostFactionQuest()">POST QUEST</button>
+        </div>
+      </div>
+      <!-- Active / Completed split -->
+      <div class="two-col" style="margin-top:8px">
+        <div>
+          <div class="card-title" style="margin-bottom:12px">ACTIVE FACTION QUESTS</div>
+          <div id="faction-quests-active"><p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">No active quests.</p></div>
+        </div>
+        <div>
+          <div class="card-title" style="margin-bottom:12px">COMPLETED / ENDED</div>
+          <div id="faction-quests-done"><p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">None yet.</p></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- QUESTS -->
+    <div class="deity-panel" id="deity-panel-quests">
+      <div class="panel-header"><h2>STORY QUESTS</h2><p>Story quests you've issued into the world</p></div>
+      <div style="display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap">
+        <button class="btn-primary" onclick="openDeityModal('quest-modal')">+ DROP NEW QUEST</button>
+      </div>
+      <div class="two-col">
+        <div>
+          <div class="card-title" style="margin-bottom:12px">ACTIVE QUESTS</div>
+          <div id="deity-quests-active"><p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">No active quests.</p></div>
+        </div>
+        <div>
+          <div class="card-title" style="margin-bottom:12px">COMPLETED / EXPIRED</div>
+          <div id="deity-quests-done"><p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">None yet.</p></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- NPC MANAGER -->
+    <div class="deity-panel" id="deity-panel-npcs">
+      <div class="panel-header"><h2>NPC MANAGER</h2><p>Create and control NPCs across all locations. Set their auto-responses and speak through them in chat.</p></div>
+      <div style="margin-bottom:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <select class="field-input" id="npc-location-filter" style="max-width:260px;cursor:pointer" onchange="window._loadDeityNpcs?.(this.value)">
+          <option value="">— Select a location —</option>
+        </select>
+        <button class="btn-primary" onclick="window._openDeityNpcForm?.(null)">+ CREATE NPC</button>
+      </div>
+      <div id="deity-npc-list"><p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">Select a location to manage its NPCs.</p></div>
+    </div>
+
+    <!-- RP CHAT -->
+    <div class="deity-panel" id="deity-panel-chat">
+      <div class="panel-header"><h2>RP CHAT</h2><p>Speak into the world as yourself or through an NPC</p></div>
+
+      <!-- Chat tabs -->
+      <div class="dchat-tabs">
+        <button class="dchat-tab active" id="dchat-tab-location" onclick="window._switchDeityChatTab?.('location')">📍 Location Chat</button>
+        <button class="dchat-tab"        id="dchat-tab-general"  onclick="window._switchDeityChatTab?.('general')">🌍 General</button>
+      </div>
+
+      <!-- Controls row (hidden on General tab) -->
+      <div class="dchat-controls" id="dchat-location-controls">
+        <div class="dchat-control-group">
+          <label class="dchat-label">📍 Location</label>
+          <select class="field-input dchat-select" id="deity-chat-location" onchange="window._switchDeityChat?.(this.value)">
+            <option value="">— Pick a location —</option>
+          </select>
+        </div>
+        <div class="dchat-control-group">
+          <label class="dchat-label">🎭 Speaking as</label>
+          <select class="field-input dchat-select" id="deity-chat-as">
+            <option value="self">As Myself</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- General tab identity picker (hidden on Location tab) -->
+      <div class="dchat-controls" id="dchat-general-controls" style="display:none">
+        <div class="dchat-control-group">
+          <label class="dchat-label">🎭 Speaking as</label>
+          <select class="field-input dchat-select" id="deity-general-as">
+            <option value="self">As Myself</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Players in location -->
+      <div class="dchat-players-bar" id="dchat-players-bar" style="display:none">
+        <span class="dchat-players-label" id="dchat-players-label">👥 In this location:</span>
+        <div class="dchat-players-list" id="dchat-players-list"></div>
+      </div>
+
+      <!-- Single chat window -->
+      <div class="dchat-window" id="deity-chat-messages">
+        <div class="chat-empty"><span>✦</span><span>Select a location to view its chat.</span></div>
+      </div>
+
+      <!-- Replying-to bar (hidden until a reply is started) -->
+      <div id="dchat-replying-to" class="dchat-replying-to" style="display:none;"></div>
+
+      <!-- Input row -->
+      <div class="dchat-input-row">
+        <textarea class="dchat-input" id="deity-chat-input" placeholder="Speak your truth into the world…" rows="1"
+          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();window._sendDeityChat?.()}"></textarea>
+        <button class="dchat-send-btn" onclick="window._sendDeityChat?.()">SEND</button>
+      </div>
+    </div>
+
+    <!-- RAIDS -->
+    <div class="deity-panel" id="deity-panel-raids">
+      <div class="panel-header"><h2>RAIDS</h2><p>Create and manage boss encounters for player raids</p></div>
+
+      <!-- Create / Edit boss form (collapsible) -->
+      <div class="fq-post-collapsible" id="boss-form-collapsible">
+        <button class="fq-post-toggle" id="boss-form-toggle" onclick="window._toggleBossForm?.()">
+          <span>👹 CREATE NEW BOSS</span>
+          <span class="fq-post-arrow" id="boss-form-arrow">▼</span>
+        </button>
+        <div class="fq-post-body" id="boss-form-body">
+          <input type="hidden" id="boss-edit-id" value=""/>
+          <div class="two-col" style="margin-bottom:12px">
+            <div class="field-group">
+              <label class="field-label">Boss Name</label>
+              <input class="field-input" type="text" id="boss-name" maxlength="60" placeholder="e.g. Wraithbound Titan"/>
+            </div>
+            <div class="field-group">
+              <label class="field-label">Emoji (if no image)</label>
+              <input class="field-input" type="text" id="boss-icon" maxlength="4" placeholder="👹" value="👹"/>
+            </div>
+          </div>
+          <div class="field-group" style="margin-bottom:12px">
+            <label class="field-label">Boss Image <span style="color:#888;font-weight:normal">(optional — replaces emoji)</span></label>
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+              <label for="boss-image-file" class="custom-file-label" id="boss-image-label" tabindex="0">Choose Image</label>
+              <input type="file" id="boss-image-file" accept="image/*" style="display:none"/>
+              <span id="boss-image-filename" style="color:var(--text-dim);font-size:0.88rem"></span>
+            </div>
+            <img id="boss-image-preview" src="" style="display:none;margin-top:10px;width:90px;height:90px;object-fit:cover;border-radius:10px;border:2px solid var(--gold)"/>
+            <input type="hidden" id="boss-image-current" value=""/>
+            <div id="boss-image-current-wrap" style="display:none;margin-top:8px">
+              <img id="boss-image-current-preview" src="" style="width:90px;height:90px;object-fit:cover;border-radius:10px;border:2px solid var(--gold-dim)"/>
+              <div style="font-size:0.75rem;color:var(--text-dim);margin-top:4px">Current image — upload a new one to replace</div>
+            </div>
+          </div>
+          <div class="field-group" style="margin-bottom:12px">
+            <label class="field-label">Description</label>
+            <textarea class="field-input" id="boss-desc" rows="2" maxlength="300" placeholder="A short description shown to players before the fight..."></textarea>
+          </div>
+          <div class="field-group" style="margin-bottom:12px">
+            <label class="field-label">Abilities <span style="color:#888;font-weight:normal">(up to 5 — name the flavour, pick the mechanic)</span></label>
+            <div id="boss-ability-slots" style="display:flex;flex-direction:column;gap:10px;margin-top:4px"></div>
+            <button class="btn-secondary" type="button" id="boss-ability-add-btn" onclick="window._addAbilitySlot?.()" style="margin-top:8px;width:auto;padding:5px 14px;font-size:0.8rem">+ Add Ability</button>
+            <!-- Mechanic hint bar -->
+            <div style="margin-top:10px;background:var(--ink1);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+              <div style="font-size:0.72rem;font-family:var(--font-mono);font-weight:700;color:var(--gold-dim);letter-spacing:0.06em;margin-bottom:6px">MECHANIC GUIDE</div>
+              <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:4px 12px;font-size:0.75rem;color:var(--text-dim)">
+                <span><b style="color:var(--text-light)">aoe</b> — hits all party members</span>
+                <span><b style="color:var(--text-light)">drain</b> — steals HP from one target</span>
+                <span><b style="color:var(--text-light)">freeze</b> — skips target's next turn</span>
+                <span><b style="color:var(--text-light)">weaken</b> — reduces party attack (2 turns)</span>
+                <span><b style="color:var(--text-light)">enrage</b> — boss gains +30% ATK permanently</span>
+                <span><b style="color:var(--text-light)">shield</b> — boss takes 50% damage for 2 turns</span>
+                <span><b style="color:var(--text-light)">instakill</b> — 15% chance to one-shot a target</span>
+                <span><b style="color:var(--text-light)">heal</b> — boss recovers 8% of max HP</span>
+                <span><b style="color:var(--text-light)">teleport</b> — true dmg, bypasses defense entirely</span>
+                <span><b style="color:var(--text-light)">summon</b> — 2–4 minion strikes hit random members</span>
+                <span><b style="color:var(--text-light)">curse</b> — marked player takes big dmg if they act</span>
+                <span><b style="color:var(--text-light)">reflect</b> — 40% of next hit is mirrored back</span>
+                <span><b style="color:var(--text-light)">berserk</b> — pressures now, goes full rage at ≤30% HP</span>
+                <span><b style="color:var(--text-light)">silence</b> — blocks target's skills for 1 turn</span>
+                <span><b style="color:var(--text-light)">execute</b> — instantly kills any target below 20% HP</span>
+                <span><b style="color:var(--text-light)">blind</b> — target's next attack has 60% miss chance</span>
+                <span><b style="color:var(--text-light)">leech</b> — AoE drain; boss heals for total damage dealt</span>
+                <span><b style="color:var(--text-light)">basic</b> — single target physical hit</span>
+              </div>
+            </div>
+          </div>
+          <div class="field-group" style="margin-bottom:12px">
+            <label class="field-label" style="margin-bottom:8px">Base Stats</label>
+            <div class="three-col">
+              <div class="field-group">
+                <label class="field-label" style="font-size:0.72rem">HP</label>
+                <input class="field-input" type="number" id="boss-hp" min="100" placeholder="1000"/>
+              </div>
+              <div class="field-group">
+                <label class="field-label" style="font-size:0.72rem">ATK</label>
+                <input class="field-input" type="number" id="boss-atk" min="1" placeholder="70"/>
+              </div>
+              <div class="field-group">
+                <label class="field-label" style="font-size:0.72rem">DEF</label>
+                <input class="field-input" type="number" id="boss-def" min="0" placeholder="35"/>
+              </div>
+            </div>
+          </div>
+          <div class="form-error" id="boss-form-error" style="margin-bottom:8px"></div>
+          <div style="display:flex;gap:10px">
+            <button class="btn-primary" id="boss-save-btn" onclick="window._saveBoss?.()">CREATE BOSS</button>
+            <button class="btn-secondary" onclick="window._cancelBossEdit?.()">CLEAR</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Boss list -->
+      <div style="margin-top:18px">
+        <div class="card-title" style="margin-bottom:12px">ALL RAID BOSSES</div>
+        <div id="deity-boss-list"><p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">Loading bosses...</p></div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  // ── Nav ────────────────────────────────────────────────────
+  function toggleNav() {
+    const sidebar = document.getElementById('deity-sidebar');
+    const overlay = document.getElementById('nav-overlay');
+    const open = sidebar.classList.toggle('nav-open');
+    overlay.classList.toggle('active', open);
+    document.body.style.overflow = open ? 'hidden' : '';
+  }
+  function closeNav() {
+    document.getElementById('deity-sidebar').classList.remove('nav-open');
+    document.getElementById('nav-overlay').classList.remove('active');
+    document.body.style.overflow = '';
+  }
+
+  function switchDeityPanel(name) {
+    document.querySelectorAll('.deity-panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.deity-nav-item').forEach(n => n.classList.remove('active'));
+    document.getElementById('deity-panel-' + name)?.classList.add('active');
+    document.querySelector(`.deity-nav-item[data-panel="${name}"]`)?.classList.add('active');
+    window._onDeityPanelSwitch?.(name);
+    // Ensure image preview event is attached when switching to Factions panel
+    if (name === 'factions' && typeof setupFactionLeaderImagePreview === 'function') {
+      setTimeout(setupFactionLeaderImagePreview, 0);
+    }
+    closeNav();
+  }
+
+  // ── Modals ─────────────────────────────────────────────────
+  function openDeityModal(id) {
+    window._populateWorshipperSelects?.();
+    // Reset recipient display to dropdown mode (overview/quick-action path)
+    ["vision","bestow","faith"].forEach(t => window._resetModalRecipient?.(t));
+    document.getElementById(id).style.display = 'flex';
+  }
+  function closeModal(id) {
+    document.getElementById(id).style.display = 'none';
+    // Reset recipient fields back to dropdown for next open
+    ["vision","bestow","faith"].forEach(t => window._resetModalRecipient?.(t));
+  }
+
+  // ── Vision type ────────────────────────────────────────────
+  let _visionType = 'knowledge';
+  function selectVisionType(el, type) {
+    document.querySelectorAll('.vision-type-card').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+    _visionType = type;
+  }
+
+  // ── Quest type ─────────────────────────────────────────────
+  let _questType = 'story';
+  function selectQuestType(el, type) {
+    document.querySelectorAll('[data-qtype]').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+    _questType = type;
+  }
+
+  // ── Dispatchers ────────────────────────────────────────────
+  function doSendVision()        { window._sendVision?.(_visionType); }
+  function doBestow()            { window._doBestow?.(); }
+  // doCreateEvent dispatcher removed
+  function doUpdateFaith()       { window._doUpdateFaith?.(); }
+  function doDropQuest()         { window._doDropQuest?.(_questType); }
+  function filterQuests(type, btn) {
+    document.querySelectorAll('.quest-filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    window._filterDeityQuests?.(type);
+  }
+  function filterWorshippers(q)  { window._filterWorshippers?.(q); }
+  function doPostFactionMission(){ window._postFactionMission?.(); }
+
+  // ── Toast ──────────────────────────────────────────────────
+  let _tt;
+  function showToast(msg, type='') {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.className = 'toast show ' + type;
+    clearTimeout(_tt); _tt = setTimeout(() => t.classList.remove('show'), 3500);
+  }
+  window.showToast = showToast;
+</script>
+
+<script type="module">
+  import { initDeityDashboard } from '../js/deity-dashboard.js';
+  initDeityDashboard();
+</script>
+</body>
+
+<style id="dq-sub-extra">
+.dq-sub-proof-row {
+  font-size: 0.82rem;
+  color: var(--text-light);
+  margin: 4px 0;
+  line-height: 1.5;
+}
+.dq-sub-activity-toggle {
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  color: var(--gold-dim);
+  cursor: pointer;
+  margin-top: 8px;
+  padding: 4px 0;
+  border-top: 1px solid var(--border);
+  user-select: none;
+}
+.dq-sub-activity-toggle:hover { color: var(--gold); }
+.dq-sub-activity-list {
+  margin-top: 6px;
+  background: var(--ink1);
+  border-radius: 5px;
+  padding: 8px 10px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.dq-sub-activity-item {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  padding: 2px 0;
+  border-bottom: 1px solid var(--border);
+  line-height: 1.5;
+}
+.dq-sub-activity-item:last-child { border-bottom: none; }
+</style>
+  <!-- Deity chat player popup -->
+  <div class="dchat-player-popup" id="dchat-player-popup" style="display:none" onclick="window._closeDchatPlayerPopup()">
+    <div class="dchat-player-popup-inner" onclick="event.stopPropagation()">
+      <div class="dchat-player-popup-name" id="dchat-popup-player-name">—</div>
+      <button class="dchat-popup-speak-btn" onclick="window._dchatSpeakToPlayer()">💬 SPEAK</button>
+    </div>
+  </div>
+</html>

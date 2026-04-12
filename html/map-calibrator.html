@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8"/>
+<title>Map Pin Calibrator — Forge of Legends</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#0d0b08; color:#fff; font-family:monospace; display:flex; flex-direction:column; height:100vh; }
+  #toolbar { background:#1a1208; border-bottom:1px solid #3a2a10; padding:10px 14px; display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  #toolbar label { font-size:11px; color:#c9a84c; letter-spacing:0.08em; }
+  #toolbar select, #toolbar input[type=text] { background:#0d0b08; border:1px solid #3a2a10; color:#fff; padding:4px 8px; font-family:monospace; font-size:12px; border-radius:4px; }
+  #toolbar button { background:#b8960a; color:#1a1200; border:none; padding:5px 14px; border-radius:4px; cursor:pointer; font-size:11px; font-weight:600; letter-spacing:0.06em; }
+  #toolbar button.sec { background:#2a2010; color:#c9a84c; border:1px solid #3a2a10; }
+  #map-wrap { position:relative; flex:1; overflow:hidden; cursor:crosshair; background:#0a0c14; display:flex; align-items:center; justify-content:center; }
+  #map-img { max-width:100%; max-height:100%; object-fit:contain; display:block; user-select:none; }
+  .pin { position:absolute; transform:translate(-50%,-50%); pointer-events:none; z-index:10; }
+  .pin-dot { width:12px; height:12px; border-radius:50%; border:2px solid rgba(255,255,255,0.7); }
+  .pin-lbl { position:absolute; left:50%; transform:translateX(-50%); top:15px; white-space:nowrap; font-size:9px; color:#f0e8d0; text-shadow:0 1px 4px rgba(0,0,0,0.95); background:rgba(0,0,0,0.6); padding:1px 5px; border-radius:3px; }
+  #out-panel { background:#111; border-top:1px solid #2a1a08; padding:10px 14px; max-height:180px; overflow-y:auto; }
+  #out-list { font-size:11px; color:#aaa; line-height:1.9; }
+  .c-coord { color:#4ade80; } .c-lbl { color:#c9a84c; }
+  #cur { position:absolute; bottom:8px; right:8px; font-size:11px; color:#888; background:rgba(0,0,0,0.6); padding:3px 8px; border-radius:4px; pointer-events:none; z-index:30; }
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <label>MAP</label>
+  <select id="img-sel">
+    <option value="world">World Map</option>
+    <option value="frostspire">Frostspire (Capital)</option>
+    <option value="frost_wildlands">Frost Wildlands</option>
+    <option value="whitecrest">Whitecrest Village</option>
+    <option value="icerun">Icerun Hamlet</option>
+    <option value="paleglow">Paleglow Town</option>
+    <option value="mistveil">Mistveil Town</option>
+    <option value="solmere">Solmere (Capital)</option>
+    <option value="verdantis_wildlands">Verdantis Wildlands</option>
+    <option value="sunpetal">Sunpetal Village</option>
+    <option value="basil">Basil Village</option>
+    <option value="riverend">Riverend Town</option>
+    <option value="verdance">Verdance Town</option>
+    <option value="vorthak">Vorthak</option>
+    <option value="nyx_abyss">Nyx Abyss</option>
+  </select>
+  <label>LABEL</label>
+  <input type="text" id="pin-lbl" placeholder="Pin name" style="width:170px"/>
+  <label>COLOR</label>
+  <select id="pin-col">
+    <option value="#e8d070">Gold — settlement/capital</option>
+    <option value="#e05555">Red — monster zone</option>
+    <option value="#70c0e0">Blue — resource zone</option>
+    <option value="#d070e0">Purple — deity/endgame</option>
+    <option value="#4fc870">Green — player location</option>
+  </select>
+  <button class="sec" onclick="clearPins()">CLEAR</button>
+  <button onclick="copyOut()">COPY JSON</button>
+</div>
+
+<div id="map-wrap">
+  <img id="map-img" draggable="false"/>
+  <div id="cur">x:0% y:0%</div>
+</div>
+
+<div id="out-panel">
+  <div style="font-size:10px;color:#c9a84c;letter-spacing:0.1em;margin-bottom:5px;">PINS — click map to place, COPY JSON when done</div>
+  <div id="out-list">No pins yet.</div>
+</div>
+
+<script>
+const IMGS = {
+  world:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fworld-map%2Fworld-map.jpeg?alt=media&token=0cb306f5-391f-42d3-b987-a2cbb88d9fc0",
+  frostspire:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrostspire.jpeg?alt=media&token=02a9f440-6dc2-4d30-b6dd-3393c156e6ca",
+  whitecrest:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Fwhitecrest_village.jpeg?alt=media&token=8dd42296-a946-481d-b26f-f4cac2b7d66c",
+  icerun:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ficerun_hamlet.jpeg?alt=media&token=dfd74d98-9363-4514-a2cf-d4e10d1aaeb7",
+  paleglow:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Fpaleglow_town.jpeg?alt=media&token=083ffc0b-2bfa-4708-92f4-ea1cac3f2390",
+  mistveil:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Fmistveil_town.jpeg?alt=media&token=3fd261ca-b5d2-4096-8b0c-9c0f53e2c228",
+  frost_wildlands:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost_wildlands.jpeg?alt=media&token=6a811429-0b80-4be9-a10f-3a7b2f929420",
+  solmere:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fsolmere.jpeg?alt=media&token=d651b87b-c394-4aa7-8177-c533daa67da2",
+  sunpetal:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fsunpetal_village.jpeg?alt=media&token=da53581d-271c-4879-a40f-460c19a8879e",
+  basil:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fbasil_village.jpeg?alt=media&token=aaa9091c-6f79-4ddf-8136-2300dd7db9e8",
+  riverend:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Friverend_town.jpeg?alt=media&token=27721626-45d4-4b92-b089-24ae514b57f3",
+  verdance:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdance_town.jpeg?alt=media&token=06f44360-80c6-422f-8877-74aec213608f",
+  verdantis_wildlands:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis_wildlands.jpeg?alt=media&token=1897eed1-4719-4aeb-aed7-14be9434c38e",
+  vorthak:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fvorthak.jpeg?alt=media&token=4e8578db-8b12-49f3-8ff6-efd4fb75be6c",
+  nyx_abyss:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fnyx-abyss%2Fnyx-abyss.jpeg?alt=media&token=f53427ea-4393-48e1-93d7-c83f7823dd8a",
+};
+
+let pins=[], curMap="world";
+const img=document.getElementById("map-img"), wrap=document.getElementById("map-wrap"), cur=document.getElementById("cur");
+img.src=IMGS.world;
+
+document.getElementById("img-sel").addEventListener("change",e=>{ curMap=e.target.value; pins=[]; img.src=IMGS[curMap]; render(); renderList(); });
+
+wrap.addEventListener("mousemove",e=>{
+  const r=img.getBoundingClientRect();
+  cur.textContent=`x:${((e.clientX-r.left)/r.width*100).toFixed(1)}%  y:${((e.clientY-r.top)/r.height*100).toFixed(1)}%`;
+});
+
+wrap.addEventListener("click",e=>{
+  const r=img.getBoundingClientRect();
+  if (e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom) return;
+  const x=parseFloat(((e.clientX-r.left)/r.width*100).toFixed(1));
+  const y=parseFloat(((e.clientY-r.top)/r.height*100).toFixed(1));
+  const label=document.getElementById("pin-lbl").value||`Pin ${pins.length+1}`;
+  const color=document.getElementById("pin-col").value;
+  pins.push({label,x,y,color});
+  render(); renderList();
+});
+
+function render(){
+  document.querySelectorAll(".pin").forEach(el=>el.remove());
+  const r=img.getBoundingClientRect(), wr=wrap.getBoundingClientRect();
+  pins.forEach(p=>{
+    const el=document.createElement("div"); el.className="pin";
+    el.style.left=(r.left-wr.left+(p.x/100)*r.width)+"px";
+    el.style.top=(r.top-wr.top+(p.y/100)*r.height)+"px";
+    el.innerHTML=`<div class="pin-dot" style="background:${p.color};box-shadow:0 0 8px ${p.color}80;"></div><div class="pin-lbl">${p.label}</div>`;
+    wrap.appendChild(el);
+  });
+}
+
+function renderList(){
+  const el=document.getElementById("out-list");
+  if (!pins.length){el.innerHTML="No pins yet.";return;}
+  el.innerHTML=pins.map((p,i)=>`<div>[${i+1}] <span class="c-lbl">"${p.label}"</span> → <span class="c-coord">x:${p.x}  y:${p.y}</span></div>`).join("");
+}
+
+function clearPins(){pins=[];render();renderList();}
+
+function copyOut(){
+  const out="// "+document.getElementById("img-sel").value+" pins\n"+pins.map(p=>`{ label:"${p.label}", x:${p.x}, y:${p.y} }`).join(",\n");
+  navigator.clipboard.writeText(out).then(()=>{
+    const b=document.querySelector("button:not(.sec)"); b.textContent="COPIED!";
+    setTimeout(()=>b.textContent="COPY JSON",1500);
+  });
+}
+
+window.addEventListener("resize",render);
+img.addEventListener("load",render);
+</script>
+</body>
+</html>

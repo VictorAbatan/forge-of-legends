@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Create Character — Forge of Legends</title>
+<link rel="stylesheet" href="../css/global.css"/>
+<link rel="stylesheet" href="../css/create-character.css"/>
+</head>
+<body>
+
+<div class="bg-glow"></div>
+<div class="bg-texture"></div>
+
+<div class="loading-overlay" id="loading">
+  <div class="loading-title">FORGE OF LEGENDS</div>
+  <div class="loading-dots">
+    <div class="loading-dot"></div>
+    <div class="loading-dot"></div>
+    <div class="loading-dot"></div>
+  </div>
+</div>
+
+<div class="create-page">
+  <div class="create-container">
+
+    <div class="page-heading anim-fadedown">
+      <h2>FORGE YOUR LEGEND</h2>
+      <p>Every choice you make here will echo through eternity</p>
+    </div>
+
+    <!-- Step indicators — 5 steps -->
+    <div class="steps-indicator anim-fadedown anim-delay-1">
+      <div class="step-dot active" id="dot-1">1<span class="step-label">Identity</span></div>
+      <div class="step-line" id="line-1"></div>
+      <div class="step-dot" id="dot-2">2<span class="step-label">Race</span></div>
+      <div class="step-line" id="line-2"></div>
+      <div class="step-dot" id="dot-3">3<span class="step-label">Class</span></div>
+      <div class="step-line" id="line-3"></div>
+      <div class="step-dot" id="dot-4">4<span class="step-label">Deity</span></div>
+      <div class="step-line" id="line-4"></div>
+      <div class="step-dot" id="dot-5">5<span class="step-label">Kingdom</span></div>
+    </div>
+
+    <div class="create-card anim-fadeup anim-delay-2">
+
+      <!-- ══════════════════════
+           STEP 1 — IDENTITY
+      ══════════════════════ -->
+      <div class="create-step active" id="step-1">
+        <div class="field-group">
+          <label class="field-label" for="char-name">Character Name</label>
+          <input class="field-input" type="text" id="char-name"
+                 placeholder="What do they call you?" maxlength="30" autocomplete="off"/>
+        </div>
+        <div class="field-group">
+          <label class="field-label" for="char-sex">Sex</label>
+          <div class="sex-select">
+            <div class="sex-card" data-sex="Male" onclick="selectSex(this,'Male')">
+              <div class="sex-icon">♂</div>
+              <div class="sex-label">MALE</div>
+            </div>
+            <div class="sex-card" data-sex="Female" onclick="selectSex(this,'Female')">
+              <div class="sex-icon">♀</div>
+              <div class="sex-label">FEMALE</div>
+            </div>
+          </div>
+        </div>
+        <div class="field-group">
+          <label class="field-label" for="char-age">Age</label>
+          <input class="field-input" type="number" id="char-age"
+                 placeholder="Character's age" min="1" max="9999" autocomplete="off"/>
+        </div>
+        <div class="field-group">
+          <label class="field-label" for="char-bio">Appearance &amp; Background</label>
+          <textarea class="field-input" id="char-bio" rows="4"
+                    placeholder="Describe your character's appearance, history and personality..."></textarea>
+        </div>
+        <div class="step-nav">
+          <button class="btn-primary" id="btn-next-1">NEXT — CHOOSE YOUR RACE</button>
+        </div>
+      </div>
+
+      <!-- ══════════════════════
+           STEP 2 — RACE
+      ══════════════════════ -->
+      <div class="create-step" id="step-2">
+        <p class="step-hint">Your race grants passive bonuses that stay with you forever. Choose wisely.</p>
+        <div class="race-grid">
+
+          <div class="race-card" data-race="Human">
+            <div class="race-icon">🧑</div>
+            <div class="race-name">HUMAN</div>
+            <div class="race-trait">+10% EXP from battles</div>
+          </div>
+
+          <div class="race-card" data-race="Elf">
+            <div class="race-icon">🧝</div>
+            <div class="race-name">ELF</div>
+            <div class="race-trait">Magical skills cost less mana</div>
+          </div>
+
+          <div class="race-card" data-race="Orc">
+            <div class="race-icon">🪖</div>
+            <div class="race-name">ORC</div>
+            <div class="race-trait">+10% melee damage</div>
+          </div>
+
+          <div class="race-card" data-race="Dwarf">
+            <div class="race-icon">⛏️</div>
+            <div class="race-name">DWARF</div>
+            <div class="race-trait">+10% stat from gear</div>
+          </div>
+
+          <div class="race-card" data-race="Fairy">
+            <div class="race-icon">🧚</div>
+            <div class="race-name">FAIRY</div>
+            <div class="race-trait">+10% luck</div>
+          </div>
+
+          <div class="race-card" data-race="Undead">
+            <div class="race-icon">💀</div>
+            <div class="race-name">UNDEAD</div>
+            <div class="race-trait">+10% melee resistance</div>
+          </div>
+
+          <div class="race-card" data-race="Dragonborn">
+            <div class="race-icon">🐉</div>
+            <div class="race-name">DRAGONBORN</div>
+            <div class="race-trait">+10% magic resistance</div>
+          </div>
+
+        </div>
+        <div class="step-nav">
+          <button class="btn-secondary" id="btn-back-2">BACK</button>
+          <button class="btn-primary"   id="btn-next-2">NEXT — CHOOSE YOUR CLASS</button>
+        </div>
+      </div>
+
+      <!-- ══════════════════════
+           STEP 3 — CLASS
+      ══════════════════════ -->
+      <div class="create-step" id="step-3">
+        <p class="step-hint">Your class defines how you fight. Each has a unique skill tree to master.</p>
+        <div class="class-grid">
+
+          <div class="class-card" data-class="Warrior">
+            <div class="class-icon">⚔️</div>
+            <div class="class-name">WARRIOR</div>
+            <div class="class-role">Melee Damage</div>
+            <div class="class-desc">The classic frontline fighter who overwhelms enemies with raw skill.</div>
+          </div>
+
+          <div class="class-card" data-class="Guardian">
+            <div class="class-icon">🛡️</div>
+            <div class="class-name">GUARDIAN</div>
+            <div class="class-role">Tank / Defense</div>
+            <div class="class-desc">The defensive protector who absorbs damage and shields allies.</div>
+          </div>
+
+          <div class="class-card" data-class="Arcanist">
+            <div class="class-icon">🔮</div>
+            <div class="class-name">ARCANIST</div>
+            <div class="class-role">Magic Damage</div>
+            <div class="class-desc">A master of arcane power who channels destructive magic.</div>
+          </div>
+
+          <div class="class-card" data-class="Hunter">
+            <div class="class-icon">🏹</div>
+            <div class="class-name">HUNTER</div>
+            <div class="class-role">Ranged Damage</div>
+            <div class="class-desc">A master who specializes in ranged combat and traps.</div>
+          </div>
+
+          <div class="class-card" data-class="Assassin">
+            <div class="class-icon">🗡️</div>
+            <div class="class-name">ASSASSIN</div>
+            <div class="class-role">Stealth</div>
+            <div class="class-desc">A stealth fighter who strikes enemies before they can react.</div>
+          </div>
+
+          <div class="class-card" data-class="Cleric">
+            <div class="class-icon">✨</div>
+            <div class="class-name">CLERIC</div>
+            <div class="class-role">Support</div>
+            <div class="class-desc">A divine caster who channels the blessings of the gods.</div>
+          </div>
+
+          <div class="class-card" data-class="Summoner">
+            <div class="class-icon">🌀</div>
+            <div class="class-name">SUMMONER</div>
+            <div class="class-role">Hybrid Magic</div>
+            <div class="class-desc">A mystical class that summons creatures from other realms.</div>
+          </div>
+
+        </div>
+        <div class="step-nav">
+          <button class="btn-secondary" id="btn-back-3">BACK</button>
+          <button class="btn-primary"   id="btn-next-3">NEXT — CHOOSE YOUR DEITY</button>
+        </div>
+      </div>
+
+      <!-- ══════════════════════
+           STEP 4 — DEITY
+      ══════════════════════ -->
+      <div class="create-step" id="step-4">
+        <p class="step-hint">The deity you worship determines your blessing, advancement ingredients, and faith path.</p>
+        <div class="deity-grid">
+
+          <div class="deity-card" data-deity="Sah'run">
+            <div class="deity-card-icon"><img src="https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/deity-images%2Fsah'run.jpeg?alt=media&token=a9ba07ac-26ad-405e-a773-3959a9dd5d9c" alt="Sah'run"/></div>
+            <div class="deity-card-name">SAH'RUN</div>
+            <div class="deity-card-domain">God of Flames · Flames, Luminance, Hellfire</div>
+            <div class="deity-card-desc">The lord of flames and embodiment of scorch. Also known as The Demon of Fire.</div>
+            <div class="deity-card-blessing">Blessing: Flame of Forge — 3% chance enemies drop forge materials</div>
+          </div>
+
+          <div class="deity-card" data-deity="Alistor">
+            <div class="deity-card-icon"><img src="https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/deity-images%2Falistor.jpeg?alt=media&token=00925b01-6a3f-4844-a833-99aabd61ca45" alt="Alistor"/></div>
+            <div class="deity-card-name">ALISTOR</div>
+            <div class="deity-card-domain">God of Darkness · Darkness, Slumber, Secrets</div>
+            <div class="deity-card-desc">The God of darkness and shadows. Also known as the Final Slumber.</div>
+            <div class="deity-card-blessing">Blessing: Veil-step — 3% reduced chance of being robbed while exploring</div>
+          </div>
+
+          <div class="deity-card" data-deity="Elionidas">
+            <div class="deity-card-icon"><img src="https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/deity-images%2Felionidas.jpeg?alt=media&token=3076c6f2-1e25-4664-8a50-668c834b62f8" alt="Elionidas"/></div>
+            <div class="deity-card-name">ELIONIDAS</div>
+            <div class="deity-card-domain">God of Abundance · Fate, Blessings, Riches</div>
+            <div class="deity-card-desc">The God of wealth, good luck and opportunities. Also known as The Fortunal.</div>
+            <div class="deity-card-blessing">Blessing: Fortune's Drift — 3% chance of finding precious loot while exploring</div>
+          </div>
+
+          <div class="deity-card" data-deity="Mah'run">
+            <div class="deity-card-icon"><img src="https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/deity-images%2Fmah'run.jpeg?alt=media&token=7169560d-b36d-4009-9344-4703d5dca35b" alt="Mah'run"/></div>
+            <div class="deity-card-name">MAH'RUN</div>
+            <div class="deity-card-domain">Goddess of Stars · Stars, Cosmos, Guidance</div>
+            <div class="deity-card-desc">The Goddess of the night sky and eternal stars. Also known as the Astral Mother.</div>
+            <div class="deity-card-blessing">Blessing: +3% chance of encountering rare events and special locations</div>
+          </div>
+
+          <div class="deity-card" data-deity="Freyja">
+            <div class="deity-card-icon"><img src="https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/deity-images%2Ffreyja.jpeg?alt=media&token=434371f1-7d82-4d87-b7bb-4545fe37b5e6" alt="Freyja"/></div>
+            <div class="deity-card-name">FREYJA</div>
+            <div class="deity-card-domain">Goddess of Love · Love, Souls, Desire</div>
+            <div class="deity-card-desc">The Goddess of affection, passion and bonds. Also known as the Heart Mother.</div>
+            <div class="deity-card-blessing">Blessing: +3% chance of receiving gifts from NPCs</div>
+          </div>
+
+          <div class="deity-card" data-deity="Arion">
+            <div class="deity-card-icon"><img src="https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/deity-images%2Farion.jpeg?alt=media&token=1fe0f371-aed9-4666-a02b-06cb10800af3" alt="Arion"/></div>
+            <div class="deity-card-name">ARION</div>
+            <div class="deity-card-domain">God of Justice · Justice, Balance, Retribution</div>
+            <div class="deity-card-desc">The God of law, balance and fairness. Also known as the Divine Arbiter.</div>
+            <div class="deity-card-blessing">Blessing: Balances the ratio of good and bad encounters</div>
+          </div>
+
+          <div class="deity-card" data-deity="Veil">
+            <div class="deity-card-icon"><img src="https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/deity-images%2Fveil.jpeg?alt=media&token=e7fcf690-c559-4337-9012-dff063db7742" alt="Veil"/></div>
+            <div class="deity-card-name">VEIL</div>
+            <div class="deity-card-domain">God of Knowledge · Knowledge, Memory, Secrets</div>
+            <div class="deity-card-desc">The God of wisdom, memory and hidden truths. Also known as The Hand of Secret.</div>
+            <div class="deity-card-blessing">Blessing: +3% EXP gained from all activities</div>
+          </div>
+
+        </div>
+        <div class="step-nav">
+          <button class="btn-secondary" id="btn-back-4">BACK</button>
+          <button class="btn-primary"   id="btn-next-4">NEXT — CHOOSE YOUR KINGDOM</button>
+        </div>
+      </div>
+
+      <!-- ══════════════════════
+           STEP 5 — KINGDOM
+      ══════════════════════ -->
+      <div class="create-step" id="step-5">
+        <p class="step-hint">New players may only begin in the safe continents. Danger zones unlock as you grow stronger.</p>
+        <div class="location-list">
+
+          <div class="location-card" data-location="Frostspire — Gladys Kingdom">
+            <div class="location-card-icon">❄️</div>
+            <div class="location-card-info">
+              <span class="zone-badge zone-safe">SAFE ZONE · NORTHERN CONTINENT</span>
+              <div class="location-card-name">FROSTSPIRE — GLADYS KINGDOM</div>
+              <div class="location-card-zone">Frostveil Region · Ice castle, marble guild HQ, faction buildings</div>
+              <div class="location-card-desc">A land of snowy landscapes, frozen mountains and white kingdoms. Features settlements like Whitecrest Village, Icerun Hamlet and Paleglow Town. Home to E–C grade monsters in surrounding zones.</div>
+            </div>
+          </div>
+
+          <div class="location-card" data-location="Solmere — Elaria Kingdom">
+            <div class="location-card-icon">🌿</div>
+            <div class="location-card-info">
+              <span class="zone-badge zone-safe">SAFE ZONE · WESTERN CONTINENT</span>
+              <div class="location-card-name">SOLMERE — ELARIA KINGDOM</div>
+              <div class="location-card-zone">Verdantis Region · Beautiful castle, cobblestone streets, forest settlements</div>
+              <div class="location-card-desc">A land of lush forests, vast valleys and beautiful cottages. Features settlements like Sunpetal Village, Basil Village and Riverend Town. Home to E–C grade monsters in surrounding zones.</div>
+            </div>
+          </div>
+
+        </div>
+        <div class="step-nav">
+          <button class="btn-secondary" id="btn-back-5">BACK</button>
+          <button class="btn-primary"   id="btn-create">ENTER THE FORGE</button>
+        </div>
+      </div>
+
+    </div><!-- /create-card -->
+  </div><!-- /create-container -->
+</div><!-- /create-page -->
+
+<div class="toast" id="toast"></div>
+
+<script>
+  // Sex selection (non-module, onclick compatible)
+  function selectSex(el, sex) {
+    document.querySelectorAll('.sex-card').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+    window._selectedSex = sex;
+  }
+</script>
+
+<script type="module">
+  import { initCharacterCreation } from "../js/character.js";
+  initCharacterCreation();
+</script>
+</body>
+</html>

@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Enter the World — Forge of Legends</title>
+<link rel="stylesheet" href="../css/global.css"/>
+<link rel="stylesheet" href="../css/auth.css"/>
+</head>
+<body>
+
+<!-- Animated background -->
+<div class="auth-bg"></div>
+<div class="auth-stars" id="auth-stars"></div>
+<div class="auth-particles" id="auth-particles"></div>
+
+<!-- Loading -->
+<div class="loading-overlay" id="loading">
+  <div class="loading-title">FORGE OF LEGENDS</div>
+  <div class="loading-dots">
+    <div class="loading-dot"></div>
+    <div class="loading-dot"></div>
+    <div class="loading-dot"></div>
+  </div>
+</div>
+
+
+<div class="auth-page">
+
+  <!-- Left panel — decorative lore side -->
+  <div class="auth-lore">
+    <div class="auth-lore-inner">
+      <div class="auth-sigil">
+        <svg viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- Outer ring — rotates slowly -->
+          <g>
+            <animateTransform attributeName="transform" type="rotate"
+              from="0 60 60" to="360 60 60" dur="24s" repeatCount="indefinite"/>
+            <circle cx="60" cy="60" r="55" stroke="rgba(201,168,76,0.2)" stroke-width="0.8"/>
+            <circle cx="60" cy="60" r="55" stroke="rgba(201,168,76,0.1)" stroke-width="0.4" stroke-dasharray="4 10"/>
+          </g>
+          <!-- Inner ring — counter-rotates -->
+          <g>
+            <animateTransform attributeName="transform" type="rotate"
+              from="0 60 60" to="-360 60 60" dur="36s" repeatCount="indefinite"/>
+            <circle cx="60" cy="60" r="44" stroke="rgba(201,168,76,0.15)" stroke-width="0.5"/>
+          </g>
+          <!-- Star — rotates with outer ring -->
+          <g>
+            <animateTransform attributeName="transform" type="rotate"
+              from="0 60 60" to="360 60 60" dur="24s" repeatCount="indefinite"/>
+            <path d="M 60.0,18.0 L 70.0,46.2 L 99.9,47.0 L 76.2,65.3 L 84.7,94.0 L 60.0,77.0 L 35.3,94.0 L 43.8,65.3 L 20.1,47.0 L 50.0,46.2 Z"
+                  stroke="#C9A84C" stroke-width="1.2" fill="rgba(201,168,76,0.06)" stroke-linejoin="round"/>
+          </g>
+          <!-- Centre dot — always static and centred -->
+          <circle cx="60" cy="60" r="4" fill="rgba(201,168,76,0.85)"/>
+        </svg>
+      </div>
+      <h1 class="auth-lore-title"><span class="title-pulse">FORGE OF LEGENDS</span></h1>
+      <p class="auth-lore-sub">where legends are forged</p>
+      <div class="auth-lore-divider"><span>✦</span></div>
+      <p class="auth-lore-quote">
+        "Every legend begins with a single step into the unknown.
+        The world remembers those who dare."
+      </p>
+      <div class="auth-deity-hints">
+        <div class="auth-deity-hint">
+          <img src="https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/deity-images%2Fsah'run.jpeg?alt=media&token=a9ba07ac-26ad-405e-a773-3959a9dd5d9c" alt="Sah'run"/>
+          <span>Sah'run</span>
+        </div>
+        <div class="auth-deity-hint">
+          <img src="https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/deity-images%2Falistor.jpeg?alt=media&token=00925b01-6a3f-4844-a833-99aabd61ca45" alt="Alistor"/>
+          <span>Alistor</span>
+        </div>
+        <div class="auth-deity-hint">
+          <img src="https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/deity-images%2Felionidas.jpeg?alt=media&token=3076c6f2-1e25-4664-8a50-668c834b62f8" alt="Elionidas"/>
+          <span>Elionidas</span>
+        </div>
+        <div class="auth-deity-hint">
+          <img src="https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/deity-images%2Fmah'run.jpeg?alt=media&token=7169560d-b36d-4009-9344-4703d5dca35b" alt="Mah'run"/>
+          <span>Mah'run</span>
+        </div>
+        <div class="auth-deity-hint">
+          <img src="https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/deity-images%2Ffreyja.jpeg?alt=media&token=434371f1-7d82-4d87-b7bb-4545fe37b5e6" alt="Freyja"/>
+          <span>Freyja</span>
+        </div>
+        <div class="auth-deity-hint">
+          <img src="https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/deity-images%2Farion.jpeg?alt=media&token=1fe0f371-aed9-4666-a02b-06cb10800af3" alt="Arion"/>
+          <span>Arion</span>
+        </div>
+        <div class="auth-deity-hint">
+          <img src="https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/deity-images%2Fveil.jpeg?alt=media&token=e7fcf690-c559-4337-9012-dff063db7742" alt="Veil"/>
+          <span>Veil</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right panel — auth forms -->
+  <div class="auth-right">
+    <div class="auth-content">
+
+      <!-- Back link -->
+      <a href="../index.html" class="auth-back">← Back to home</a>
+
+      <!-- Tab switcher -->
+      <div class="auth-tabs">
+        <button class="auth-tab active" id="tab-login" onclick="switchTab('login')">
+          Enter the World
+        </button>
+        <button class="auth-tab" id="tab-signup" onclick="switchTab('signup')">
+          New Arrival
+        </button>
+      </div>
+
+      <!-- ── LOGIN FORM ── -->
+      <form class="auth-form active" id="form-login" onsubmit="handleLogin(event)">
+        <div class="field-group">
+          <label class="field-label" for="login-email">Email</label>
+          <input class="field-input" type="email" id="login-email"
+                 placeholder="your@email.com" autocomplete="email" required/>
+        </div>
+        <div class="field-group">
+          <label class="field-label" for="login-password">Password</label>
+          <div class="input-wrap">
+            <input class="field-input" type="password" id="login-password"
+                   placeholder="••••••••" autocomplete="current-password" required/>
+            <button type="button" class="input-eye" onclick="togglePassword('login-password', this)">👁</button>
+          </div>
+        </div>
+        <div class="forgot-wrap">
+          <button type="button" class="forgot-link" onclick="showForgotPassword()">Forgot password?</button>
+        </div>
+        <div class="form-error" id="login-error"></div>
+        <div class="verify-notice" id="verify-notice" style="display:none">
+          <div class="verify-notice-icon">✉️</div>
+          <div class="verify-notice-text">
+            <strong>Check your inbox first.</strong><br/>
+            Click the verification link in your email, then reload and log in.
+          </div>
+          <button type="button" class="verify-notice-resend" onclick="resendVerification()">Resend email</button>
+        </div>
+        <button class="btn-primary" type="submit" id="login-btn">ENTER THE WORLD</button>
+      </form>
+
+      <!-- ── SIGNUP FORM ── -->
+      <form class="auth-form" id="form-signup" onsubmit="handleSignup(event)">
+        <div class="field-group">
+          <label class="field-label" for="signup-email">Email</label>
+          <input class="field-input" type="email" id="signup-email"
+                 placeholder="your@email.com" autocomplete="email" required/>
+        </div>
+        <div class="field-group">
+          <label class="field-label" for="signup-password">Password</label>
+          <div class="input-wrap">
+            <input class="field-input" type="password" id="signup-password"
+                   placeholder="min. 6 characters" autocomplete="new-password" required minlength="6"/>
+            <button type="button" class="input-eye" onclick="togglePassword('signup-password', this)">👁</button>
+          </div>
+        </div>
+        <div class="field-group">
+          <label class="field-label" for="signup-confirm">Confirm Password</label>
+          <div class="input-wrap">
+            <input class="field-input" type="password" id="signup-confirm"
+                   placeholder="repeat password" required/>
+            <button type="button" class="input-eye" onclick="togglePassword('signup-confirm', this)">👁</button>
+          </div>
+        </div>
+
+        <!-- Account type -->
+        <div class="field-group">
+          <label class="field-label">Account Type</label>
+          <div class="role-select">
+            <div class="role-card selected" id="role-player" onclick="selectRole('player')">
+              <div class="role-card-name">⚔️ PLAYER</div>
+              <div class="role-card-desc">Explore, roleplay, forge your legend</div>
+            </div>
+            <div class="role-card" id="role-deity" onclick="selectRole('deity')">
+              <div class="role-card-name">👁️ DEITY</div>
+              <div class="role-card-desc">Admin — shape the world as a god</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Deity invite code (hidden unless deity selected) -->
+        <div class="field-group" id="invite-group" style="display:none">
+          <label class="field-label" for="invite-code">Deity Invite Code</label>
+          <input class="field-input" type="text" id="invite-code"
+                 placeholder="e.g. ****" autocomplete="off"/>
+          <span class="field-hint">Invite codes are issued by the Inkcraft admins.</span>
+        </div>
+
+        <div class="form-error" id="signup-error"></div>
+        <button class="btn-primary" type="submit" id="signup-btn">BEGIN YOUR STORY</button>
+      </form>
+
+      <!-- ── FORGOT PASSWORD PANEL ── -->
+      <div class="forgot-panel" id="forgot-panel" style="display:none">
+        <button type="button" class="forgot-back" onclick="hideForgotPassword()">← Back to login</button>
+        <div class="forgot-header">
+          <div class="forgot-icon">🔑</div>
+          <h2 class="forgot-title">Reset Password</h2>
+          <p class="forgot-desc">Enter your email and we'll send a reset link.</p>
+        </div>
+        <div class="field-group">
+          <label class="field-label" for="reset-email">Email</label>
+          <input class="field-input" type="email" id="reset-email"
+                 placeholder="your@email.com" autocomplete="email"/>
+        </div>
+        <div class="form-error" id="reset-error"></div>
+        <div class="reset-success" id="reset-success" style="display:none">
+          <span>✉️</span> Reset link sent! Check your inbox.
+        </div>
+        <button class="btn-primary" type="button" id="reset-btn" onclick="handlePasswordReset()">
+          SEND RESET LINK
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- UI scripts -->
+<script>
+  window.selectedRole = 'player';
+
+  function switchTab(tab) {
+    document.getElementById('tab-login').classList.toggle('active', tab === 'login');
+    document.getElementById('tab-signup').classList.toggle('active', tab === 'signup');
+    document.getElementById('form-login').classList.toggle('active', tab === 'login');
+    document.getElementById('form-signup').classList.toggle('active', tab === 'signup');
+    document.getElementById('login-error').textContent = '';
+    document.getElementById('signup-error').textContent = '';
+  }
+
+  function selectRole(role) {
+    window.selectedRole = role;
+    document.getElementById('role-player').classList.toggle('selected', role === 'player');
+    document.getElementById('role-deity').classList.toggle('selected', role === 'deity');
+    document.getElementById('invite-group').style.display = role === 'deity' ? 'flex' : 'none';
+  }
+
+  function togglePassword(id, btn) {
+    const input = document.getElementById(id);
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    btn.style.opacity = show ? '1' : '0.5';
+  }
+
+  function showForgotPassword() {
+    document.getElementById('form-login').style.display = 'none';
+    document.getElementById('tab-login').classList.remove('active');
+    document.getElementById('tab-signup').classList.remove('active');
+    document.querySelector('.auth-tabs').style.display = 'none';
+    document.getElementById('forgot-panel').style.display = 'flex';
+    document.getElementById('reset-error').textContent = '';
+    document.getElementById('reset-success').style.display = 'none';
+    document.getElementById('reset-email').value = '';
+    document.getElementById('reset-btn').disabled = false;
+    document.getElementById('reset-btn').textContent = 'SEND RESET LINK';
+  }
+
+  function hideForgotPassword() {
+    document.getElementById('forgot-panel').style.display = 'none';
+    document.querySelector('.auth-tabs').style.display = '';
+    switchTab('login');
+  }
+
+  window.showForgotPassword = showForgotPassword;
+  window.hideForgotPassword = hideForgotPassword;
+
+  function toast(msg, type = '') {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className = 'toast show ' + type;
+    setTimeout(() => el.classList.remove('show'), 4000);
+  }
+</script>
+
+<!-- Firebase scripts -->
+<script type="module">
+  import { auth, db } from "../firebase/firebase.js";
+  import {
+    onAuthStateChanged,
+    signInWithEmailAndPassword,
+    createUserWithEmailAndPassword,
+    sendEmailVerification,
+    sendPasswordResetEmail,
+    reload
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+  import {
+    doc, getDoc, setDoc, updateDoc, serverTimestamp
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+  // ── Redirect helper ───────────────────────────────────────
+  async function redirectUser(uid) {
+    const userSnap = await getDoc(doc(db, 'users', uid));
+    const role = userSnap.exists() ? userSnap.data().role : 'player';
+    if (role === 'deity') {
+      const charSnap = await getDoc(doc(db, 'characters', uid));
+      window.location.href = charSnap.exists() ? 'deity-dashboard.html' : 'create-deity.html';
+    } else {
+      const charSnap = await getDoc(doc(db, 'characters', uid));
+      window.location.href = charSnap.exists() ? 'dashboard.html' : 'create-character.html';
+    }
+  }
+
+  // ── Hide loading & check auth ─────────────────────────────
+  onAuthStateChanged(auth, async (user) => {
+    if (window._signupInProgress) return;
+
+    if (!user) {
+      document.getElementById('loading')?.classList.add('hidden');
+      setTimeout(() => document.getElementById('loading')?.remove(), 400);
+      return;
+    }
+
+    // Force fresh status from Firebase
+    try { await reload(user); } catch(e) {}
+
+    // Hide loading
+    document.getElementById('loading')?.classList.add('hidden');
+    setTimeout(() => document.getElementById('loading')?.remove(), 400);
+
+    const currentUser = auth.currentUser;
+
+    if (!currentUser?.emailVerified) {
+      // Reset login button, show notice, stay on page
+      const loginBtn = document.getElementById('login-btn');
+      if (loginBtn) { loginBtn.disabled = false; loginBtn.textContent = 'ENTER THE WORLD'; }
+      document.getElementById('verify-notice').style.display = 'flex';
+      switchTab('login');
+      return;
+    }
+
+    // Verified — redirect
+    await redirectUser(currentUser.uid);
+  });
+
+  // ── Friendly errors ───────────────────────────────────────
+  function friendlyError(code) {
+    const map = {
+      'auth/email-already-in-use':   'That email is already registered.',
+      'auth/invalid-email':          'Please enter a valid email address.',
+      'auth/weak-password':          'Password must be at least 6 characters.',
+      'auth/user-not-found':         'No account found with that email.',
+      'auth/wrong-password':         'Incorrect password. Try again.',
+      'auth/invalid-credential':     'Invalid email or password.',
+      'auth/too-many-requests':      'Too many attempts. Please wait and try again.',
+      'auth/network-request-failed': 'Network error. Check your connection.',
+    };
+    return map[code] || 'Something went wrong. Please try again.';
+  }
+
+  // ── Login ─────────────────────────────────────────────────
+  window.handleLogin = async (e) => {
+    e.preventDefault();
+    const btn   = document.getElementById('login-btn');
+    const errEl = document.getElementById('login-error');
+    btn.disabled = true; btn.textContent = 'ENTERING...';
+    errEl.textContent = '';
+    try {
+      await signInWithEmailAndPassword(auth,
+        document.getElementById('login-email').value.trim(),
+        document.getElementById('login-password').value
+      );
+      // onAuthStateChanged handles redirect
+    } catch (err) {
+      errEl.textContent = friendlyError(err.code);
+      btn.disabled = false; btn.textContent = 'ENTER THE WORLD';
+    }
+  };
+
+  // ── Signup ────────────────────────────────────────────────
+  window._signupInProgress = false;
+
+  window.handleSignup = async (e) => {
+    e.preventDefault();
+    const btn     = document.getElementById('signup-btn');
+    const errEl   = document.getElementById('signup-error');
+    const email   = document.getElementById('signup-email').value.trim();
+    const pass    = document.getElementById('signup-password').value;
+    const confirm = document.getElementById('signup-confirm').value;
+    const role    = window.selectedRole || 'player';
+    const code    = document.getElementById('invite-code')?.value.trim().toUpperCase();
+
+    errEl.textContent = '';
+
+    if (pass !== confirm) {
+      errEl.textContent = 'Passwords do not match.'; return;
+    }
+
+    // Validate deity invite code against Firestore
+    if (role === 'deity') {
+      if (!code) { errEl.textContent = 'Enter your invite code.'; return; }
+      const codeSnap = await getDoc(doc(db, 'invite_codes', code));
+      if (!codeSnap.exists() || codeSnap.data().used === true) {
+        errEl.textContent = 'Invalid or already used invite code.'; return;
+      }
+    }
+
+    btn.disabled = true; btn.textContent = 'CREATING...';
+    window._signupInProgress = true;
+
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, email, pass);
+      await sendEmailVerification(cred.user);
+
+      await setDoc(doc(db, 'users', cred.user.uid), {
+        uid: cred.user.uid, email, role,
+        emailVerified: false,
+        createdAt: serverTimestamp(),
+      });
+
+      if (role === 'deity') {
+        await updateDoc(doc(db, 'invite_codes', code), {
+          used: true, usedBy: cred.user.uid, usedAt: serverTimestamp(),
+        });
+      }
+
+      // Signup done — switch to login tab and show verification notice
+      window._signupInProgress = false;
+      btn.disabled = false; btn.textContent = 'BEGIN YOUR STORY';
+      switchTab('login');
+      document.getElementById('verify-notice').style.display = 'flex';
+      toast('Account created! Verify your email then log in.', 'success');
+
+    } catch (err) {
+      window._signupInProgress = false;
+      errEl.textContent = friendlyError(err.code);
+      btn.disabled = false; btn.textContent = 'BEGIN YOUR STORY';
+    }
+  };
+
+  // ── Password Reset ────────────────────────────────────────
+  window.handlePasswordReset = async () => {
+    const email  = document.getElementById('reset-email').value.trim();
+    const errEl  = document.getElementById('reset-error');
+    const succEl = document.getElementById('reset-success');
+    const btn    = document.getElementById('reset-btn');
+
+    errEl.textContent = '';
+    succEl.style.display = 'none';
+
+    if (!email) { errEl.textContent = 'Please enter your email address.'; return; }
+
+    btn.disabled = true; btn.textContent = 'SENDING...';
+    try {
+      await sendPasswordResetEmail(auth, email);
+      succEl.style.display = 'flex';
+      btn.textContent = 'LINK SENT';
+    } catch (err) {
+      errEl.textContent = friendlyError(err.code);
+      btn.disabled = false; btn.textContent = 'SEND RESET LINK';
+    }
+  };
+
+  // ── Resend verification email ─────────────────────────────
+  window.resendVerification = async () => {
+    const user = auth.currentUser;
+    if (!user) return;
+    const btn = document.querySelector('.verify-notice-resend');
+    try {
+      await sendEmailVerification(user);
+      if (btn) { btn.textContent = 'Sent!'; btn.disabled = true;
+        setTimeout(() => { btn.textContent = 'Resend email'; btn.disabled = false; }, 30000); }
+      toast('Verification email resent!', 'success');
+    } catch(err) {
+      toast('Could not resend email. Try again shortly.', 'error');
+    }
+  };
+</script>
+
+<!-- Stars & particles -->
+<script>
+  const authStars = document.getElementById('auth-stars');
+  for (let i = 0; i < 60; i++) {
+    const s = document.createElement('div');
+    s.className = 'auth-star';
+    const size = (Math.random() * 1.6 + 0.4).toFixed(1);
+    const isGold = Math.random() > 0.75;
+    s.style.cssText = `
+      width:${size}px; height:${size}px;
+      left:${(Math.random()*100).toFixed(1)}%;
+      top:${(Math.random()*100).toFixed(1)}%;
+      --dur:${(Math.random()*4+2).toFixed(1)}s;
+      --delay:-${(Math.random()*6).toFixed(1)}s;
+      ${isGold ? 'background:rgba(201,168,76,0.6);' : ''}
+    `;
+    authStars.appendChild(s);
+  }
+
+  const authParts = document.getElementById('auth-particles');
+  for (let i = 0; i < 14; i++) {
+    const p = document.createElement('div');
+    p.className = 'auth-particle';
+    p.style.cssText = `
+      left:${(Math.random()*50).toFixed(1)}%;
+      top:${(Math.random()*60+40).toFixed(1)}%;
+      --dur:${(Math.random()*6+6).toFixed(1)}s;
+      --delay:-${(Math.random()*10).toFixed(1)}s;
+    `;
+    authParts.appendChild(p);
+  }
+</script>
+</body>
+</html>
