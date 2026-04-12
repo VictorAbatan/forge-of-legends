@@ -602,10 +602,10 @@ html { scroll-snap-type: y mandatory; }
   /* Deity section */
   .deity-section { padding: 60px 24px; }
   .deity-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
-  .deity-teaser-icon { height: 120px; }
+  .deity-teaser-icon { aspect-ratio: 3/4; height: auto; }
   .deity-teaser-icon img {
     object-fit: cover;
-    object-position: center;
+    object-position: center top;
   }
   .deity-teaser-name { font-size: 0.78rem; }
 
