@@ -858,7 +858,45 @@
 
 <script type="module">
   import { initDeityDashboard } from '../js/deity-dashboard.js';
-  initDeityDashboard();
+  import { initAllCustomSelects, refreshCustomSelect } from '../js/custom-select.js';
+
+  await initDeityDashboard();
+
+  // Init all selects that exist in HTML at load time
+  initAllCustomSelects();
+
+  // Re-init after worshipper selects are populated
+  const _origPopulate = window._populateWorshipperSelects;
+  window._populateWorshipperSelects = function(...args) {
+    _origPopulate?.(...args);
+    ['vision-target','bestow-target','faith-target'].forEach(id => {
+      refreshCustomSelect(document.getElementById(id));
+    });
+  };
+
+  // Re-init location selects after panel switches (they're populated lazily)
+  const _origPanelSwitch = window._onDeityPanelSwitch;
+  window._onDeityPanelSwitch = function(name) {
+    _origPanelSwitch?.(name);
+    setTimeout(() => {
+      ['npc-location-filter','deity-chat-location','deity-chat-as','deity-general-as','faction-leader-select'].forEach(id => {
+        refreshCustomSelect(document.getElementById(id));
+      });
+    }, 80);
+  };
+
+  // Re-init "speaking as" select after switchDeityChat populates NPC options
+  const _origSwitchChat = window._switchDeityChat;
+  window._switchDeityChat = function(loc) {
+    const p = _origSwitchChat?.(loc);
+    if (p instanceof Promise) {
+      p.then(() => {
+        refreshCustomSelect(document.getElementById('deity-chat-as'));
+        refreshCustomSelect(document.getElementById('deity-general-as'));
+      });
+    }
+    return p;
+  };
 </script>
 </body>
 

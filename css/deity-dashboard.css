@@ -1029,3 +1029,140 @@ textarea.field-input { resize: vertical; line-height: 1.5; min-height: 70px; }
 .ink-confirm-cancel:hover { color: var(--text); border-color: var(--ash-light); }
 .ink-confirm-ok { background: rgba(201,168,76,0.15); border-color: var(--gold-dim); color: var(--gold); }
 .ink-confirm-ok:hover { background: rgba(201,168,76,0.28); border-color: var(--gold); }
+
+/* ══════════════════════════════════════
+   CUSTOM SELECT DROPDOWN
+   Replaces native <select> on all devices
+══════════════════════════════════════ */
+.csel-wrapper {
+  position: relative;
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--ff-body, inherit);
+}
+
+/* Trigger (the visible "button") */
+.csel-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 12px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 0.88rem;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.2s;
+  min-height: 38px;
+}
+.csel-trigger:hover,
+.csel-wrapper.csel-open .csel-trigger {
+  border-color: var(--border-bright);
+}
+.csel-wrapper.csel-open .csel-trigger {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  border-color: var(--gold-dim);
+}
+.csel-trigger-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+/* Placeholder / unselected state */
+.csel-trigger-text:empty::before,
+.csel-wrapper[data-placeholder] .csel-trigger-text {
+  color: var(--text-dim);
+}
+.csel-arrow {
+  font-size: 0.75rem;
+  color: var(--gold-dim);
+  transition: transform 0.18s;
+  flex-shrink: 0;
+}
+.csel-wrapper.csel-open .csel-arrow {
+  transform: rotate(180deg);
+  color: var(--gold);
+}
+
+/* Dropdown panel */
+.csel-panel {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0; right: 0;
+  z-index: 9999;
+  background: var(--ink2, #1a1712);
+  border: 1px solid var(--gold-dim);
+  border-top: none;
+  border-radius: 0 0 var(--radius) var(--radius);
+  max-height: 260px;
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.csel-panel::-webkit-scrollbar { width: 4px; }
+.csel-panel::-webkit-scrollbar-track { background: transparent; }
+.csel-panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+.csel-wrapper.csel-open .csel-panel { display: block; }
+
+/* Group headers (optgroup labels) */
+.csel-group-label {
+  padding: 8px 12px 4px;
+  font-family: var(--ff-mono, monospace);
+  font-size: 0.58rem;
+  letter-spacing: 0.14em;
+  color: var(--gold-dim);
+  text-transform: uppercase;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+.csel-group-label:first-child {
+  border-top: none;
+  margin-top: 0;
+}
+
+/* Individual options */
+.csel-option {
+  padding: 9px 16px;
+  font-size: 0.86rem;
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.csel-option:hover {
+  background: rgba(201,168,76,0.08);
+  color: var(--text-light, #f0e8d0);
+}
+.csel-option.csel-selected {
+  background: rgba(201,168,76,0.12);
+  color: var(--gold);
+}
+.csel-option.csel-placeholder {
+  color: var(--text-dim);
+  font-style: italic;
+  cursor: default;
+}
+.csel-option.csel-placeholder:hover {
+  background: transparent;
+  color: var(--text-dim);
+}
+
+/* Compact variant for dchat controls */
+.csel-compact .csel-trigger {
+  padding: 7px 10px;
+  font-size: 0.84rem;
+  min-height: 34px;
+}
+.csel-compact .csel-panel {
+  max-height: 200px;
+}
