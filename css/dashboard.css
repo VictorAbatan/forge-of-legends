@@ -437,6 +437,9 @@
 
 .sidebar-nav { padding: 12px 0; flex: 1; }
 .nav-section-label { padding: 10px 16px 4px; font-family: var(--font-mono); font-size: 0.55rem; letter-spacing: 0.2em; color: var(--ash-light); text-transform: uppercase; }
+.nav-rune-divider { display: flex; align-items: center; gap: 6px; padding: 8px 14px; }
+.nav-rune-line { flex: 1; height: 1px; background: linear-gradient(to right, transparent, rgba(201,168,76,0.25), transparent); }
+.nav-rune-glyph { font-size: 0.6rem; color: rgba(201,168,76,0.45); line-height: 1; flex-shrink: 0; }
 .nav-item {
   display: flex; align-items: center; gap: 10px; padding: 10px 16px;
   cursor: pointer; transition: all 0.15s; font-size: 0.88rem; color: var(--text-dim);
