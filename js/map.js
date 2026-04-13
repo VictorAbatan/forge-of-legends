@@ -96,7 +96,7 @@ const CONTINENTS = {
       { id:"whispering",    label:"Whispering Forest",     type:"monster",  grade:"E-D", monsters:"Red-mane Wolves, Vicious Gremlins",                   travelCost:20, travelTime:10, x:88.0, y:36.6, px:85.6, py:35.0 },
       { id:"golden_plains", label:"Golden Plains",         type:"monster",  grade:"E-D", monsters:"Scavengers, Rampage Bulls",                            travelCost:20, travelTime:10, x:20.0, y:69.3, px:24.1, py:69.6 },
       { id:"elem_valley",   label:"Element Valley",        type:"monster",  grade:"E-D", monsters:"Lightning Shrouds, Rock Golems, Flame Spirits",        travelCost:20, travelTime:10, x:12.1, y:24.3, px:14.9, py:23.8 },
-      { id:"defiled",       label:"Defiled Sanctum",       type:"monster",  grade:"C",   monsters:"Skeletal Beast, Ghoul Blatherer, Cursed Fiend",        travelCost:30, travelTime:30, x:41.4, y:11.9, px:47.0, py:11.8 },
+      { id:"defiled",       label:"Defiled Sanctum",       type:"monster",  grade:"C",   monsters:"Skeletal Beast, Ghoul Blatherer, Cursed Fiend",        travelCost:30, travelTime:30, x:47.7, y:28.4, px:47.0, py:11.8 },
       // Resource — verdantis pins 9-14
       { id:"asahi",         label:"Asahi Valley",          type:"resource", prof:"Forager / Herbalist / Hunter", travelCost:20, travelTime:10, x:36.6, y:40.9, px:40.6, py:39.4 },
       { id:"moss_stream",   label:"Moss Stream",           type:"resource", prof:"Angler",                       travelCost:20, travelTime:10, x:37.7, y:59.1, px:40.1, py:56.5 },
@@ -495,7 +495,12 @@ function renderWorldMap() {
     const cont=CONTINENTS[pin.id];
     const inCont=_isInContinent(pin.id);
     const locked=!_canEnter(pin.id);
-    const col=pin.type==="capital"?"#e8d070":pin.type==="danger"?"#e05555":"#d070e0";
+    const atPin = _isAtLocation(pin.id);
+    const col=pin.type==="capital"?(atPin?"#4fc870":"#e8d070"):pin.type==="danger"?"#e05555":"#d070e0";
+    const pinGlow = pin.type==="capital"&&atPin
+      ? "0 0 0 4px rgba(79,200,112,0.35),0 0 18px rgba(79,200,112,0.9)"
+      : `0 0 0 3px ${col}44, 0 0 14px ${col}cc`;
+    const pinAnim = pin.type==="capital"&&atPin ? "animation:lmap-pulse-player 1.8s infinite;" : "";
 
     // Player position for this continent
     const pp=WORLD_PLAYER_PINS.find(p=>p.id===pin.id);
@@ -518,7 +523,7 @@ function renderWorldMap() {
 
     const el=document.createElement("div");
     el.className="lmap-wpin"; el.style.cssText=`position:absolute;left:${px}px;top:${py}px;transform:translate(-50%,-50%);z-index:10;pointer-events:all;overflow:visible;`;
-    el.innerHTML=`<div class="lmap-wpin-dot" style="background:${col};box-shadow:0 0 0 3px ${col}44, 0 0 14px ${col}cc;${locked?'opacity:0.45':''}"></div>
+    el.innerHTML=`<div class="lmap-wpin-dot" style="background:${col};box-shadow:${pinGlow};${pinAnim}${locked?'opacity:0.45':''}"></div>
       <div class="lmap-wpin-label" style="${locked?'opacity:0.5':''}">${pin.label}</div>
       <div class="lmap-wpin-tooltip">${ttBody}</div>`;
     el.querySelector(".lmap-wpin-dot").addEventListener("click",e=>{ e.stopPropagation(); _openTT(el, e); });
@@ -593,7 +598,7 @@ function renderContinent(cid) {
           ${cont.settlements.length?`<div class="lmap-section-title">SETTLEMENTS</div>${cont.settlements.map(s=>`<div class="lmap-info-item"><span class="lmap-info-dot" style="background:#e8d070"></span><span class="lmap-info-name">🏘️ ${s.label}</span>${_isAtLocation(s.id)?`<span class="lmap-here-badge-small">HERE</span>`:""}</div>`).join("")}`:""}
           ${cont.explore.length?`<div class="lmap-section-title" style="margin-top:10px">EXPLORE ZONES</div>
             ${cont.explore.map(e=>`<div class="lmap-info-item">
-              <span class="lmap-info-dot" style="background:${e.type==="monster"?_gradeCol(e.grade):e.type==="resource"?"#5b9fe0":"#e8b84b"}"></span>
+              <span class="lmap-info-dot" style="background:${e.type==="monster"?_gradeCol(e.grade):e.type==="resource"?"#5b9fe0":"#c44dff"}"></span>
               <span class="lmap-info-name">${_icon(e.type)} ${e.label}</span>
               ${e.grade?`<span style="font-size:9px;color:${_gradeCol(e.grade)};margin-left:auto">${e.grade}</span>`:""}
             </div>`).join("")}`:""}
@@ -637,9 +642,9 @@ function renderContinent(cid) {
       // Settlement pin
       const atS=_isAtLocation(p.id);
       const canTravel=here;
-      el.innerHTML=`<div class="lmap-loc-pin-dot" style="background:#e8d070;"></div>
-        <div class="lmap-loc-pin-label">${p.label}</div>
-        ${atS?`<div class="lmap-player-dot" style="position:absolute;top:-6px;left:50%;transform:translateX(-50%);"></div>`:""}
+      const settleDot = atS ? 'background:#4fc870;box-shadow:0 0 0 4px rgba(79,200,112,0.3),0 0 16px rgba(79,200,112,0.8);animation:lmap-pulse-player 1.8s infinite' : 'background:#e8d070;box-shadow:0 0 0 3px rgba(232,208,112,0.3),0 0 12px rgba(232,208,112,0.6)';
+      el.innerHTML=`<div class="lmap-loc-pin-dot" style="${settleDot}"></div>
+        <div class="lmap-loc-pin-label" style="color:${atS?'#4fc870':'#e8d070'}">${p.label}</div>
         <div class="lmap-wpin-tooltip">
           <div class="lmap-wpin-tt-name">${p.label}</div>
           <div style="font-size:10px;color:#888;margin:3px 0 6px;">${p.desc}</div>
@@ -657,15 +662,7 @@ function renderContinent(cid) {
   });
 
   // Capital player pin — only if player is at the capital itself (not a settlement)
-  if(_isAtCapital(cid)&&cont.capitalPlayerPin) {
-    const addCapDot = () => {
-      const pp=cont.capitalPlayerPin;
-      const dot=document.createElement("div");
-      dot.className="lmap-player-dot"; dot.style.cssText=`position:absolute;left:${pp.x}%;top:${pp.y}%;transform:translate(-50%,-50%);pointer-events:none;z-index:12;`;
-      pinsEl.appendChild(dot);
-    };
-    if(imgEl.complete&&imgEl.naturalWidth) addCapDot(); else imgEl.addEventListener("load",addCapDot);
-  }
+
 }
 
 // ═══════════════════════════════
@@ -698,7 +695,7 @@ function renderWildlands(cid) {
           <div class="lmap-section-title" style="margin-top:10px">RESOURCE ZONES</div>
           ${cont.explore.filter(e=>e.type==="resource").map(e=>`<div class="lmap-info-item"><span class="lmap-info-dot" style="background:#5b9fe0"></span><span class="lmap-info-name">⛏️ ${e.label}</span><span style="font-size:9px;color:#70c090;margin-left:auto">${e.prof}</span></div>`).join("")}
           <div class="lmap-section-title" style="margin-top:10px">DEITY SHRINES</div>
-          ${cont.explore.filter(e=>e.type==="deity").map(e=>`<div class="lmap-info-item"><span class="lmap-info-dot" style="background:#c9a84c"></span><span class="lmap-info-name">✦ ${e.label}</span></div>`).join("")}
+          ${cont.explore.filter(e=>e.type==="deity").map(e=>`<div class="lmap-info-item"><span class="lmap-info-dot" style="background:#c44dff"></span><span class="lmap-info-name">✦ ${e.label}</span></div>`).join("")}
         </div>
         <div class="lmap-sidebar-footer"><div style="font-size:10px;color:#555;text-align:center;">Click a pin on the map to travel to a zone</div></div>
       </div>
@@ -712,20 +709,34 @@ function renderWildlands(cid) {
   const pinsEl=document.getElementById("lmap-loc-pins");
 
   _placeCoverPins(imgEl, pinsEl, cont.explore, (zone, px, py) => {
-    const dotCol=zone.type==="monster"?_gradeCol(zone.grade):zone.type==="resource"?"#5b9fe0":"#e8b84b";
-    const pulseAnim=zone.type==="monster"?"lmap-pulse-monster 2s infinite":zone.type==="resource"?"lmap-pulse-resource 2.2s infinite":"lmap-pulse-deity 1.8s infinite";
+    // Pin colours: monster=red, resource=blue, deity=purple
+    const dotCol=zone.type==="monster"?"#e03030":zone.type==="resource"?"#5b9fe0":"#c44dff";
     const atZone=_isAtLocation(zone.id)||_isAtLocation(zone.label);
+    // Pulse: when player is here → bright arrival beacon; otherwise → type pulse
+    let pulseAnim, dotStyle;
+    if (atZone) {
+      // Arrival beacon: bright pulsing halo, pin switches to vivid colour
+      const arrivalCol = zone.type==="monster"?"#ff4444":zone.type==="resource"?"#60b8ff":"#dd55ff";
+      dotStyle = `background:${arrivalCol};border-color:${arrivalCol};box-shadow:0 0 0 5px ${arrivalCol}55,0 0 22px ${arrivalCol}cc;`;
+      pulseAnim = zone.type==="monster"?"lmap-pulse-arrival-red 1.2s infinite":zone.type==="resource"?"lmap-pulse-arrival-blue 1.2s infinite":"lmap-pulse-arrival-gold 1.2s infinite";
+    } else {
+      dotStyle = zone.type==="monster"
+        ? `background:#e03030;border-color:#111;box-shadow:0 0 0 3px #11111188,0 0 10px #e0303099;`
+        : zone.type==="resource"
+        ? `background:#5b9fe0;border-color:#5b9fe0;box-shadow:0 0 0 3px rgba(91,159,224,0.3),0 0 10px rgba(91,159,224,0.6);`
+        : `background:#c44dff;border-color:#c44dff;box-shadow:0 0 0 3px rgba(196,77,255,0.3),0 0 10px rgba(196,77,255,0.6);`;
+      pulseAnim = "none";
+    }
     const el=document.createElement("div");
     el.className="lmap-explore-pin"; el.style.cssText=`position:absolute;left:${px}px;top:${py}px;transform:translate(-50%,-50%);pointer-events:all;overflow:visible;`;
 
     let detail=zone.type==="monster"
       ?`<div style="font-size:10px;color:#aaa;margin:3px 0;">${zone.monsters}</div><span style="font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(0,0,0,0.5);color:${_gradeCol(zone.grade)};">Grade ${zone.grade}</span>`
       :zone.type==="resource"?`<div style="font-size:10px;color:#70c090;margin:3px 0;">Professions: ${zone.prof}</div>`
-      :`<div style="font-size:10px;color:#c9a84c;margin:3px 0;">${zone.deity}</div>`;
+      :`<div style="font-size:10px;color:#c44dff;margin:3px 0;">${zone.deity}</div>`;
 
-    el.innerHTML=`<div class="lmap-explore-dot" style="background:${dotCol};border-color:${dotCol};animation:${pulseAnim};"></div>
-      <div class="lmap-loc-pin-label" style="color:${dotCol}">${zone.label}</div>
-      ${atZone?`<div class="lmap-player-dot" style="position:absolute;top:-6px;left:50%;transform:translateX(-50%);"></div>`:""}
+    el.innerHTML=`<div class="lmap-explore-dot" style="${dotStyle}animation:${pulseAnim};"></div>
+      <div class="lmap-loc-pin-label" style="color:${atZone?(zone.type==="monster"?"#ff4444":zone.type==="resource"?"#60b8ff":"#dd55ff"):dotCol}">${zone.label}</div>
       <div class="lmap-wpin-tooltip">
         <div class="lmap-wpin-tt-name">${_icon(zone.type)} ${zone.label}</div>
         ${detail}
@@ -740,7 +751,7 @@ function renderWildlands(cid) {
                     ⚔️ FIGHT HERE
                   </button>`
                : zone.type==="deity"
-               ? `<button class="lmap-wpin-travel-btn" data-action="temple" style="margin-top:6px;background:rgba(201,168,76,0.15);border-color:rgba(201,168,76,0.5);color:#c9a84c;">
+               ? `<button class="lmap-wpin-travel-btn" data-action="temple" style="margin-top:6px;background:rgba(196,77,255,0.15);border-color:rgba(196,77,255,0.5);color:#c44dff;">
                     🙏 VISIT TEMPLE
                   </button>`
                : ""}`

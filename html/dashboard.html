@@ -313,7 +313,7 @@
       <div class="panel-header"><h2>OVERVIEW</h2><p id="panel-welcome">Welcome to the Forge, traveller.</p></div>
       <div class="stat-grid">
         <div class="stat-card"><div class="stat-label">Rank</div><div class="stat-value" style="font-size:1.1rem;margin-top:4px" id="stat-rank">Wanderer</div><div class="stat-sub" id="stat-level">Level 1</div></div>
-        <div class="stat-card"><div class="stat-label">Gold</div><div class="stat-value" id="stat-gold">100</div><div class="stat-sub">coins</div></div>
+        <div class="stat-card"><div class="stat-label">Gold</div><div class="stat-value" id="stat-gold">500</div><div class="stat-sub">coins</div></div>
         <div class="stat-card"><div class="stat-label">Health</div><div class="stat-value" id="stat-hp">100</div><div class="stat-sub" id="stat-hp-max">/ 100</div></div>
         <div class="stat-card"><div class="stat-label">Mana</div><div class="stat-value" id="stat-mana">50</div><div class="stat-sub" id="stat-mana-max">/ 50</div></div>
         <div class="stat-card"><div class="stat-label">Location</div><div class="stat-value" style="font-size:0.8rem;margin-top:6px" id="stat-loc">—</div><div class="stat-sub" id="stat-continent">—</div></div>
@@ -383,7 +383,7 @@
             <table class="stats-table">
               <tr><td>Health</td><td id="s-hp">100 / 100</td></tr>
               <tr><td>Mana</td><td id="s-mana">50 / 50</td></tr>
-              <tr><td>Gold</td><td id="s-gold">100</td></tr>
+              <tr><td>Gold</td><td id="s-gold">500</td></tr>
               <tr><td>EXP</td><td id="s-xp">0 / 100</td></tr>
               <tr><td>Faith Level</td><td id="s-faith">0</td></tr>
               <tr><td>Reputation</td><td id="s-rep">0</td></tr>
@@ -1862,7 +1862,7 @@
     document.getElementById('tab-general').classList.toggle('active', tab === 'general');
     const placeholder = tab === 'rp'
       ? 'Speak your truth into the world...'
-      : 'Chat with players nearby...';
+      : 'Chat with all players across the world...';
     document.getElementById('chat-input').placeholder = placeholder;
     window._switchChatTab?.(tab);
   }

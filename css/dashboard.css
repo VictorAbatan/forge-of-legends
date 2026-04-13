@@ -1437,6 +1437,8 @@
 .chat-msg.own .chat-msg-body { text-align: right; }
 .chat-msg.own .own-text { background: rgba(201,168,76,0.15); border: 1px solid rgba(201,168,76,0.2); border-radius: 12px 0 12px 12px; padding: 8px 12px; font-size: 0.88rem; color: var(--text); line-height: 1.6; word-break: break-word; display: inline-block; text-align: left; }
 .chat-msg.own .own-time { font-family: var(--font-mono); font-size: 0.52rem; color: var(--ash); margin-top: 3px; }
+.own-header { display: flex; justify-content: flex-end; align-items: baseline; gap: 6px; margin-bottom: 3px; flex-wrap: wrap; }
+.own-name { font-family: var(--font-display); font-size: 0.72rem; color: var(--gold); letter-spacing: 0.05em; }
 
 .chat-msg-location { font-family: var(--font-mono); font-size: 0.52rem; color: var(--ash-light); margin-bottom: 3px; }
 
@@ -2100,11 +2102,16 @@
 .lmap-wpin-travel-btn:hover { background:rgba(184,150,10,0.35); }
 
 /* Pulse animation for wildlands entry */
-@keyframes lmap-pulse        { 0%,100%{box-shadow:0 0 0 2px rgba(112,192,144,0.3), 0 0 8px #70c09088;}  50%{box-shadow:0 0 0 5px rgba(112,192,144,0.15), 0 0 18px #70c090cc;} }
-@keyframes lmap-pulse-player { 0%,100%{box-shadow:0 0 0 3px rgba(79,200,112,0.35), 0 0 14px #4fc870cc;} 50%{box-shadow:0 0 0 6px rgba(79,200,112,0.15), 0 0 22px #4fc870ff;} }
-@keyframes lmap-pulse-monster{ 0%,100%{box-shadow:0 0 0 2px rgba(224,112,96,0.35),  0 0 10px rgba(224,112,96,0.6);}  50%{box-shadow:0 0 0 5px rgba(224,112,96,0.15),  0 0 20px rgba(224,112,96,0.9);}  }
+@keyframes lmap-pulse         { 0%,100%{box-shadow:0 0 0 2px rgba(112,192,144,0.3),  0 0 8px #70c09088;}  50%{box-shadow:0 0 0 5px rgba(112,192,144,0.15), 0 0 18px #70c090cc;} }
+@keyframes lmap-pulse-player  { 0%,100%{box-shadow:0 0 0 3px rgba(79,200,112,0.35),  0 0 14px #4fc870cc;} 50%{box-shadow:0 0 0 6px rgba(79,200,112,0.15),  0 0 22px #4fc870ff;} }
+/* Monster: red dot, black halo */
+@keyframes lmap-pulse-monster { 0%,100%{box-shadow:0 0 0 3px #111111cc, 0 0 10px rgba(224,48,48,0.5);}  50%{box-shadow:0 0 0 6px #111111aa, 0 0 18px rgba(224,48,48,0.85);} }
 @keyframes lmap-pulse-resource{ 0%,100%{box-shadow:0 0 0 2px rgba(91,159,224,0.35),  0 0 10px rgba(91,159,224,0.6);}  50%{box-shadow:0 0 0 5px rgba(91,159,224,0.15),  0 0 20px rgba(91,159,224,0.9);}  }
-@keyframes lmap-pulse-deity  { 0%,100%{box-shadow:0 0 0 2px rgba(232,184,75,0.4),   0 0 10px rgba(232,184,75,0.65);} 50%{box-shadow:0 0 0 6px rgba(232,184,75,0.15),  0 0 22px rgba(232,184,75,1.0);}  }
+@keyframes lmap-pulse-deity   { 0%,100%{box-shadow:0 0 0 2px rgba(232,184,75,0.4),   0 0 10px rgba(232,184,75,0.65);} 50%{box-shadow:0 0 0 6px rgba(232,184,75,0.15),  0 0 22px rgba(232,184,75,1.0);}  }
+/* Arrival beacons — bright pulsing halo when player is at a zone */
+@keyframes lmap-pulse-arrival-red  { 0%,100%{box-shadow:0 0 0 5px rgba(255,68,68,0.4),   0 0 20px rgba(255,68,68,0.7);}  50%{box-shadow:0 0 0 10px rgba(255,68,68,0.15),  0 0 36px rgba(255,68,68,1.0);}  }
+@keyframes lmap-pulse-arrival-blue { 0%,100%{box-shadow:0 0 0 5px rgba(96,184,255,0.4),  0 0 20px rgba(96,184,255,0.7);} 50%{box-shadow:0 0 0 10px rgba(96,184,255,0.15), 0 0 36px rgba(96,184,255,1.0);} }
+@keyframes lmap-pulse-arrival-gold { 0%,100%{box-shadow:0 0 0 5px rgba(255,208,96,0.4),  0 0 20px rgba(255,208,96,0.7);} 50%{box-shadow:0 0 0 10px rgba(255,208,96,0.15), 0 0 36px rgba(255,208,96,1.0);} }
 
 
 /* ── Player Action Popup ── */

@@ -2327,9 +2327,7 @@ export function initDashboard() {
       _charData.uid = user.uid; // ensure uid is always available on charData
       // Patch old accounts silently on load
       _charData = await _migrateAccountStats(_charData);
-      // Set baselines for watchers before starting them
-      _prevGold      = _charData.gold ?? 0;
-      _prevInvLength = (_charData.inventory ?? []).length;
+      // Set baseline for faith watcher
       _prevFaithLevel = _charData.faithLevel ?? 0;
       window.startBestowWatcher();
       window.startFaithWatcher();
@@ -2413,7 +2411,7 @@ function populateDashboard(c) {
   set("panel-welcome",  `Welcome to the Forge, ${c.name}.`);
   set("stat-rank",      c.rank    || "Wanderer");
   set("stat-level",     `Level ${c.level||1}`);
-  set("stat-gold",      c.gold    ?? 100);
+  set("stat-gold",      c.gold    ?? 500);
   set("stat-hp",        c.hp      ?? 100);
   set("stat-hp-max",   `/ ${c.hpMax   ?? 100}`);
   set("stat-mana",      c.mana    ?? 50);
@@ -3897,7 +3895,11 @@ function startChatListener(locationId, tab) {
   const msgsRef = tab === "general"
     ? collection(db, "general-chat", "global", "messages")   // one global room
     : collection(db, "chats", locationId, "messages");        // location-specific
-  const q = query(msgsRef, orderBy("timestamp", "asc"), limit(150));
+  // General chat uses limit-only query (no orderBy) to avoid composite index requirement.
+  // Messages are then sorted client-side on first load.
+  const q = tab === "general"
+    ? query(msgsRef, limit(150))
+    : query(msgsRef, orderBy("timestamp", "asc"), limit(150));
 
   // ── Helper: build a single message element ──────────────────────
   function _buildMsgEl(d) {
@@ -4008,7 +4010,13 @@ function startChatListener(locationId, tab) {
           </div>
         </div>` : '';
       el.innerHTML = `
+        <div class="chat-msg-avatar own-avatar">${avatarContent}</div>
         <div class="chat-msg-body">
+          <div class="chat-msg-header own-header">
+            ${msg.title ? `<span class="chat-msg-title">${msg.title}</span>` : ""}
+            <span class="chat-msg-rank">${msg.rank||_charData?.rank||"Wanderer"} · Lv.${msg.level||_charData?.level||1}</span>
+            <span class="chat-msg-name own-name">${msg.charName||_charData?.name||"You"}</span>
+          </div>
           ${replyQuoteHTML}
           <div class="chat-msg-text own-text" data-docid="${docId}">${formatChatText(msg.text||"")}</div>
           <div class="chat-msg-actions">
@@ -4016,8 +4024,7 @@ function startChatListener(locationId, tab) {
             <button class="chat-action-btn" title="Delete" onclick="deleteMsg('${docId}','${colPath}')">🗑️</button>
           </div>
           <div class="chat-msg-time own-time">${time}</div>
-        </div>
-        <div class="chat-msg-avatar">${avatarContent}</div>`;
+        </div>`;
 
       const msgBody = el.querySelector(".chat-msg-body");
       let _hideTimer = null;
@@ -4089,7 +4096,17 @@ function startChatListener(locationId, tab) {
         return;
       }
       container.innerHTML = "";
-      snap.forEach(d => {
+      // For general chat (no server-side orderBy), sort client-side by timestamp
+      const docs = [];
+      snap.forEach(d => docs.push(d));
+      if (tab === "general") {
+        docs.sort((a, b) => {
+          const ta = a.data().timestamp?.toMillis?.() ?? 0;
+          const tb = b.data().timestamp?.toMillis?.() ?? 0;
+          return ta - tb;
+        });
+      }
+      docs.forEach(d => {
         const el = _buildMsgEl(d);
         if (el) container.appendChild(el);
       });
@@ -4142,6 +4159,9 @@ function startChatListener(locationId, tab) {
       }
     });
     if (didAppend) container.scrollTop = container.scrollHeight;
+  }, (err) => {
+    console.error("[Chat] onSnapshot error — tab:", tab, "err:", err);
+    window.showToast?.("Chat failed to load. Please refresh.", "error");
   });
 }
 
@@ -4179,7 +4199,13 @@ async function sendChat() {
     payload.replyTo = window._replyTo;
   }
 
-  await addDoc(msgsRef, payload);
+  try {
+    await addDoc(msgsRef, payload);
+  } catch(e) {
+    console.error("[sendChat] Failed to send message:", e);
+    window.showToast?.("Failed to send message. Please try again.", "error");
+    return;
+  }
   if (input) input.value = "";
   window._cancelReply?.();
 
@@ -4882,7 +4908,8 @@ window._buyListing = async (listingId, name, icon, price, type, maxQty) => {
     const qty = target.qty || 1;
     const totalPrice = target.price * qty;
 
-    if (gold < totalPrice) { errEl.textContent = `Not enough gold.`; return; }
+    if (gold < totalPrice) { errEl.textContent = `Not enough gold. You have ${gold} coins.`; return; }
+    if (!listingId) { errEl.textContent = "Invalid listing. Please refresh the market."; return; }
 
     const btn = document.getElementById("btn-confirm-buy");
     btn.disabled = true;
@@ -4891,7 +4918,7 @@ window._buyListing = async (listingId, name, icon, price, type, maxQty) => {
     try {
       // Call the secure Cloud Function
       const fnBuyListing = httpsCallable(functions, "buyListing");
-      await fnBuyListing({ listingId, qty });
+      const result = await fnBuyListing({ listingId, qty });
 
       // Locally update inventory and gold (will be refreshed from server soon)
       if (_charData) { _charData.gold = gold - totalPrice; }
@@ -4908,18 +4935,23 @@ window._buyListing = async (listingId, name, icon, price, type, maxQty) => {
         playerMsgEl.style.display = "block";
         setTimeout(() => playerMsgEl.style.display = "none", 5000);
       }
+      // Refresh market so the purchased listing updates
       loadPlayerListings();
       // Restore default _buyItem
       window._buyItem = buyItem;
     } catch(e) {
-      console.error(e);
-      errEl.textContent = `Purchase failed: ${e?.message || e}`;
+      console.error("[_buyListing] Cloud Function error:", e);
+      // Surface the actual error message from the Cloud Function
+      const msg = e?.details?.message || e?.message || String(e);
+      errEl.textContent = `Purchase failed: ${msg}`;
+      // Also reload market in case listing is stale (e.g. already sold)
+      loadPlayerListings();
     } finally {
       btn.disabled = false;
       btn.textContent = "BUY";
     }
   };
-  };
+};
 
 
 // ═══════════════════════════════════════════════════
@@ -6101,45 +6133,36 @@ window.deleteVision = async function(id) {
 // ═══════════════════════════════════════════════════
 //  BESTOW WATCHER — detect deity-granted gold/items
 // ═══════════════════════════════════════════════════
-let _prevGold      = null;
-let _prevInvLength = null;
 let _bestowUnsub   = null;
 
 window.startBestowWatcher = function() {
   if (_bestowUnsub) _bestowUnsub();
   if (!_uid) return;
+  let _prevBestowId = null;
   _bestowUnsub = onSnapshot(doc(db, 'characters', _uid), (snap) => {
     if (!snap.exists()) return;
     const data = snap.data();
-    // Skip the very first snapshot (initial load) — just set baseline
-    if (_prevGold === null) {
-      _prevGold      = data.gold      ?? 0;
-      _prevInvLength = (data.inventory ?? []).length;
+    const bestowId = data.lastBestowId ?? null;
+    // On first snapshot just record baseline — never fire
+    if (_prevBestowId === null) {
+      _prevBestowId = bestowId;
       return;
     }
-    const newGold     = data.gold      ?? 0;
-    const newInvLen   = (data.inventory ?? []).length;
-    const goldDiff    = newGold - _prevGold;
-    const itemsAdded  = newInvLen - _prevInvLength;
-
-    if (goldDiff > 0 || itemsAdded > 0) {
-      // Only fire if change came from outside normal gameplay
-      // We tag bestow events by checking if charData wasn't just updated by this client
+    // Only fire when the deity writes a new lastBestowId (set by bestowResources Cloud Function)
+    if (bestowId && bestowId !== _prevBestowId) {
+      _prevBestowId = bestowId;
+      const gold       = data.lastBestowGold  ?? 0;
+      const itemsAdded = data.lastBestowItems ?? 0;
       const parts = [];
-      if (goldDiff > 0)   parts.push(`+${goldDiff.toLocaleString()}💰`);
+      if (gold > 0)       parts.push(`+${gold.toLocaleString()}💰`);
       if (itemsAdded > 0) parts.push(`+${itemsAdded} item${itemsAdded > 1 ? 's' : ''}`);
-      if (parts.length) {
-        const msg = parts.join(', ');
-        window.showToast(`✨ Divine Bestowment: ${msg}`, 'success');
-        logActivity('✨', `<b>Divine Bestowment:</b> ${msg} granted by your deity.`, '#c9a84c');
-        // Refresh charData display
-        Object.assign(_charData, data);
-        _syncAllDisplays(_charData);
-        window.renderInventory(_charData.inventory || []);
-      }
+      const msg = parts.length ? parts.join(', ') : 'resources';
+      window.showToast(`✨ Divine Bestowment: ${msg}`, 'success');
+      logActivity('✨', `<b>Divine Bestowment:</b> ${msg} granted by your deity.`, '#c9a84c');
+      Object.assign(_charData, data);
+      _syncAllDisplays(_charData);
+      window.renderInventory(_charData.inventory || []);
     }
-    _prevGold      = newGold;
-    _prevInvLength = newInvLen;
   });
 };
 
@@ -6437,19 +6460,34 @@ async function loadFactionMembers(factionName, leaderName) {
       section.innerHTML = '<div style="color:var(--text-dim);font-style:italic">No members yet.</div>';
       return;
     }
-    section.innerHTML = `<div style="font-size:1.1rem;font-weight:600;margin-bottom:8px;color:var(--gold)">Members</div>` +
-      '<div style="display:flex;flex-wrap:wrap;gap:18px;">' +
-      members.map(m => `
-        <div class="faction-member-card" data-uid="${m.uid}" style="display:flex;align-items:center;gap:10px;background:rgba(60,60,60,0.5);border-radius:8px;padding:8px 14px;min-width:160px;cursor:pointer;">
-          <div class="faction-member-avatar" style="width:36px;height:36px;border-radius:50%;overflow:hidden;background:#222;border:1.5px solid var(--gold-dim);display:flex;align-items:center;justify-content:center;">
-            ${m.avatarUrl ? `<img src="${m.avatarUrl}" style="width:100%;height:100%;object-fit:cover;"/>` : `<span style="font-size:1.2rem">👤</span>`}
+    const collapsed = section.dataset.collapsed === 'true';
+    section.innerHTML = `
+      <div class="fac-members-header" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none;padding:4px 0 10px;">
+        <div style="font-size:1.1rem;font-weight:600;color:var(--gold)">Members <span style="font-size:0.8rem;color:var(--text-dim);font-weight:400">(${members.length})</span></div>
+        <span class="fac-members-chevron" style="font-size:0.75rem;color:var(--gold-dim);transition:transform 0.2s;transform:rotate(${collapsed?'-90deg':'0deg'})">${collapsed?'▶':'▼'}</span>
+      </div>
+      <div class="fac-members-body" style="display:${collapsed?'none':'flex'};flex-wrap:wrap;gap:18px;">
+        ${members.map(m => `
+          <div class="faction-member-card" data-uid="${m.uid}" style="display:flex;align-items:center;gap:10px;background:rgba(60,60,60,0.5);border-radius:8px;padding:8px 14px;min-width:160px;cursor:pointer;">
+            <div class="faction-member-avatar" style="width:36px;height:36px;border-radius:50%;overflow:hidden;background:#222;border:1.5px solid var(--gold-dim);display:flex;align-items:center;justify-content:center;">
+              ${m.avatarUrl ? `<img src="${m.avatarUrl}" style="width:100%;height:100%;object-fit:cover;"/>` : `<span style="font-size:1.2rem">👤</span>`}
+            </div>
+            <div>
+              <div style="font-weight:600;color:var(--gold)">${m.name}</div>
+              <div style="font-size:0.9rem;color:var(--text-dim)">${m.rank || ''} · Lv${m.level || 1}</div>
+            </div>
           </div>
-          <div>
-            <div style="font-weight:600;color:var(--gold)">${m.name}</div>
-            <div style="font-size:0.9rem;color:var(--text-dim)">${m.rank || ''} · Lv${m.level || 1}</div>
-          </div>
-        </div>
-      `).join('') + '</div>';
+        `).join('')}
+      </div>`;
+    // Toggle collapse
+    section.querySelector('.fac-members-header').addEventListener('click', () => {
+      const body = section.querySelector('.fac-members-body');
+      const chevron = section.querySelector('.fac-members-chevron');
+      const isNowCollapsed = body.style.display !== 'none';
+      body.style.display = isNowCollapsed ? 'none' : 'flex';
+      chevron.style.transform = isNowCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)';
+      section.dataset.collapsed = isNowCollapsed ? 'true' : 'false';
+    });
     // Add click event for member actions
     setTimeout(() => {
       document.querySelectorAll('.faction-member-card').forEach(card => {
