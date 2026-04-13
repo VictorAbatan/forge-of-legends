@@ -194,6 +194,59 @@ function _setupBC(c) {
     else if(CONTINENTS[bc.id]) renderContinent(bc.id);
     else renderWorldMap();
   }));
+
+  // Clean up any previous drag listeners before attaching new ones
+  if (window._lmapBarMouseMove) window.removeEventListener("mousemove", window._lmapBarMouseMove);
+  if (window._lmapBarMouseUp)   window.removeEventListener("mouseup",   window._lmapBarMouseUp);
+
+  const bar = document.getElementById("lmap-bcbar");
+  if (!bar) return;
+
+  let _bdragging=false, _bdx=0, _bdy=0, _bx=12, _by=12;
+
+  function startDrag(clientX, clientY) {
+    _bdragging = true;
+    _bdx = clientX; _bdy = clientY;
+    const r  = bar.getBoundingClientRect();
+    const pr = bar.offsetParent?.getBoundingClientRect() || { left:0, top:0 };
+    _bx = r.left - pr.left;
+    _by = r.top  - pr.top;
+    bar.style.left = _bx + "px";
+    bar.style.top  = _by + "px";
+  }
+
+  function moveDrag(clientX, clientY) {
+    if (!_bdragging) return;
+    _bx += clientX - _bdx;
+    _by += clientY - _bdy;
+    _bdx = clientX; _bdy = clientY;
+    bar.style.left = _bx + "px";
+    bar.style.top  = _by + "px";
+  }
+
+  function endDrag() { _bdragging = false; bar.style.cursor = "grab"; }
+
+  bar.addEventListener("mousedown", e => {
+    if (e.target.closest(".lmap-bc,.lmap-bc-sep,.lmap-bc-current")) return;
+    bar.style.cursor = "grabbing";
+    startDrag(e.clientX, e.clientY);
+    e.preventDefault();
+  });
+
+  window._lmapBarMouseMove = e => moveDrag(e.clientX, e.clientY);
+  window._lmapBarMouseUp   = endDrag;
+  window.addEventListener("mousemove", window._lmapBarMouseMove);
+  window.addEventListener("mouseup",   window._lmapBarMouseUp);
+
+  bar.addEventListener("touchstart", e => {
+    if (e.target.closest(".lmap-bc,.lmap-bc-sep,.lmap-bc-current")) return;
+    startDrag(e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: true });
+  bar.addEventListener("touchmove", e => {
+    e.stopPropagation();
+    moveDrag(e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: true });
+  bar.addEventListener("touchend", endDrag, { passive: true });
 }
 
 function _initZoomPan(container, wrap) {
@@ -341,6 +394,15 @@ function _openTT(el, e) {
         const cid = btn.dataset.cid || btn.dataset.id;
         _mapBreadcrumbs.push({id:cid, label:CONTINENTS[cid]?.name||cid});
         renderWildlands(cid);
+      } else if (action === "gather") {
+        window.switchPanel?.("profession");
+        window.showToast?.("You are at a resource zone — gather away!", "success");
+      } else if (action === "fight") {
+        window.switchPanel?.("battle");
+        window.setBattleMode?.("farming");
+        setTimeout(() => window._autoSelectZoneByName?.(btn.dataset.zone), 80);
+      } else if (action === "temple") {
+        window._openTemplePanel?.();
       }
     });
   });
@@ -456,8 +518,8 @@ function renderWorldMap() {
 
     const el=document.createElement("div");
     el.className="lmap-wpin"; el.style.cssText=`position:absolute;left:${px}px;top:${py}px;transform:translate(-50%,-50%);z-index:10;pointer-events:all;overflow:visible;`;
-    el.innerHTML=`<div class="lmap-wpin-dot" style="background:${col};box-shadow:0 0 10px ${col}88;${locked?"opacity:0.45":""}"></div>
-      <div class="lmap-wpin-label" style="${locked?"opacity:0.5":""}">${pin.label}</div>
+    el.innerHTML=`<div class="lmap-wpin-dot" style="background:${col};box-shadow:0 0 0 3px ${col}44, 0 0 14px ${col}cc;${locked?'opacity:0.45':''}"></div>
+      <div class="lmap-wpin-label" style="${locked?'opacity:0.5':''}">${pin.label}</div>
       <div class="lmap-wpin-tooltip">${ttBody}</div>`;
     el.querySelector(".lmap-wpin-dot").addEventListener("click",e=>{ e.stopPropagation(); _openTT(el, e); });
     el.querySelector('[data-action="enter"]')?.addEventListener("click",e=>{ e.stopPropagation(); _closeTT(); _mapBreadcrumbs=[{id:"world",label:"World Map"}]; renderContinent(pin.id); });
@@ -562,7 +624,7 @@ function renderContinent(cid) {
     el.className="lmap-loc-pin"; el.style.cssText=`position:absolute;left:${px}px;top:${py}px;transform:translate(-50%,-50%);pointer-events:all;overflow:visible;`;
 
     if(p._type==="wildlands") {
-      el.innerHTML=`<div class="lmap-explore-dot" style="background:#70c090;border-color:#70c09088;animation:lmap-pulse 2s infinite;"></div>
+      el.innerHTML=`<div class="lmap-explore-dot" style="background:#4fc870;border-color:#4fc87099;animation:lmap-pulse 2s infinite;"></div>
         <div class="lmap-loc-pin-label" style="color:#70c090">🌿 Explore</div>
         <div class="lmap-wpin-tooltip">
           <div class="lmap-wpin-tt-name">Explore the Wildlands</div>
@@ -651,6 +713,7 @@ function renderWildlands(cid) {
 
   _placeCoverPins(imgEl, pinsEl, cont.explore, (zone, px, py) => {
     const dotCol=zone.type==="monster"?_gradeCol(zone.grade):zone.type==="resource"?"#5b9fe0":"#e8b84b";
+    const pulseAnim=zone.type==="monster"?"lmap-pulse-monster 2s infinite":zone.type==="resource"?"lmap-pulse-resource 2.2s infinite":"lmap-pulse-deity 1.8s infinite";
     const atZone=_isAtLocation(zone.id)||_isAtLocation(zone.label);
     const el=document.createElement("div");
     el.className="lmap-explore-pin"; el.style.cssText=`position:absolute;left:${px}px;top:${py}px;transform:translate(-50%,-50%);pointer-events:all;overflow:visible;`;
@@ -660,22 +723,56 @@ function renderWildlands(cid) {
       :zone.type==="resource"?`<div style="font-size:10px;color:#70c090;margin:3px 0;">Professions: ${zone.prof}</div>`
       :`<div style="font-size:10px;color:#c9a84c;margin:3px 0;">${zone.deity}</div>`;
 
-    el.innerHTML=`<div class="lmap-explore-dot" style="background:${dotCol};border-color:${dotCol}88;"></div>
+    el.innerHTML=`<div class="lmap-explore-dot" style="background:${dotCol};border-color:${dotCol};animation:${pulseAnim};"></div>
       <div class="lmap-loc-pin-label" style="color:${dotCol}">${zone.label}</div>
       ${atZone?`<div class="lmap-player-dot" style="position:absolute;top:-6px;left:50%;transform:translateX(-50%);"></div>`:""}
       <div class="lmap-wpin-tooltip">
         <div class="lmap-wpin-tt-name">${_icon(zone.type)} ${zone.label}</div>
         ${detail}
         ${atZone
-          ? `<div class="lmap-here-text" style="margin-top:8px;">📍 YOU ARE HERE</div>`
+          ? `<div class="lmap-here-text" style="margin-top:8px;">📍 YOU ARE HERE</div>
+             ${zone.type==="resource"
+               ? `<button class="lmap-wpin-travel-btn" data-action="gather" style="margin-top:6px;background:rgba(91,159,224,0.15);border-color:rgba(91,159,224,0.5);color:#5b9fe0;">
+                    ⛏️ GATHER HERE
+                  </button>`
+               : zone.type==="monster"
+               ? `<button class="lmap-wpin-travel-btn" data-action="fight" data-zone="${zone.label}" style="margin-top:6px;background:rgba(224,112,96,0.15);border-color:rgba(224,112,96,0.5);color:#e07060;">
+                    ⚔️ FIGHT HERE
+                  </button>`
+               : zone.type==="deity"
+               ? `<button class="lmap-wpin-travel-btn" data-action="temple" style="margin-top:6px;background:rgba(201,168,76,0.15);border-color:rgba(201,168,76,0.5);color:#c9a84c;">
+                    🙏 VISIT TEMPLE
+                  </button>`
+               : ""}`
           : `<button class="lmap-wpin-travel-btn" data-cost="${zone.travelCost}" data-time="${zone.travelTime}" data-dest="${zone.label}" data-cont="${cont.label}" style="margin-top:8px;">
-               TRAVEL HERE — ${zone.travelCost}🪙 · ${_ft(zone.travelTime)}
+               TRAVEL HERE — ⏱ ${_ft(zone.travelTime)}${zone.type==="monster"||zone.type==="resource"||zone.type==="deity" ? " · Free" : ` · ${zone.travelCost}🪙`}
              </button>`
         }
       </div>`;
 
     el.querySelector(".lmap-explore-dot").addEventListener("click",e=>{ e.stopPropagation(); _openTT(el, e); });
-    el.querySelector(".lmap-wpin-travel-btn")?.addEventListener("click",e=>{ e.stopPropagation(); const d=e.currentTarget.dataset; window.openTravelModal?.(d.dest,(d.cont||cont.label).split("·")[0].trim(),parseInt(d.cost),parseInt(d.time)); });
+    el.querySelector(".lmap-wpin-travel-btn[data-cost]")?.addEventListener("click",e=>{
+      e.stopPropagation();
+      const d=e.currentTarget.dataset;
+      // Monster, resource and deity zones are free — no gold cost
+      const isFree = zone.type==="monster"||zone.type==="resource"||zone.type==="deity";
+      window.openTravelModal?.(d.dest,(d.cont||cont.label).split("·")[0].trim(), isFree ? 0 : parseInt(d.cost), parseInt(d.time));
+    });
+    el.querySelector('[data-action="gather"]')?.addEventListener("click",e=>{
+      e.stopPropagation(); _closeTT();
+      window.switchPanel?.("profession");
+      window.showToast?.("You are at a resource zone — gather away!", "success");
+    });
+    el.querySelector('[data-action="fight"]')?.addEventListener("click",e=>{
+      e.stopPropagation(); _closeTT();
+      window.switchPanel?.("battle");
+      window.setBattleMode?.("farming");
+      setTimeout(()=>window._autoSelectZoneByName?.(zone.label), 80);
+    });
+    el.querySelector('[data-action="temple"]')?.addEventListener("click",e=>{
+      e.stopPropagation(); _closeTT();
+      window._openTemplePanel?.();
+    });
     return el;
   });
 

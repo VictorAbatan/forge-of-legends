@@ -801,11 +801,150 @@ function renderFactionQuestRewardPicker() {
   updateSelectedDisplay();
 }
 
+// Bestow item picker — same pattern as quest reward pickers
+function renderBestowItemPicker() {
+  const picker = document.getElementById("bestow-item-picker");
+  if (!picker) return;
+
+  let selected = [];
+  let currentCat = "weapon";
+  let searchQuery = "";
+
+  picker.innerHTML = `
+    <div class="reward-picker-tabs">
+      ${ITEM_CATEGORIES.map(cat => `<button class="reward-picker-tab${cat.key === currentCat ? ' active' : ''}" data-cat="${cat.key}">${cat.label}</button>`).join("")}
+    </div>
+    <input type="text" id="bestow-item-search" class="field-input" placeholder="🔍 Search items..." style="margin:8px 0;padding:6px 10px;font-size:0.82rem"/>
+    <div class="reward-picker-list"></div>
+    <div class="reward-picker-selected"></div>
+  `;
+
+  const listDiv     = picker.querySelector(".reward-picker-list");
+  const selectedDiv = picker.querySelector(".reward-picker-selected");
+  const searchInput = picker.querySelector("#bestow-item-search");
+
+  function getBadge(item) {
+    if (item.grade)  { const col = GRADE_COLORS[item.grade]   || "#aaa"; return `<span style="font-size:0.65rem;font-weight:700;padding:1px 5px;border-radius:3px;background:${col}22;color:${col};border:1px solid ${col}44;margin-left:4px">${item.grade}</span>`; }
+    if (item.rarity) { const col = RARITY_COLORS[item.rarity] || "#aaa"; return `<span style="font-size:0.65rem;font-weight:700;padding:1px 5px;border-radius:3px;background:${col}22;color:${col};border:1px solid ${col}44;margin-left:4px">${item.rarity}</span>`; }
+    return "";
+  }
+
+  function syncHidden() {
+    document.getElementById("bestow-items").value = selected.map(i => `${i.name}, ${i.qty}`).join("\n");
+  }
+
+  function updateSelectedDisplay() {
+    if (!selected.length) {
+      selectedDiv.innerHTML = `<div style="color:var(--text-dim);font-size:0.82rem;padding:6px 0;font-style:italic">No items selected yet.</div>`;
+    } else {
+      selectedDiv.innerHTML = `
+        <div style="font-size:0.72rem;color:var(--text-dim);margin-bottom:6px;font-family:var(--ff-mono);letter-spacing:0.06em">SELECTED ITEMS</div>
+        ${selected.map((item, idx) => `
+          <div class="reward-selected-row">
+            <span class="reward-selected-num">${idx + 1}</span>
+            <span class="reward-selected-icon">${item.icon || "📦"}</span>
+            <span class="reward-selected-name">${item.name}${getBadge(item)}</span>
+            <input type="number" min="1" value="${item.qty}" data-name="${item.name}" class="reward-qty-input"/>
+            <button data-name="${item.name}" class="reward-remove-btn">✕</button>
+          </div>`).join("")}`;
+    }
+    syncHidden();
+    selectedDiv.querySelectorAll(".reward-qty-input").forEach(input => {
+      input.addEventListener("input", () => {
+        const val = Math.max(1, parseInt(input.value) || 1);
+        input.value = val;
+        const item = selected.find(i => i.name === input.dataset.name);
+        if (item) { item.qty = val; syncHidden(); }
+      });
+    });
+    selectedDiv.querySelectorAll(".reward-remove-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        selected = selected.filter(i => i.name !== btn.dataset.name);
+        updateSelectedDisplay();
+        showCategory(currentCat);
+      });
+    });
+  }
+
+  function showCategory(catKey) {
+    currentCat = catKey;
+    const query = searchQuery.toLowerCase();
+    let items = ITEMS.filter(i => i.type === catKey);
+    if (query) items = items.filter(i => i.name.toLowerCase().includes(query));
+    if (!items.length) {
+      listDiv.innerHTML = `<div style="color:var(--text-dim);font-size:0.82rem;padding:8px;font-style:italic">No items found.</div>`;
+      return;
+    }
+    listDiv.innerHTML = items.map(item => {
+      const isSelected = !!selected.find(s => s.name === item.name);
+      return `<button class="reward-item-btn${isSelected ? ' selected' : ''}" data-name="${item.name}">
+        ${item.icon || "📦"} ${item.name}${getBadge(item)}
+        ${item.stats ? `<span class="reward-item-stat">${item.stats}</span>` : ""}
+        ${isSelected ? `<span class="reward-item-check">✓</span>` : ""}
+      </button>`;
+    }).join("");
+    listDiv.querySelectorAll(".reward-item-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const name = btn.dataset.name;
+        if (selected.find(i => i.name === name)) return;
+        const item = ITEMS.find(i => i.name === name);
+        selected.push({ ...item, qty: 1 });
+        updateSelectedDisplay();
+        showCategory(currentCat);
+      });
+    });
+  }
+
+  searchInput.addEventListener("input", () => {
+    searchQuery = searchInput.value;
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      const items = ITEMS.filter(i => i.name.toLowerCase().includes(query));
+      listDiv.innerHTML = items.length
+        ? items.map(item => {
+            const isSelected = !!selected.find(s => s.name === item.name);
+            return `<button class="reward-item-btn${isSelected ? ' selected' : ''}" data-name="${item.name}">
+              ${item.icon || "📦"} ${item.name}${getBadge(item)}
+              ${item.stats ? `<span class="reward-item-stat">${item.stats}</span>` : ""}
+              ${isSelected ? `<span class="reward-item-check">✓</span>` : ""}
+            </button>`;
+          }).join("")
+        : `<div style="color:var(--text-dim);font-size:0.82rem;padding:8px;font-style:italic">No items found.</div>`;
+      listDiv.querySelectorAll(".reward-item-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const name = btn.dataset.name;
+          if (selected.find(i => i.name === name)) return;
+          const item = ITEMS.find(i => i.name === name);
+          selected.push({ ...item, qty: 1 });
+          updateSelectedDisplay();
+          searchInput.dispatchEvent(new Event("input"));
+        });
+      });
+    } else {
+      showCategory(currentCat);
+    }
+  });
+
+  picker.querySelectorAll(".reward-picker-tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      picker.querySelectorAll(".reward-picker-tab").forEach(t => t.classList.remove("active"));
+      tab.classList.add("active");
+      searchQuery = "";
+      searchInput.value = "";
+      showCategory(tab.dataset.cat);
+    });
+  });
+
+  showCategory(currentCat);
+  updateSelectedDisplay();
+}
+
 // Render picker when quest modal opens
 const origOpenDeityModal = window.openDeityModal;
 window.openDeityModal = function(id) {
   origOpenDeityModal?.(id);
-  if (id === "quest-modal") setTimeout(renderQuestRewardPicker, 0);
+  if (id === "quest-modal")  setTimeout(renderQuestRewardPicker, 0);
+  if (id === "bestow-modal") setTimeout(renderBestowItemPicker, 0);
 };
 // Also render faction quest picker when factions panel becomes visible
 document.addEventListener("DOMContentLoaded", () => {
@@ -1312,6 +1451,7 @@ async function doBestow() {
     document.getElementById("bestow-modal").style.display = "none";
     document.getElementById("bestow-gold").value  = "0";
     document.getElementById("bestow-items").value = "";
+    document.getElementById("bestow-item-picker").innerHTML = "";
 
     const logEl = document.getElementById("bestow-log");
     if (logEl) {

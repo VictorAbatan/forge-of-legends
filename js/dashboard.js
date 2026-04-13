@@ -1881,6 +1881,258 @@ const PROFESSION_DESCS = {
 
 const CLASS_ICONS  = { Warrior:"⚔️",Guardian:"🛡️",Arcanist:"🔮",Hunter:"🏹",Assassin:"🗡️",Cleric:"✨",Summoner:"🌀" };
 const DEITY_ICONS  = { "Sah'run":"🔥","Alistor":"🌑","Elionidas":"🪙","Mah'run":"⭐","Freyja":"💗","Arion":"⚖️","Veil":"📖" };
+
+// ═══════════════════════════════════════════════════
+//  FAITH / WORSHIP SYSTEM
+// ═══════════════════════════════════════════════════
+
+// Worship materials required per sacrifice (1 of each)
+const DEITY_WORSHIP_MATS = {
+  "Sah'run":   ["Volcanic Roots","Devil-Spring Water","Ash of Elder Trees"],
+  "Alistor":   ["Ephemeral Footprints","Oil-stained Feathers","Whispering Purple Sands"],
+  "Elionidas": ["Golden Wheat Sheaves","Miracle Coins","Ancient Mint Seeds"],
+  "Mah'run":   ["Starlight Dust","Moon Petals","Crystallized Night Dews"],
+  "Freyja":    ["Crimson Toad Moss","Branch of Soul Tree","Bloom Petals"],
+  "Arion":     ["Broken Shackles","Iron Oaths","Verdict Quill"],
+  "Veil":      ["Ancient Scroll Fragments","White Mystic Woods","Truths"],
+};
+
+// Which shrine belongs to which deity
+const DEITY_SHRINE_MAP = {
+  "shrine of secrets":     "Veil",
+  "shrine_of_secrets":     "Veil",
+  "aurora basin":          "Mah'run",
+  "aurora_basin":          "Mah'run",
+  "forgotten estuary":     "Alistor",
+  "forgotten_estuary":     "Alistor",
+  "purgatory of light":    "Sah'run",
+  "purgatory_of_light":    "Sah'run",
+  "temple of verdict":     "Arion",
+  "temple_of_verdict":     "Arion",
+  "heart garden":          "Freyja",
+  "heart_garden":          "Freyja",
+  "valley of overflowing": "Elionidas",
+  "valley_of_overflowing": "Elionidas",
+};
+
+// Faith tiers — each tier strengthens the blessing multiplier
+// Base blessing is 3%. Each tier adds 3% (so Tier 5 = 18%)
+const FAITH_TIERS = [
+  { tier: 0, minFaith: 0,   label: "Faithless",    mult: 1.0  },
+  { tier: 1, minFaith: 5,   label: "Initiate",     mult: 1.5  },
+  { tier: 2, minFaith: 15,  label: "Devotee",      mult: 2.0  },
+  { tier: 3, minFaith: 35,  label: "Acolyte",      mult: 3.0  },
+  { tier: 4, minFaith: 70,  label: "Zealot",       mult: 4.0  },
+  { tier: 5, minFaith: 120, label: "Chosen",       mult: 5.0  },
+  { tier: 6, minFaith: 200, label: "High Priest",  mult: 6.0  },
+];
+
+// Returns current faith tier data for a player
+function _getFaithTier(faithLevel) {
+  let current = FAITH_TIERS[0];
+  for (const t of FAITH_TIERS) {
+    if (faithLevel >= t.minFaith) current = t;
+  }
+  const next = FAITH_TIERS.find(t => t.minFaith > faithLevel) || null;
+  return { current, next };
+}
+
+// Returns the effective blessing description with faith multiplier applied
+function _getBlessingDesc(deity, faithLevel) {
+  const basePct = 3;
+  const { current } = _getFaithTier(faithLevel);
+  const effectivePct = Math.round(basePct * current.mult);
+  const descs = {
+    "Sah'run":   `${effectivePct}% chance enemies drop forge materials on defeat`,
+    "Alistor":   `${effectivePct}% reduced chance of getting robbed/attacked while exploring`,
+    "Elionidas": `${effectivePct}% chance of finding precious loot while exploring`,
+    "Mah'run":   `+${effectivePct}% chance of encountering rare events and special locations`,
+    "Freyja":    `+${effectivePct}% chance of receiving gifts from NPCs`,
+    "Arion":     `Balances good/bad encounters (${effectivePct}% correction strength)`,
+    "Veil":      `+${effectivePct}% EXP gained from all activities`,
+  };
+  return descs[deity] || `+${effectivePct}% blessing effect`;
+}
+
+// Returns the effective blessing % for a deity at current faith level
+function _getFaithBlessingPct(charData) {
+  const faith = charData?.faithLevel || 0;
+  const { current } = _getFaithTier(faith);
+  return (3 * current.mult) / 100; // e.g. tier 2 = 6% = 0.06
+}
+
+// Temple panel — shows faith level, tier, blessing strength, sacrifice option
+window._openTemplePanel = function() {
+  const c = _charData;
+  if (!c) return;
+
+  const loc = (c.kingdom || c.location || "").toLowerCase().replace(/_/g, " ");
+  const shrineName = Object.keys(DEITY_SHRINE_MAP).find(k => loc.includes(k));
+  const shrineDeity = shrineName ? DEITY_SHRINE_MAP[shrineName] : null;
+  const isOwnShrine = shrineDeity === c.deity;
+  const faithLevel = c.faithLevel || 0;
+  const { current: tier, next } = _getFaithTier(faithLevel);
+  const blessingDesc = _getBlessingDesc(c.deity, faithLevel);
+  const deityIcon = DEITY_ICONS[c.deity] || "✨";
+  const mats = DEITY_WORSHIP_MATS[c.deity] || [];
+  const inv = c.inventory || [];
+
+  // Check if player has all 3 worship materials
+  const matStatus = mats.map(mat => {
+    const owned = inv.find(i => i.name === mat);
+    return { name: mat, qty: owned?.qty || 0, hasOne: (owned?.qty || 0) >= 1 };
+  });
+  const canSacrifice = isOwnShrine && matStatus.every(m => m.hasOne);
+
+  // Build faith bar
+  const nextThreshold = next ? next.minFaith : faithLevel;
+  const tierProgress = next
+    ? Math.round(((faithLevel - tier.minFaith) / (next.minFaith - tier.minFaith)) * 100)
+    : 100;
+
+  // Render into a modal overlay
+  const existing = document.getElementById('_temple-modal');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = '_temple-modal';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+
+  overlay.innerHTML = `
+    <div style="background:var(--bg-card,#18171c);border:1px solid var(--gold-dim,#a07830);border-radius:16px;padding:28px 22px;max-width:420px;width:100%;max-height:85vh;overflow-y:auto">
+
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px">
+        <span style="font-size:2rem">${deityIcon}</span>
+        <div>
+          <div style="font-size:0.7rem;letter-spacing:0.12em;color:var(--gold,#c9a84c);text-transform:uppercase">Temple of ${c.deity}</div>
+          <div style="font-size:0.85rem;color:var(--text-dim,#aaa)">${c.deity ? ({"Sah'run":'God of Flames','Alistor':'God of Darkness','Elionidas':'God of Abundance',"Mah'run":'Goddess of Stars','Freyja':'Goddess of Love','Arion':'God of Justice','Veil':'God of Knowledge'})[c.deity] || '' : ''}</div>
+        </div>
+        <button onclick="document.getElementById('_temple-modal').remove()" style="margin-left:auto;background:transparent;border:none;color:var(--text-dim,#aaa);font-size:1.2rem;cursor:pointer">✕</button>
+      </div>
+
+      <!-- Faith Level -->
+      <div style="background:rgba(201,168,76,0.06);border:1px solid rgba(201,168,76,0.2);border-radius:10px;padding:14px;margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-size:0.75rem;letter-spacing:0.1em;color:var(--gold,#c9a84c);text-transform:uppercase">Faith Level</span>
+          <span style="font-size:1rem;font-weight:700;color:var(--gold,#c9a84c)">${faithLevel}</span>
+        </div>
+        <div style="background:rgba(255,255,255,0.06);border-radius:6px;height:6px;overflow:hidden;margin-bottom:8px">
+          <div style="height:100%;width:${tierProgress}%;background:var(--gold,#c9a84c);border-radius:6px;transition:width 0.4s"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:0.72rem;color:var(--text-dim,#aaa)">
+          <span>Tier ${tier.tier} — <b style="color:var(--gold,#c9a84c)">${tier.label}</b></span>
+          ${next ? `<span>Next: ${next.label} at Faith ${next.minFaith}</span>` : `<span style="color:var(--gold,#c9a84c)">Max Tier Reached</span>`}
+        </div>
+      </div>
+
+      <!-- Blessing -->
+      <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border,#333);border-radius:10px;padding:14px;margin-bottom:16px">
+        <div style="font-size:0.7rem;letter-spacing:0.1em;color:var(--gold,#c9a84c);text-transform:uppercase;margin-bottom:6px">Active Blessing</div>
+        <div style="font-size:0.9rem;font-weight:600;color:var(--text,#eee);margin-bottom:4px">${c.blessing || '—'}</div>
+        <div style="font-size:0.82rem;color:var(--text-dim,#aaa)">${blessingDesc}</div>
+        <div style="margin-top:8px;font-size:0.72rem;color:#888">Blessing strength: <b style="color:var(--gold,#c9a84c)">${tier.mult}×</b> base (Faith Tier ${tier.tier})</div>
+      </div>
+
+      <!-- Sacrifice -->
+      <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border,#333);border-radius:10px;padding:14px">
+        <div style="font-size:0.7rem;letter-spacing:0.1em;color:var(--gold,#c9a84c);text-transform:uppercase;margin-bottom:10px">Offer Sacrifice</div>
+        ${!isOwnShrine ? `
+          <div style="font-size:0.82rem;color:#888;font-style:italic">
+            You must be at <b style="color:var(--gold,#c9a84c)">${c.deity}'s</b> shrine to sacrifice.<br>
+            ${shrineName ? `This is ${shrineDeity}'s shrine.` : 'You are not at a deity shrine.'}
+          </div>` : `
+          <div style="font-size:0.8rem;color:var(--text-dim,#aaa);margin-bottom:10px">Sacrifice 1 of each worship material to gain +1 Faith.</div>
+          <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">
+            ${matStatus.map(m => `
+              <div style="display:flex;align-items:center;gap:8px;font-size:0.82rem">
+                <span style="color:${m.hasOne ? '#4fc870' : '#e05555'}">${m.hasOne ? '✓' : '✗'}</span>
+                <span style="color:${m.hasOne ? 'var(--text,#eee)' : 'var(--text-dim,#aaa)'}">${m.name}</span>
+                <span style="margin-left:auto;color:#888">×${m.qty} owned</span>
+              </div>`).join('')}
+          </div>
+          <button id="_temple-sacrifice-btn"
+            style="width:100%;padding:11px;border-radius:8px;font-weight:700;font-size:0.82rem;letter-spacing:0.08em;cursor:${canSacrifice ? 'pointer' : 'not-allowed'};
+              background:${canSacrifice ? 'var(--gold,#c9a84c)' : 'rgba(255,255,255,0.05)'};
+              color:${canSacrifice ? '#111' : '#555'};
+              border:1px solid ${canSacrifice ? 'var(--gold,#c9a84c)' : 'var(--border,#333)'}"
+            ${canSacrifice ? '' : 'disabled'}>
+            🙏 OFFER SACRIFICE
+          </button>
+          <div id="_temple-sacrifice-result" style="margin-top:8px;font-size:0.8rem;text-align:center;min-height:1.2em"></div>
+        `}
+      </div>
+    </div>`;
+
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+  if (isOwnShrine) {
+    document.getElementById('_temple-sacrifice-btn')?.addEventListener('click', window._doSacrifice);
+  }
+};
+
+// Perform the sacrifice
+window._doSacrifice = async function() {
+  const btn = document.getElementById('_temple-sacrifice-btn');
+  const resultEl = document.getElementById('_temple-sacrifice-result');
+  if (!btn || btn.disabled) return;
+
+  const c = _charData;
+  const mats = DEITY_WORSHIP_MATS[c.deity] || [];
+  const inv = [...(c.inventory || [])];
+
+  // Double-check materials
+  for (const mat of mats) {
+    const owned = inv.find(i => i.name === mat);
+    if (!owned || owned.qty < 1) {
+      if (resultEl) resultEl.textContent = `Missing: ${mat}`;
+      return;
+    }
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Offering...';
+
+  // Consume 1 of each material
+  for (const mat of mats) {
+    const item = inv.find(i => i.name === mat);
+    item.qty -= 1;
+    if (item.qty <= 0) inv.splice(inv.indexOf(item), 1);
+  }
+
+  const newFaith = (c.faithLevel || 0) + 1;
+  const { current: newTier } = _getFaithTier(newFaith);
+  const prevTier = _getFaithTier(c.faithLevel || 0).current;
+  const tieredUp = newTier.tier > prevTier.tier;
+
+  try {
+    await updateDoc(doc(db, 'characters', _uid), { inventory: inv, faithLevel: newFaith });
+    Object.assign(c, { inventory: inv, faithLevel: newFaith });
+    window._allInvItems = inv;
+    window._refreshInvDisplay?.();
+    set('s-faith', newFaith);
+
+    if (resultEl) {
+      resultEl.style.color = '#4fc870';
+      resultEl.textContent = tieredUp
+        ? `🎉 Faith reached ${newFaith}! Advanced to ${newTier.label}!`
+        : `🙏 Sacrifice accepted. Faith: ${newFaith}`;
+    }
+    logActivity('🙏', `<b>Sacrifice Offered</b> at <b>${c.deity}'s shrine</b>. Faith Level: <b>${newFaith}</b>${tieredUp ? ` — Advanced to <b>${newTier.label}</b>!` : ''}.`, '#c9a84c');
+
+    // Refresh the modal after a short delay so tier/blessing update
+    setTimeout(() => {
+      document.getElementById('_temple-modal')?.remove();
+      window._openTemplePanel();
+    }, 1200);
+
+  } catch(e) {
+    console.error(e);
+    if (resultEl) { resultEl.style.color = '#e05555'; resultEl.textContent = 'Sacrifice failed. Try again.'; }
+    btn.disabled = false;
+    btn.textContent = '🙏 OFFER SACRIFICE';
+  }
+};
 const RANK_ORDER   = ["Wanderer","Follower","Disciple","Master","Exalted","Crown","Supreme","Legend","Myth","Eternal"];
 
 const SKILL_TREES = {
@@ -5268,14 +5520,29 @@ window._doGather = async function() {
   const resources = PROF_RESOURCES[prof];
   if (!resources) return;
 
+  // ── Location check: must be at a resource or deity zone ──────────────────
+  const loc = (_charData.kingdom||_charData.location||"").toLowerCase();
+
+  const PROF_ZONES = {
+    Miner:     ["hobbit_cave","suldan_mine","argent_grotto","shiny_cavern","hobbit cave","suldan mine","argent grotto","shiny cavern"],
+    Angler:    ["silver_lake","dream_river","moss_stream","golden_river","silver lake","dream river","moss stream","golden river"],
+    Forager:   ["wisteria","arctic_willow","arctic_willow_west","asahi","wisteria forest","arctic willow","asahi valley"],
+    Herbalist: ["wisteria","arctic_willow","arctic_willow_west","asahi","wisteria forest","arctic willow","asahi valley"],
+    Hunter:    ["wisteria","asahi","wisteria forest","asahi valley"],
+  };
+  const deityLocKeywords = ["shrine","basin","estuary","purgatory","temple","heart garden","valley of overflowing"];
+  const isDeityLoc = deityLocKeywords.some(k => loc.includes(k.split(" ")[0]));
+  const validZones = PROF_ZONES[prof] || [];
+  const isAtResourceZone = validZones.some(z => loc.includes(z));
+
+  if (!isDeityLoc && !isAtResourceZone) {
+    window.showToast(`Travel to a ${prof} resource zone on the World Map before gathering.`, "error");
+    return;
+  }
+
   const btn    = document.getElementById("btn-gather");
   const logEl  = document.getElementById("gather-log");
   if (!btn||!logEl) return;
-
-  // Determine if at a deity location — check current location name
-  const loc = (_charData.kingdom||_charData.location||"").toLowerCase();
-  const deityLocKeywords = ["shrine","basin","estuary","purgatory","temple","heart garden","valley of overflowing"];
-  const isDeityLoc = deityLocKeywords.some(k => loc.includes(k.split(" ")[0]));
 
   btn.disabled = true;
   btn.textContent = "Working...";
@@ -5348,7 +5615,10 @@ window._doGather = async function() {
 
       // Profession XP
       const xpGain = { common:2, uncommon:5, rare:10, legendary:20, mythic:50 }[rarity]||2;
-      const newProfXp  = (_charData.professionXp||0) + xpGain;
+      // Veil blessing: +X% EXP from all activities including gathering
+      const _veilGatherBonus = _charData?.deity === 'Veil' ? (1 + _getFaithBlessingPct(_charData)) : 1;
+      const xpGainFinal = Math.round(xpGain * _veilGatherBonus);
+      const newProfXp  = (_charData.professionXp||0) + xpGainFinal;
       const profExpTable = [0,100,200,400,800,1600,3200,6400,12800,25600,51200];
       const xpNeeded   = profExpTable[Math.min(lvl, profExpTable.length-2)] || 100;
       let newProfLvl   = lvl;
@@ -6883,6 +7153,27 @@ function _rollDrops(grade) {
   if (table.runestone && Math.random() < Math.min(0.30, table.runestone.chance * totalLuck)) {
     items.push({ name: table.runestone.name, qty: 1 });
   }
+
+  // Sah'run blessing: X% chance to also drop a random forge material
+  if (_charData?.deity === "Sah'run") {
+    const sahPct = _getFaithBlessingPct(_charData);
+    if (Math.random() < sahPct) {
+      const forgeMats = ['Iron','Copper','Tin','Silver','Bronze','Gold','Mythril','Titanium','Adamantium'];
+      const mat = forgeMats[Math.floor(Math.random() * forgeMats.length)];
+      items.push({ name: mat, qty: 1 });
+    }
+  }
+
+  // Elionidas blessing: X% chance to find bonus precious loot
+  if (_charData?.deity === 'Elionidas') {
+    const elionPct = _getFaithBlessingPct(_charData);
+    if (Math.random() < elionPct) {
+      const preciousPool = ['Ancient Rune','Magic Crystal','Dragon Scales','Cyclops Eye','Phoenix Bloom','Adamantium','Titanium'];
+      const bonus = preciousPool[Math.floor(Math.random() * preciousPool.length)];
+      items.push({ name: bonus, qty: 1 });
+    }
+  }
+
   return { gold, items };
 }
  
@@ -7043,7 +7334,8 @@ async function _clientBattleTurn(action, skillName) {
   // ── Victory ──
   if (monster.hp <= 0) {
     const drops  = _rollDrops(b.grade);
-    const expGain = Math.round((MONSTER_EXP_LOCAL[b.grade] || 10) * _getRaceExpMult(_charData?.race) * _getCompanionExpMult(_charData?.companion?.name));
+    const _veilExpBonus = _charData?.deity === 'Veil' ? (1 + _getFaithBlessingPct(_charData)) : 1;
+        const expGain = Math.round((MONSTER_EXP_LOCAL[b.grade] || 10) * _getRaceExpMult(_charData?.race) * _getCompanionExpMult(_charData?.companion?.name) * _veilExpBonus);
     const inv = [...(char.inventory||[])];
     drops.items.forEach(item => {
       const ex = inv.find(i => i.name === item.name);
@@ -7203,7 +7495,8 @@ async function _clientAutoBattle(grade, maxTurns=15, zoneName=null) {
   const updates = { hp: playerHp, mana: playerMana };
   if (status === "victory") {
     const drops   = _rollDrops(grade);
-    const expGain = Math.round((MONSTER_EXP_LOCAL[grade] || 10) * _getRaceExpMult(_charData?.race) * _getCompanionExpMult(_charData?.companion?.name));
+    const _veilExpBonus2 = _charData?.deity === 'Veil' ? (1 + _getFaithBlessingPct(_charData)) : 1;
+    const expGain = Math.round((MONSTER_EXP_LOCAL[grade] || 10) * _getRaceExpMult(_charData?.race) * _getCompanionExpMult(_charData?.companion?.name) * _veilExpBonus2);
     const inv = [...(char.inventory||[])];
     drops.items.forEach(item => {
       const ex = inv.find(i => i.name === item.name);
@@ -7774,7 +8067,8 @@ function _launchAutoBattleLoop(grade, zoneName) {
     // ── Monster defeated — award rewards ──
     killCount++;
     const drops   = _rollDrops(grade);
-    const expGain = Math.round((MONSTER_EXP_LOCAL[grade] || 10) * _getRaceExpMult(_charData?.race) * _getCompanionExpMult(_charData?.companion?.name));
+    const _veilExpBonus2 = _charData?.deity === 'Veil' ? (1 + _getFaithBlessingPct(_charData)) : 1;
+    const expGain = Math.round((MONSTER_EXP_LOCAL[grade] || 10) * _getRaceExpMult(_charData?.race) * _getCompanionExpMult(_charData?.companion?.name) * _veilExpBonus2);
     const inv = [...(char.inventory||[])];
     drops.items.forEach(item => {
       const ex = inv.find(i => i.name === item.name);
@@ -10614,9 +10908,35 @@ const _RANDOM_EVENTS = {
 };
 
 function _rollExploringEvent() {
-  const events = _RANDOM_EVENTS.exploring;
-  const total  = events.reduce((s,e)=>s+e.weight, 0);
-  let roll     = Math.random() * total;
+  const events = _RANDOM_EVENTS.exploring.map((ev, i) => {
+    // Alistor blessing: reduce robbery (index 0) weight by faith %
+    if (i === 0 && _charData?.deity === 'Alistor') {
+      const reduction = _getFaithBlessingPct(_charData); // e.g. 0.06 at tier 2
+      return { ...ev, weight: Math.max(1, Math.round(ev.weight * (1 - reduction))) };
+    }
+    // Arion blessing: balance — reduce bad (robbery) AND boost good events equally
+    if (i === 0 && _charData?.deity === 'Arion') {
+      const bal = _getFaithBlessingPct(_charData) * 0.5;
+      return { ...ev, weight: Math.max(1, Math.round(ev.weight * (1 - bal))) };
+    }
+    if ((i === 1 || i === 2) && _charData?.deity === 'Arion') {
+      const bal = _getFaithBlessingPct(_charData) * 0.5;
+      return { ...ev, weight: Math.round(ev.weight * (1 + bal)) };
+    }
+    // Mah'run blessing: boost rare events (Hidden Loot index 2, Lost Traveler index 3)
+    if ((i === 2 || i === 3) && _charData?.deity === "Mah'run") {
+      const boost = _getFaithBlessingPct(_charData);
+      return { ...ev, weight: Math.round(ev.weight * (1 + boost)) };
+    }
+    // Freyja blessing: boost Kind Stranger event (index 1 — NPC gifts)
+    if (i === 1 && _charData?.deity === 'Freyja') {
+      const boost = _getFaithBlessingPct(_charData);
+      return { ...ev, weight: Math.round(ev.weight * (1 + boost)) };
+    }
+    return ev;
+  });
+  const total = events.reduce((s,e)=>s+e.weight, 0);
+  let roll    = Math.random() * total;
   for (const ev of events) {
     roll -= ev.weight;
     if (roll <= 0) { ev.fn?.(); return; }

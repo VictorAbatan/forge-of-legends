@@ -310,8 +310,9 @@
       <input class="field-input" type="number" id="bestow-gold" min="0" max="10000" placeholder="0" value="0"/>
     </div>
     <div class="field-group" style="margin-bottom:16px">
-      <label class="field-label">Items (one per line: name, qty)</label>
-      <textarea class="field-input" id="bestow-items" rows="4" placeholder="e.g.&#10;Minor HP Potion, 3&#10;Iron, 5"></textarea>
+      <label class="field-label">Items to Bestow</label>
+      <div id="bestow-item-picker"></div>
+      <textarea id="bestow-items" style="display:none"></textarea>
     </div>
     <div class="form-error" id="bestow-error" style="margin-bottom:8px"></div>
     <div style="display:flex;gap:10px">
@@ -456,6 +457,12 @@
       </div>
       <div class="card">
         <!-- Active World Events overview removed -->
+      </div>
+      <div style="margin-top:24px;padding-top:20px;border-top:1px solid var(--border,#2a2a2a)">
+        <button onclick="window._leaveWorld()" style="display:flex;align-items:center;gap:8px;background:transparent;border:1px solid rgba(224,85,85,0.35);color:#e05555;padding:10px 18px;border-radius:8px;font-size:0.75rem;letter-spacing:0.1em;cursor:pointer;font-family:var(--ff-display);transition:background 0.2s,border-color 0.2s" onmouseover="this.style.background='rgba(224,85,85,0.1)';this.style.borderColor='rgba(224,85,85,0.6)'" onmouseout="this.style.background='transparent';this.style.borderColor='rgba(224,85,85,0.35)'">
+          🚪 LEAVE WORLD
+        </button>
+        <p style="font-size:0.72rem;color:var(--text-dim,#888);margin-top:8px;font-style:italic">You will be signed out. The world continues without you.</p>
       </div>
     </div>
 
