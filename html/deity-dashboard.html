@@ -253,9 +253,25 @@
       <div id="quest-reward-picker"></div>
       <textarea class="field-input" id="quest-reward-items" rows="2" style="display:none" placeholder="e.g.&#10;Void Crystal, 1"></textarea>
     </div>
-    <div class="field-group" style="margin-bottom:16px">
+    <div class="field-group" style="margin-bottom:12px">
       <label class="field-label">Expires In (hours, leave blank = no expiry)</label>
       <input class="field-input" type="number" id="quest-expires" min="1" placeholder="e.g. 72"/>
+    </div>
+    <div class="field-group" style="margin-bottom:16px">
+      <label class="field-label">Completion Type</label>
+      <div class="completion-type-toggle">
+        <button type="button" class="completion-type-btn active" id="ctype-open" onclick="window._setCompletionType('open')">
+          <span class="ctype-icon">🌍</span>
+          <span class="ctype-label">Open to All</span>
+          <span class="ctype-desc">Any player can complete this quest</span>
+        </button>
+        <button type="button" class="completion-type-btn" id="ctype-onetime" onclick="window._setCompletionType('one_time')">
+          <span class="ctype-icon">🔒</span>
+          <span class="ctype-label">One-Time Only</span>
+          <span class="ctype-desc">First completion locks the quest for others</span>
+        </button>
+      </div>
+      <input type="hidden" id="quest-completion-type" value="open"/>
     </div>
     <div class="form-error" id="quest-error" style="margin-bottom:8px"></div>
     <div style="display:flex;gap:10px">
@@ -666,8 +682,22 @@
       <!-- Replying-to bar (hidden until a reply is started) -->
       <div id="dchat-replying-to" class="dchat-replying-to" style="display:none;"></div>
 
+      <!-- World Event quick-send bar -->
+      <div class="dchat-world-event-bar" id="dchat-world-event-bar" style="display:none">
+        <div class="dchat-we-types">
+          <button class="dchat-we-type-btn active" id="we-type-unexpected" onclick="window._setWeType('unexpected')">⚡ Unexpected Development</button>
+          <button class="dchat-we-type-btn"        id="we-type-logical"    onclick="window._setWeType('logical')">📖 Logical Development</button>
+        </div>
+        <textarea class="dchat-input dchat-we-input" id="dchat-we-text" placeholder="Describe what happens in the world…" rows="2"></textarea>
+        <div style="display:flex;gap:8px;margin-top:6px">
+          <button class="dchat-send-btn" style="flex:1" onclick="window._sendWorldEvent?.()">⚡ SEND EVENT</button>
+          <button class="dchat-send-btn" style="background:rgba(255,255,255,0.06);color:var(--text-dim)" onclick="window._toggleWorldEventBar?.()">✕</button>
+        </div>
+      </div>
+
       <!-- Input row -->
       <div class="dchat-input-row">
+        <button class="dchat-world-event-toggle" id="dchat-we-toggle" onclick="window._toggleWorldEventBar?.()" title="Send World Event to chat">⚡</button>
         <textarea class="dchat-input" id="deity-chat-input" placeholder="Speak your truth into the world…" rows="1"
           onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();window._sendDeityChat?.()}"></textarea>
         <button class="dchat-send-btn" onclick="window._sendDeityChat?.()">SEND</button>

@@ -1316,10 +1316,16 @@ function renderFactionQuestItems(snap, factionList) {
     const el = document.createElement('div');
     el.className = 'faction-quest-item';
     el.id = 'fq-card-' + docSnap.id;
-    const subStatus = window._factionQuestSubmissions?.[docSnap.id];
+    const subStatus    = window._factionQuestSubmissions?.[docSnap.id];
+    const completionType = q.completionType || 'open';
+    const completedBy    = q.completedBy || [];
+    const alreadyDoneByMe = completedBy.some(c => c.uid === _uid);
+    const lockedOut      = completionType === 'one_time' && completedBy.length > 0 && !alreadyDoneByMe;
     const _dismissBtn = `<button class="sq-delete-btn" title="Dismiss" style="margin-left:8px" onclick="window._dismissFactionQuest('${docSnap.id}')">✕ Dismiss</button>`;
     let submitHtml = '';
-    if (subStatus === 'pending') {
+    if (lockedOut) {
+      submitHtml = `<div class="sq-closed-note">🔒 This quest has already been claimed by another player.</div>`;
+    } else if (subStatus === 'pending') {
       submitHtml = `<div class="sq-pending-note">⏳ Submitted, awaiting review…</div>`;
     } else if (subStatus === 'approved') {
       submitHtml = `<div class="sq-approved-note" style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span>✅ Approved!</span>${_dismissBtn}</div>`;
@@ -1328,7 +1334,10 @@ function renderFactionQuestItems(snap, factionList) {
     } else {
       submitHtml = `<button class="sq-submit-btn" onclick="window._submitFactionQuestForReview('${docSnap.id}',event)">📜 Submit</button>`;
     }
-    el.innerHTML = `<div class="faction-quest-title"><span class="faction-quest-bullet"></span>${q.title}</div><div class="faction-quest-desc">${descHtml}</div><div class="faction-quest-reward">${rewardStr}</div><div class="faction-quest-submit-row">${submitHtml}</div>`;
+    const fqCtypeBadge = q.completionType === 'one_time'
+      ? `<span class="sq-badge" style="background:rgba(160,60,60,0.2);color:#e09090;font-size:0.68rem;padding:2px 7px;border-radius:4px;margin-left:6px">🔒 One-time</span>`
+      : '';
+    el.innerHTML = `<div class="faction-quest-title"><span class="faction-quest-bullet"></span>${q.title}${fqCtypeBadge}</div><div class="faction-quest-desc">${descHtml}</div><div class="faction-quest-reward">${rewardStr}</div><div class="faction-quest-submit-row">${submitHtml}</div>`;
     itemsWrap.appendChild(el);
   });
 }
@@ -2196,6 +2205,14 @@ function loadPublicStoryQuests() {
         const isExpired = expiresAt && expiresAt.getTime() < now;
         const firestoreStatus = d.status || "active";
         const effectiveStatus = (firestoreStatus === "closed" || isExpired) ? "closed" : "active";
+        // One-time quest: if completedBy has any entry AND completionType is one_time,
+        // treat as closed for players who haven't completed it themselves
+        const completionType = d.completionType || 'open';
+        const completedBy    = d.completedBy || [];
+        const alreadyDoneByMe = completedBy.some(c => c.uid === _uid);
+        const lockedOut = completionType === 'one_time' && completedBy.length > 0 && !alreadyDoneByMe;
+        const oneTimeEffectiveStatus = lockedOut ? 'closed' : effectiveStatus;
+
         STORY_QUESTS.push({
           id: docSnap.id,
           title: d.title,
@@ -2210,7 +2227,9 @@ function loadPublicStoryQuests() {
           unlockRank: d.unlockRank || "Wanderer",
           target: d.target || 1,
           expiresAt,
-          status: effectiveStatus,
+          status: oneTimeEffectiveStatus,
+          completionType,
+          lockedOut,
         });
       });
 
@@ -3980,6 +3999,24 @@ function startChatListener(locationId, tab) {
       return el;
     }
 
+    // ── WORLD EVENT (Unexpected / Logical Development) ──────────
+    if (msg.isWorldEvent && msg.uid === 'system') {
+      const el = document.createElement('div');
+      const isUnexpected = msg.eventType === 'unexpected';
+      el.className = `chat-msg world-event-msg world-event-${msg.eventType || 'unexpected'}`;
+      el.dataset.msgId = docId;
+      el.innerHTML = `
+        <div class="world-event-bubble">
+          <div class="world-event-header">
+            <span class="world-event-icon">${isUnexpected ? '⚡' : '📖'}</span>
+            <span class="world-event-label">[${msg.eventLabel || (isUnexpected ? 'UNEXPECTED DEVELOPMENT' : 'LOGICAL DEVELOPMENT')}]</span>
+            <span class="world-event-time">${time}</span>
+          </div>
+          <div class="world-event-text">${formatChatText(msg.text || '')}</div>
+        </div>`;
+      return el;
+    }
+
     // ── SYSTEM message ───────────────────────────────────────────
     if (msg.isSystem && msg.uid === 'system') {
       const el = document.createElement('div');
@@ -5097,9 +5134,10 @@ function _renderStoryQuests() {
 
     // Status badge
     let badge = '';
-    if (done)      badge = `<span class="sq-badge sq-badge--completed">✓ Completed</span>`;
-    else if (isClosed) badge = `<span class="sq-badge sq-badge--closed">✕ Closed</span>`;
-    else           badge = `<span class="sq-badge sq-badge--active">● Active</span>`;
+    if (done)           badge = `<span class="sq-badge sq-badge--completed">✓ Completed</span>`;
+    else if (q.lockedOut) badge = `<span class="sq-badge sq-badge--closed">🔒 Claimed</span>`;
+    else if (isClosed)    badge = `<span class="sq-badge sq-badge--closed">✕ Closed</span>`;
+    else                  badge = `<span class="sq-badge sq-badge--active">● Active</span>`;
 
     const el = document.createElement('div');
     el.className = `story-quest-item sq-item${done ? ' sq-item--completed' : isClosed ? ' sq-item--closed' : ''}`;
@@ -5123,7 +5161,7 @@ function _renderStoryQuests() {
           ${q.objectives.map(obj => `<li class="sq-objective-item">📌 ${obj}</li>`).join('')}
         </ul>` : ''}
         ${expiryHtml}
-        ${!isClosed ? (() => {
+        ${q.lockedOut ? `<div class="sq-closed-note">🔒 This quest has already been claimed by another player.</div>` : !isClosed ? (() => {
           const sub = window._questSubmissions?.[q.id];
           if (done) {
             return `<div class="dq-progress" style="color:var(--gold)">✓ Complete — Reward claimed</div>`;
@@ -5772,6 +5810,61 @@ window.toggleNameEdit = function() {
     }
   }
   document.getElementById("name-change-error").textContent = "";
+};
+
+window.saveNameChange = async function() {
+  const input    = document.getElementById("new-name-input");
+  const errEl    = document.getElementById("name-change-error");
+  const newName  = input?.value.trim();
+  errEl.textContent = "";
+
+  if (!newName)              { errEl.textContent = "Name cannot be empty.";          return; }
+  if (newName.length < 2)    { errEl.textContent = "Name must be at least 2 characters."; return; }
+  if (newName.length > 30)   { errEl.textContent = "Name cannot exceed 30 characters.";  return; }
+  if (newName === _charData?.name) { window.toggleNameEdit(); return; } // no change
+
+  const now            = Date.now();
+  const lastChange     = _charData?.lastNameChange || 0;
+  const cooldownMs     = 30 * 24 * 60 * 60 * 1000; // 30 days
+  const hasChangedBefore = !!_charData?.lastNameChange;
+
+  // Cooldown check
+  if (hasChangedBefore && (now - lastChange) < cooldownMs) {
+    const daysLeft = Math.ceil((cooldownMs - (now - lastChange)) / (24 * 60 * 60 * 1000));
+    errEl.textContent = `Cooldown active — ${daysLeft} day(s) remaining.`;
+    return;
+  }
+
+  // Gold check (first change free)
+  const cost = hasChangedBefore ? 100 : 0;
+  if ((_charData?.gold ?? 0) < cost) {
+    errEl.textContent = `Not enough gold. You need 100 coins.`;
+    return;
+  }
+
+  const btn = document.querySelector("#name-edit-row .btn-primary");
+  if (btn) { btn.disabled = true; btn.textContent = "SAVING..."; }
+
+  try {
+    const updates = { name: newName, lastNameChange: now };
+    if (cost > 0) updates.gold = (_charData.gold || 0) - cost;
+    await updateDoc(doc(db, "characters", _uid), updates);
+
+    // Update local state
+    _charData.name = newName;
+    if (cost > 0) _charData.gold = (_charData.gold || 0) - cost;
+    _charData.lastNameChange = now;
+
+    // Refresh displays
+    _syncAllDisplays(_charData);
+    window.toggleNameEdit();
+    window.showToast(`Name changed to "${newName}"!`, "success");
+  } catch(e) {
+    console.error("[saveNameChange]", e);
+    errEl.textContent = "Failed to save name. Try again.";
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "SAVE"; }
+  }
 };
 
 window.openEquipModal = function(type) {

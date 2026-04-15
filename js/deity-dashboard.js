@@ -197,6 +197,20 @@ async function loadFactionLeaders() {
     factionInput.value    = myLeader ? myLeader.faction : '';
     factionInput.disabled = !myLeader;
   }
+  // Inject fq-completion-type select if not already present
+  if (!document.getElementById("fq-completion-type")) {
+    const fqCompRow = document.createElement("div");
+    fqCompRow.style.cssText = "margin-bottom:10px";
+    fqCompRow.innerHTML = `
+      <label style="font-size:0.78rem;font-family:var(--font-mono);color:var(--text-dim);letter-spacing:0.05em;display:block;margin-bottom:4px">Completion Type</label>
+      <select id="fq-completion-type" style="width:100%;background:var(--ink3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text-light);font-size:0.85rem;font-family:var(--font-mono)">
+        <option value="open">♻️ Open — any player may complete</option>
+        <option value="one_time">🔒 One-time — first approval claims it</option>
+      </select>`;
+    // Insert before the error/submit row — after fq-reward-items textarea
+    const fqItems = document.getElementById("fq-reward-items");
+    if (fqItems) fqItems.closest("div")?.after(fqCompRow);
+  }
   // Also load quests for this faction (submissions are awaited inside loadFactionMissions)
   loadFactionMissions();
 }
@@ -963,7 +977,7 @@ import { auth, db, storage } from "../firebase/firebase.js";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   doc, getDoc, getDocs, setDoc, collection, query, where,
-  orderBy, limit, addDoc, updateDoc, deleteDoc, onSnapshot, serverTimestamp
+  orderBy, limit, addDoc, updateDoc, deleteDoc, onSnapshot, serverTimestamp, arrayUnion
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
   ref as storageRef, uploadBytes, getDownloadURL
@@ -1503,13 +1517,34 @@ async function doUpdateFaith() {
 // ═══════════════════════════════════════════════════
 //  FACTION MISSIONS
 // ═══════════════════════════════════════════════════
+
+// Helper: get faction leader name for a given faction
+async function _getFactionLeaderName(faction) {
+  try {
+    const q = query(collection(db, 'factionLeaders'), where('faction', '==', faction));
+    const snap = await getDocs(q);
+    if (!snap.empty) return snap.docs[0].data().leaderName || faction;
+  } catch(e) { console.warn('_getFactionLeaderName:', e); }
+  return faction; // fallback to faction name
+}
+
+// Helper: get all member UIDs of a faction
+async function _getFactionMemberUids(faction) {
+  try {
+    const q = query(collection(db, 'characters'), where('faction', '==', faction));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => d.id);
+  } catch(e) { console.warn('_getFactionMemberUids:', e); return []; }
+}
+
 async function postFactionMission() {
   const faction  = document.getElementById("faction-quest-faction")?.value;
   const title    = document.getElementById("fq-title")?.value.trim();
   const desc     = document.getElementById("fq-desc")?.value.trim();
   const gold     = parseInt(document.getElementById("fq-reward-gold")?.value) || 0;
   const exp      = parseInt(document.getElementById("fq-reward-exp")?.value) || 0;
-  const itemsRaw = document.getElementById("fq-reward-items")?.value.trim();
+  const itemsRaw       = document.getElementById("fq-reward-items")?.value.trim();
+  const completionType = document.getElementById("fq-completion-type")?.value || "open";
   const errEl    = document.getElementById("faction-quest-error");
   const btn      = document.querySelector("button[onclick='doPostFactionQuest()']");
   const origText = btn?.textContent;
@@ -1526,17 +1561,29 @@ async function postFactionMission() {
   }
   if (btn) { btn.disabled = true; btn.textContent = "Posting Quest..."; }
   try {
+    const leaderName = await _getFactionLeaderName(faction);
     await addDoc(collection(db, "factionMissions"), {
       faction,
       title,
       description: desc,
       reward: { gold, exp, items: rewardItems },
-      postedBy: _deityChar?.name || "Deity",
+      postedBy: leaderName,
       deityUid: _uid,
       status: "active",
+      completionType,
+      completedBy: [],
       createdAt: serverTimestamp(),
     });
-    ["fq-title","fq-desc","fq-reward-gold","fq-reward-exp","fq-reward-items"].forEach(id => {
+    // Notify all faction members — appears to come from leader
+    const memberUids = await _getFactionMemberUids(faction);
+    await Promise.all(memberUids.map(uid => addDoc(collection(db, 'notifications'), {
+      uid,
+      from: leaderName,
+      message: `📋 <b>New Faction Quest:</b> <b>${title}</b> has been posted by <b>${leaderName}</b>.${desc ? ` <em>${desc.slice(0,80)}${desc.length>80?"…":""}</em>` : ""}`,
+      read: false,
+      timestamp: serverTimestamp(),
+    })));
+    ["fq-title","fq-desc","fq-reward-gold","fq-reward-exp","fq-reward-items","fq-completion-type"].forEach(id => {
       const el = document.getElementById(id); if (el) el.value = "";
     });
     window.showToast(`Quest posted to ${faction}!`, "success");
@@ -1597,7 +1644,11 @@ window._renderFactionSubmissionsFor = function(q) {
       <div class="dq-sub-actions">
         <button class="deity-mini-btn success" onclick="window._approveFactionSubmission('${s.id}','${q.id}')">✓ Approve</button>
         <button class="deity-mini-btn danger"  onclick="window._rejectFactionSubmission('${s.id}')">✕ Reject</button>
-      </div>` : ''}
+        <button class="deity-mini-btn punish"  onclick="window._openPunishModal('${s.uid||s.id}','${(s.playerName||'?').replace(/'/g,"\'")}')">⚖️ Punish</button>
+      </div>` : `
+      <div class="dq-sub-actions" style="margin-top:6px">
+        <button class="deity-mini-btn punish" onclick="window._openPunishModal('${s.uid||s.id}','${(s.playerName||'?').replace(/'/g,"\'")}')">⚖️ Punish</button>
+      </div>`}
     </div>`;
   }).join('');
 };
@@ -1622,10 +1673,27 @@ window._approveFactionSubmission = async function(subId, questId) {
 
     await updateDoc(doc(db, 'factionQuestSubmissions', subId), { status: 'approved' });
 
-    // Notify the player
+    // For one-time quests: stamp completedBy so other players get locked out
+    if (quest.completionType === 'one_time') {
+      try {
+        await updateDoc(doc(db, 'factionMissions', quest.id), {
+          completedBy: arrayUnion({
+            uid: sub.uid,
+            playerName: sub.playerName || '?',
+            completedAt: new Date()
+          })
+        });
+      } catch (e) {
+        console.warn('Could not stamp completedBy on factionMission:', e);
+      }
+    }
+
+    // Notify the player — from faction leader, not deity
+    const leaderNameApprove = await _getFactionLeaderName(quest.faction || "");
     await addDoc(collection(db, 'notifications'), {
       uid: sub.uid,
-      message: `✅ <b>Faction Quest Approved:</b> Your submission for <b>${quest.title}</b> has been approved by a deity! Your reward has been granted.`,
+      from: leaderNameApprove,
+      message: `✅ <b>Faction Quest Approved:</b> Your submission for <b>${quest.title}</b> has been approved by <b>${leaderNameApprove}</b>! Your reward has been granted.`,
       read: false,
       timestamp: serverTimestamp(),
     });
@@ -1648,10 +1716,14 @@ window._rejectFactionSubmission = async function(subId) {
   }
   showRejectModal(questTitle, async (reason) => {
     try {
+      // Get faction from cached quest data
+      const factionQuestForReject = (window._deityFactionQuests||[]).find(q => (q._submissions||[]).some(s => s.id === subId));
+      const leaderNameReject = await _getFactionLeaderName(factionQuestForReject?.faction || "");
       await updateDoc(doc(db, 'factionQuestSubmissions', subId), { status: 'rejected' });
       await addDoc(collection(db, 'notifications'), {
         uid: playerUid,
-        message: `✕ <b>Faction Quest Rejected:</b> Your submission for <b>${questTitle}</b> was not approved.${reason ? ` Reason: <em>${reason}</em>` : ''} You may resubmit once the objectives are met.`,
+        from: leaderNameReject,
+        message: `✕ <b>Faction Quest Rejected:</b> Your submission for <b>${questTitle}</b> was not approved by <b>${leaderNameReject}</b>.${reason ? ` Reason: <em>${reason}</em>` : ''} You may resubmit once the objectives are met.`,
         read: false,
         timestamp: serverTimestamp(),
       });
@@ -1724,6 +1796,9 @@ function renderFactionMissions() {
     const submissionsBadge = pendingCount > 0
       ? `<span class="dq-submissions-badge">${pendingCount} pending</span>`
       : '';
+    const ctypeBadge = m.completionType === "one_time"
+      ? `<span class="quest-type-badge" style="background:rgba(160,60,60,0.25);color:#e09090">🔒 One-time</span>`
+      : `<span class="quest-type-badge" style="background:rgba(60,120,60,0.25);color:#90c090">♻️ Open</span>`;
     const submissionsPanel = isActive ? `
       <div class="dq-submissions-panel">
         <div class="dq-submissions-title" onclick="window._toggleFactionSubmissions('${m.id}')">
@@ -1737,6 +1812,7 @@ function renderFactionMissions() {
     <div class="quest-card">
       <div class="quest-card-header">
         <span class="quest-type-badge">🛡️ Faction</span>
+        ${ctypeBadge}
         <span class="quest-assigned-to">→ ${m.faction}</span>
         ${!isActive ? `<span class="quest-status-badge ${m.status}">${m.status}</span>` : ""}
         ${submissionsBadge}
@@ -1818,22 +1894,24 @@ async function doDropQuest(questType) {
 
   const expiresAt = expiresIn ? new Date(Date.now() + expiresIn * 3600000) : null;
   const deityName = _deityChar?.charClass || _deityChar?.deity || "Deity";
+  const completionType = document.getElementById("quest-completion-type")?.value || "open";
 
   if (btn) { btn.disabled = true; btn.textContent = "Dropping Quest..."; }
   try {
     await addDoc(collection(db, "storyQuests"), {
-      type:        questType,
+      type:           questType,
       title,
-      description: desc,
+      description:    desc,
       objectives,
-      reward:      { gold, exp, items: rewardItems },
-      assignedTo:  targetUid,          // null = all players can see it
-      deityUid:    _uid,
+      reward:         { gold, exp, items: rewardItems },
+      assignedTo:     targetUid,
+      deityUid:       _uid,
       deityName,
-      status:      "active",
-      completedBy: [],
-      expiresAt:   expiresAt || null,
-      createdAt:   serverTimestamp(),
+      status:         "active",
+      completionType, // "open" | "one_time"
+      completedBy:    [],
+      expiresAt:      expiresAt || null,
+      createdAt:      serverTimestamp(),
     });
 
     // Clear form
@@ -1850,6 +1928,12 @@ async function doDropQuest(questType) {
     if (btn) { btn.disabled = false; btn.textContent = origText; }
   }
 }
+
+window._setCompletionType = function(type) {
+  document.getElementById("quest-completion-type").value = type;
+  document.getElementById("ctype-open").classList.toggle("active", type === "open");
+  document.getElementById("ctype-onetime").classList.toggle("active", type === "one_time");
+};
 
 async function loadDeityQuests() {
   try {
@@ -1889,11 +1973,15 @@ function renderDeityQuests() {
       const submissionsBadge = pendingCount > 0
         ? `<span class="dq-submissions-badge">${pendingCount} pending</span>`
         : '';
+      const completionBadge = q.completionType === "one_time"
+        ? `<span class="quest-onetime-badge">🔒 One-Time</span>`
+        : `<span class="quest-onetime-badge open">🌍 Open</span>`;
       return `
       <div class="quest-card" id="qcard-${q.id}">
         <div class="quest-card-header">
           <span class="quest-type-badge">${typeIcon} Story</span>
           <span class="quest-assigned-to">→ ${assignLabel}</span>
+          ${completionBadge}
           ${q.status !== "active" ? `<span class="quest-status-badge ${q.status}">${q.status}</span>` : ""}
           ${submissionsBadge}
         </div>
@@ -1966,7 +2054,11 @@ window._renderSubmissionsFor = function(q) {
       <div class="dq-sub-actions">
         <button class="deity-mini-btn success" onclick="window._approveSubmission('${s.id}','${q.id}')">✓ Approve</button>
         <button class="deity-mini-btn danger"  onclick="window._rejectSubmission('${s.id}')">✕ Reject</button>
-      </div>` : ''}
+        <button class="deity-mini-btn punish"  onclick="window._openPunishModal('${s.uid||s.id}','${(s.playerName||'?').replace(/'/g,"\\'")}')">⚖️ Punish</button>
+      </div>` : `
+      <div class="dq-sub-actions" style="margin-top:6px">
+        <button class="deity-mini-btn punish" onclick="window._openPunishModal('${s.uid||s.id}','${(s.playerName||'?').replace(/'/g,"\\'")}')">⚖️ Punish</button>
+      </div>`}
     </div>`;
   }).join('');
 };
@@ -2011,6 +2103,21 @@ window._approveSubmission = async function(subId, questId) {
     if (!sub) return;
 
     await updateDoc(doc(db, 'questSubmissions', subId), { status: 'approved' });
+
+    // For one-time quests: stamp completedBy so other players get locked out
+    if (quest.completionType === 'one_time') {
+      try {
+        await updateDoc(doc(db, 'storyQuests', questId), {
+          completedBy: arrayUnion({
+            uid: sub.uid,
+            playerName: sub.playerName || '?',
+            completedAt: new Date(),
+          }),
+        });
+      } catch(e) {
+        console.warn('Could not stamp completedBy on storyQuest:', e);
+      }
+    }
 
     // Notify the player
     await addDoc(collection(db, 'notifications'), {
@@ -2094,6 +2201,190 @@ window._endQuest = async id => {
     loadDeityQuests();
   } catch(e) { window.showToast("Failed.", "error"); }
 };
+// ═══════════════════════════════════════════════════
+//  PUNISH SYSTEM
+// ═══════════════════════════════════════════════════
+window._openPunishModal = async function(playerUid, playerName) {
+  document.getElementById('punish-modal')?.remove();
+
+  // Fetch player's current inventory and gold
+  let currentInv = [], currentGold = 0;
+  try {
+    const charSnap = await getDoc(doc(db, 'characters', playerUid));
+    if (charSnap.exists()) {
+      const d = charSnap.data();
+      currentInv  = d.inventory || [];
+      currentGold = d.gold || 0;
+    }
+  } catch(e) { console.warn('Failed to fetch player data for punish:', e); }
+
+  const modal = document.createElement('div');
+  modal.id = 'punish-modal';
+  modal.className = 'deity-modal';
+  modal.style.display = 'flex';
+
+  const invHtml = currentInv.length
+    ? currentInv.map((item, i) => `
+        <label class="punish-item-row">
+          <input type="checkbox" class="punish-item-cb" data-idx="${i}" data-name="${(item.name||'').replace(/"/g,'&quot;')}" style="accent-color:var(--gold);width:15px;height:15px"/>
+          <span class="punish-item-icon">${item.icon||'📦'}</span>
+          <span class="punish-item-name">${item.name}</span>
+          <span class="punish-item-qty" style="color:var(--gold-dim);margin-left:auto">×${item.qty||1}</span>
+          <input type="number" min="1" max="${item.qty||1}" value="1" class="punish-item-qty-input" data-idx="${i}"
+            style="width:48px;padding:2px 6px;background:var(--ink2);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:0.8rem;margin-left:8px"/>
+        </label>`).join('')
+    : '<div style="color:var(--text-dim);font-style:italic;font-size:0.82rem">Player has no items.</div>';
+
+  modal.innerHTML = `
+    <div class="deity-modal-box" style="max-width:500px">
+      <div class="deity-modal-title">⚖️ Punish — ${playerName}</div>
+      <p class="deity-modal-desc" style="margin-bottom:14px">Strip gold or items from this player. They will receive a notification.</p>
+
+      <div class="field-group" style="margin-bottom:12px">
+        <label class="field-label">Strip Gold (current: ${currentGold})</label>
+        <input class="field-input" type="number" id="punish-gold" min="0" max="${currentGold}" value="0" placeholder="0"/>
+      </div>
+
+      <div class="field-group" style="margin-bottom:12px">
+        <label class="field-label">Strip Items</label>
+        <div id="punish-inv-list" style="background:var(--ink2);border:1px solid var(--border);border-radius:8px;padding:10px;max-height:180px;overflow-y:auto">
+          ${invHtml}
+        </div>
+      </div>
+
+      <div class="field-group" style="margin-bottom:16px">
+        <label class="field-label">Reason (shown to player)</label>
+        <textarea class="field-input" id="punish-reason" rows="2" maxlength="300" placeholder="e.g. Divine punishment for betraying the quest..."></textarea>
+      </div>
+
+      <div class="form-error" id="punish-error" style="margin-bottom:8px"></div>
+      <div style="display:flex;gap:10px">
+        <button class="btn-primary danger-btn" onclick="window._executePunish('${playerUid}','${playerName.replace(/'/g,"\'")}')">⚖️ EXECUTE PUNISHMENT</button>
+        <button class="btn-secondary" onclick="document.getElementById('punish-modal').remove()">CANCEL</button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+
+  // Store current inv on window for execute step
+  window._punishCurrentInv = currentInv;
+};
+
+window._executePunish = async function(playerUid, playerName) {
+  const errEl  = document.getElementById('punish-error');
+  const gold   = parseInt(document.getElementById('punish-gold')?.value) || 0;
+  const reason = document.getElementById('punish-reason')?.value.trim() || '';
+  const btn    = document.querySelector('#punish-modal .btn-primary');
+
+  // Collect checked items with qty
+  const strippedItems = [];
+  document.querySelectorAll('#punish-modal .punish-item-cb:checked').forEach(cb => {
+    const idx     = parseInt(cb.dataset.idx);
+    const qtyEl   = document.querySelector(`#punish-modal .punish-item-qty-input[data-idx="${idx}"]`);
+    const qty     = Math.max(1, parseInt(qtyEl?.value) || 1);
+    const srcItem = (window._punishCurrentInv || [])[idx];
+    if (srcItem) strippedItems.push({ name: srcItem.name, icon: srcItem.icon || '📦', qty: Math.min(qty, srcItem.qty || 1) });
+  });
+
+  if (gold === 0 && !strippedItems.length) {
+    errEl.textContent = 'Select gold or items to strip.'; return;
+  }
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Punishing...'; }
+  try {
+    const charRef  = doc(db, 'characters', playerUid);
+    const charSnap = await getDoc(charRef);
+    if (!charSnap.exists()) throw new Error('Player not found.');
+    const charData = charSnap.data();
+
+    // Build new inventory — reduce qty or remove item
+    let newInv = [...(charData.inventory || [])];
+    for (const strip of strippedItems) {
+      const existing = newInv.find(i => i.name === strip.name);
+      if (existing) {
+        existing.qty -= strip.qty;
+        if (existing.qty <= 0) newInv = newInv.filter(i => i.name !== strip.name);
+      }
+    }
+    const newGold = Math.max(0, (charData.gold || 0) - gold);
+
+    await updateDoc(charRef, { gold: newGold, inventory: newInv });
+
+    // Notification to player
+    const strippedDesc = [
+      gold > 0 ? `${gold} gold` : '',
+      strippedItems.map(i => `${i.qty}× ${i.name}`).join(', '),
+    ].filter(Boolean).join(' and ');
+    await addDoc(collection(db, 'notifications'), {
+      uid:       playerUid,
+      message:   `⚖️ <b>Divine Punishment:</b> The gods have stripped you of <b>${strippedDesc}</b>.${reason ? ` Reason: <em>${reason}</em>` : ''}`,
+      read:      false,
+      timestamp: serverTimestamp(),
+    });
+
+    document.getElementById('punish-modal')?.remove();
+    window.showToast(`${playerName} has been punished.`, 'success');
+  } catch(e) {
+    console.error('Punish failed:', e);
+    errEl.textContent = e.message || 'Failed to punish player.';
+    if (btn) { btn.disabled = false; btn.textContent = '⚖️ EXECUTE PUNISHMENT'; }
+  }
+};
+
+// ═══════════════════════════════════════════════════
+//  WORLD EVENT (Unexpected / Logical Development)
+// ═══════════════════════════════════════════════════
+let _weType = 'unexpected';
+
+window._setWeType = function(type) {
+  _weType = type;
+  document.getElementById('we-type-unexpected')?.classList.toggle('active', type === 'unexpected');
+  document.getElementById('we-type-logical')?.classList.toggle('active', type === 'logical');
+};
+
+window._toggleWorldEventBar = function() {
+  const bar = document.getElementById('dchat-world-event-bar');
+  if (!bar) return;
+  const isVisible = bar.style.display !== 'none';
+  bar.style.display = isVisible ? 'none' : 'block';
+  if (!isVisible) document.getElementById('dchat-we-text')?.focus();
+};
+
+window._sendWorldEvent = async function() {
+  const text   = document.getElementById('dchat-we-text')?.value.trim();
+  if (!text) { window.showToast('Write a world event message first.', 'error'); return; }
+
+  const tab    = _deityChatTab || 'location';
+  const locId  = _deityChatLocation || '';
+
+  const msgsRef = (tab === 'general')
+    ? collection(db, 'general-chat', 'global', 'messages')
+    : (locId ? collection(db, 'chats', locId, 'messages') : null);
+
+  if (!msgsRef) { window.showToast('Select a location first.', 'error'); return; }
+
+  const label = _weType === 'unexpected' ? 'UNEXPECTED DEVELOPMENT' : 'LOGICAL DEVELOPMENT';
+
+  try {
+    await addDoc(msgsRef, {
+      uid:          'system',
+      charName:     'The World',
+      isWorldEvent: true,
+      eventType:    _weType,
+      eventLabel:   label,
+      text,
+      timestamp:    serverTimestamp(),
+    });
+    const input = document.getElementById('dchat-we-text');
+    if (input) input.value = '';
+    window._toggleWorldEventBar?.();
+    window.showToast(`${label} sent to chat!`, 'success');
+  } catch(e) {
+    window.showToast('Failed to send world event: ' + (e.message || e), 'error');
+  }
+};
+
 
 // ═══════════════════════════════════════════════════
 //  NPC MANAGER (Deity)
@@ -2257,17 +2548,24 @@ function renderDeityNpcs() {
       ? `<img src="${npc.avatar}" style="width:100%;height:100%;object-fit:cover;border-radius:50%"/>`
       : `<span style="font-size:1.4rem">${npc.avatar||"🧙"}</span>`;
     const autoCount = npc.autoResponses?.length || 0;
+    const invCount  = npc.inventory?.length || 0;
+    const rankLvl   = npc.rank ? `${npc.rank} Lv.${npc.level||1}` : "";
+    const classTag  = npc.charClass ? `${npc.charClass}` : "";
+    const skillList = (npc.skills||[]).length ? (npc.skills||[]).join(", ") : "";
     return `
     <div class="deity-npc-card">
       <div class="deity-npc-avatar">${av}</div>
       <div class="deity-npc-info">
         <div class="deity-npc-name">${npc.name}</div>
         <div class="deity-npc-desc">${npc.description||"—"}</div>
-        <div class="deity-npc-meta">${autoCount} auto-response${autoCount!==1?"s":""}</div>
+        ${rankLvl  ? `<div class="deity-npc-meta npc-rank-badge">⚔️ ${rankLvl}${classTag ? ` · ${classTag}` : ""}</div>` : ""}
+        ${skillList ? `<div class="deity-npc-meta" style="color:var(--gold-dim);font-size:0.7rem">🔮 ${skillList}</div>` : ""}
+        <div class="deity-npc-meta">${autoCount} auto-response${autoCount!==1?"s":""}${invCount ? ` · 🎒 ${invCount} item${invCount!==1?"s":""}` : ""}</div>
       </div>
       <div class="deity-npc-actions">
         <button class="deity-mini-btn" onclick="window._openDeityNpcForm('${npc.id}')">✏️ Edit</button>
-        <button class="deity-mini-btn" onclick="window._npcSpeakAs('${npc.id}','${(npc.name||"").replace(/'/g,"\\'")}')">🗣️ Speak</button>
+        <button class="deity-mini-btn" onclick="window._npcSpeakAs('${npc.id}','${(npc.name||"").replace(/'/g,"\\'")}')" >🗣️ Speak</button>
+        <button class="deity-mini-btn" onclick="window._openNpcBestowModal('${npc.id}','${(npc.name||"").replace(/'/g,"\\'")}')" >🎒 Bestow</button>
         <button class="deity-mini-btn danger" onclick="window._deleteDeityNpc('${npc.id}')">🗑️</button>
       </div>
     </div>`;
@@ -2291,6 +2589,322 @@ function renderDeityNpcs() {
       loadDeityNpcs(_currentNpcLocation);
     } catch(e) { window.showToast("Failed to delete.", "error"); }
   };
+}
+
+// ── NPC Bestow Modal ─────────────────────────────────────────────────────────
+window._openNpcBestowModal = function(npcId, npcName) {
+  document.getElementById("npc-bestow-modal")?.remove();
+  const npc = _deityNpcs.find(n => n.id === npcId) || {};
+  const locationId = _currentNpcLocation;
+
+  const modal = document.createElement("div");
+  modal.id = "npc-bestow-modal";
+  modal.className = "deity-modal";
+  modal.style.display = "flex";
+
+  // Build inventory display
+  const currentInv = npc.inventory || [];
+  const invHtml = currentInv.length
+    ? currentInv.map((item, i) => `
+        <div class="bestow-log-entry" style="display:flex;align-items:center;gap:8px">
+          <span>${item.icon||"📦"}</span>
+          <span style="flex:1">${item.name}</span>
+          <span style="color:var(--gold-dim)">×${item.qty||1}</span>
+          <button onclick="window._removeNpcItem('${npcId}','${locationId}',${i})"
+            style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:0.85rem;padding:0 4px">✕</button>
+        </div>`).join("")
+    : `<div style="color:var(--text-dim);font-style:italic;font-size:0.82rem">No items yet.</div>`;
+
+  modal.innerHTML = `
+    <div class="deity-modal-box" style="max-width:480px">
+      <div class="deity-modal-title">🎒 Bestow to ${npcName}</div>
+      <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:14px">Add items directly to this NPC's inventory. Players can trade with or receive items from this NPC.</div>
+
+      <div style="font-family:var(--ff-mono);font-size:0.6rem;color:var(--gold);letter-spacing:0.1em;margin-bottom:8px">CURRENT INVENTORY</div>
+      <div id="npc-bestow-inv-display" style="margin-bottom:16px;max-height:140px;overflow-y:auto;background:var(--ink2);border:1px solid var(--border);border-radius:8px;padding:10px">
+        ${invHtml}
+      </div>
+
+      <div style="font-family:var(--ff-mono);font-size:0.6rem;color:var(--gold);letter-spacing:0.1em;margin-bottom:8px">ADD ITEMS</div>
+      <div id="npc-bestow-item-picker"></div>
+      <textarea id="npc-bestow-items" style="display:none"></textarea>
+
+      <div class="form-error" id="npc-bestow-error" style="margin:8px 0"></div>
+      <div style="display:flex;gap:10px;margin-top:12px">
+        <button class="btn-primary" onclick="window._doNpcBestow('${npcId}','${locationId}')">💾 Save to Inventory</button>
+        <button class="btn-secondary" onclick="document.getElementById('npc-bestow-modal').remove()">Cancel</button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(modal);
+  modal.addEventListener("click", e => { if (e.target === modal) modal.remove(); });
+
+  // Render item picker into the modal
+  const picker = modal.querySelector("#npc-bestow-item-picker");
+  const hiddenTextarea = modal.querySelector("#npc-bestow-items");
+  _renderNpcBestowPicker(picker, hiddenTextarea);
+};
+
+function _renderNpcBestowPicker(picker, hiddenTextarea) {
+  // Uses ITEMS array (type: weapon/armor/potion/food/material)
+  const CAT_MAP = [
+    { key:"weapon",   label:"⚔️ Weapons"   },
+    { key:"armor",    label:"🛡️ Armor"     },
+    { key:"potion",   label:"🧪 Potions"   },
+    { key:"food",     label:"🍖 Food"      },
+    { key:"material", label:"📦 Materials" },
+  ];
+
+  let selected    = [];
+  let currentCat  = "weapon";
+  let searchQuery = "";
+
+  picker.innerHTML = `
+    <div class="reward-picker-tabs" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px">
+      ${CAT_MAP.map(c=>`<button class="reward-picker-tab${c.key===currentCat?" active":""}" data-cat="${c.key}" style="touch-action:manipulation">${c.label}</button>`).join("")}
+    </div>
+    <input type="text" class="field-input npc-bestow-search-input"
+      placeholder="🔍 Search items..." style="margin-bottom:8px;padding:6px 10px;font-size:0.82rem"/>
+    <div class="reward-picker-list" style="max-height:200px;overflow-y:auto"></div>
+    <div class="reward-picker-selected" style="margin-top:8px"></div>`;
+
+  const listDiv     = picker.querySelector(".reward-picker-list");
+  const selectedDiv = picker.querySelector(".reward-picker-selected");
+  const searchInput = picker.querySelector(".npc-bestow-search-input");
+
+  function syncHidden() {
+    hiddenTextarea.value = selected.map(i=>`${i.name}, ${i.qty}`).join("\n");
+  }
+
+  function getBadge(item) {
+    if (item.grade)  { const c = GRADE_COLORS[item.grade]   ||"#aaa"; return `<span style="font-size:0.6rem;padding:1px 5px;border-radius:3px;background:${c}22;color:${c};border:1px solid ${c}44;margin-left:4px">${item.grade}</span>`; }
+    if (item.rarity) { const c = RARITY_COLORS[item.rarity] ||"#aaa"; return `<span style="font-size:0.6rem;padding:1px 5px;border-radius:3px;background:${c}22;color:${c};border:1px solid ${c}44;margin-left:4px">${item.rarity}</span>`; }
+    return "";
+  }
+
+  function updateSelected() {
+    if (!selected.length) {
+      selectedDiv.innerHTML = `<div style="color:var(--text-dim);font-size:0.82rem;padding:4px 0;font-style:italic">No items selected yet.</div>`;
+    } else {
+      selectedDiv.innerHTML = `
+        <div style="font-size:0.72rem;color:var(--text-dim);margin-bottom:6px;font-family:var(--ff-mono);letter-spacing:0.06em">SELECTED ITEMS</div>
+        ${selected.map((item,idx)=>`
+          <div class="reward-selected-row">
+            <span class="reward-selected-num">${idx+1}</span>
+            <span class="reward-selected-icon">${item.icon||"📦"}</span>
+            <span class="reward-selected-name">${item.name}${getBadge(item)}</span>
+            <input type="number" min="1" value="${item.qty}" data-name="${item.name}" class="reward-qty-input"/>
+            <button data-name="${item.name}" class="reward-remove-btn" style="touch-action:manipulation">✕</button>
+          </div>`).join("")}`;
+    }
+    syncHidden();
+    selectedDiv.querySelectorAll(".reward-qty-input").forEach(inp => {
+      inp.addEventListener("input", () => {
+        const val  = Math.max(1, parseInt(inp.value)||1);
+        inp.value  = val;
+        const item = selected.find(i=>i.name===inp.dataset.name);
+        if (item) { item.qty = val; syncHidden(); }
+      });
+    });
+    selectedDiv.querySelectorAll(".reward-remove-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        selected = selected.filter(i=>i.name!==btn.dataset.name);
+        updateSelected();
+        showCat(currentCat);
+      });
+    });
+  }
+
+  function showCat(catKey) {
+    currentCat = catKey;
+    const q = (searchInput?.value||"").trim().toLowerCase();
+    let items = ITEMS.filter(i => i.type === catKey);
+    if (q) items = items.filter(i => i.name.toLowerCase().includes(q));
+    listDiv.innerHTML = items.map(item => {
+      const inSel = selected.find(s=>s.name===item.name);
+      return `<div class="reward-picker-item${inSel?" selected":""}" data-name="${item.name}"
+        style="cursor:pointer;display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;
+        background:${inSel?"rgba(201,168,76,0.12)":"transparent"};margin-bottom:2px;touch-action:manipulation">
+        <span style="font-size:1rem;width:1.6em;text-align:center">${item.icon||"📦"}</span>
+        <span style="flex:1;font-size:0.85rem">${item.name}${getBadge(item)}</span>
+        ${inSel?`<span style="color:var(--gold);font-size:0.75rem">×${inSel.qty} ✓</span>`:""}
+      </div>`;
+    }).join("") || `<div style="color:var(--text-dim);font-size:0.82rem;padding:8px">No items found.</div>`;
+
+    listDiv.querySelectorAll(".reward-picker-item").forEach(el => {
+      el.addEventListener("click", () => {
+        const itemDef = ITEMS.find(i=>i.name===el.dataset.name);
+        if (!itemDef) return;
+        const ex = selected.find(s=>s.name===itemDef.name);
+        if (ex) ex.qty++;
+        else selected.push({...itemDef, qty:1});
+        updateSelected();
+        showCat(currentCat);
+      });
+    });
+
+    picker.querySelectorAll(".reward-picker-tab").forEach(tab => {
+      tab.classList.toggle("active", tab.dataset.cat === catKey);
+    });
+  }
+
+  picker.querySelectorAll(".reward-picker-tab").forEach(tab => {
+    tab.addEventListener("click", () => showCat(tab.dataset.cat));
+  });
+  searchInput?.addEventListener("input", () => showCat(currentCat));
+
+  showCat(currentCat);
+  updateSelected();
+}
+window._doNpcBestow = async function(npcId, locationId) {
+  const errEl = document.getElementById("npc-bestow-error");
+  errEl.textContent = "";
+  const itemsRaw = document.getElementById("npc-bestow-items")?.value.trim();
+  if (!itemsRaw) { errEl.textContent = "Select at least one item."; return; }
+
+  const newItems = [];
+  for (const line of itemsRaw.split("\n")) {
+    const p = line.split(",").map(x => x.trim());
+    if (p[0] && parseInt(p[1]) > 0) {
+      const def = ITEMS.find(i => i.name === p[0]);
+      newItems.push({ name: p[0], icon: def?.icon || "📦", type: def?.category || "material", qty: parseInt(p[1]) });
+    }
+  }
+  if (!newItems.length) { errEl.textContent = "No valid items selected."; return; }
+
+  const btn = document.querySelector("#npc-bestow-modal .btn-primary");
+  if (btn) { btn.disabled = true; btn.textContent = "Saving..."; }
+
+  try {
+    const npc = _deityNpcs.find(n => n.id === npcId) || {};
+    const currentInv = [...(npc.inventory || [])];
+    for (const item of newItems) {
+      const existing = currentInv.find(i => i.name === item.name);
+      if (existing) existing.qty += item.qty;
+      else currentInv.push(item);
+    }
+    await updateDoc(doc(db, "npcs", locationId, "list", npcId), { inventory: currentInv });
+    // Update local cache
+    const cached = _deityNpcs.find(n => n.id === npcId);
+    if (cached) cached.inventory = currentInv;
+
+    document.getElementById("npc-bestow-modal")?.remove();
+    window.showToast(`Items added to NPC inventory!`, "success");
+    loadDeityNpcs(locationId);
+  } catch(e) {
+    errEl.textContent = e.message || "Failed to save inventory.";
+    if (btn) { btn.disabled = false; btn.textContent = "💾 Save to Inventory"; }
+  }
+};
+
+window._removeNpcItem = async function(npcId, locationId, itemIdx) {
+  try {
+    const npc = _deityNpcs.find(n => n.id === npcId);
+    if (!npc) return;
+    const inv = [...(npc.inventory || [])];
+    inv.splice(itemIdx, 1);
+    await updateDoc(doc(db, "npcs", locationId, "list", npcId), { inventory: inv });
+    npc.inventory = inv;
+    // Refresh the current inventory display inside the open modal
+    const invDisplay = document.getElementById("npc-bestow-inv-display");
+    if (invDisplay) {
+      invDisplay.innerHTML = inv.length
+        ? inv.map((item, i) => `
+            <div class="bestow-log-entry" style="display:flex;align-items:center;gap:8px">
+              <span>${item.icon||"📦"}</span>
+              <span style="flex:1">${item.name}</span>
+              <span style="color:var(--gold-dim)">×${item.qty||1}</span>
+              <button onclick="window._removeNpcItem('${npcId}','${locationId}',${i})"
+                style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:0.85rem;padding:0 4px">✕</button>
+            </div>`).join("")
+        : `<div style="color:var(--text-dim);font-style:italic;font-size:0.82rem">No items yet.</div>`;
+    }
+    window.showToast("Item removed.", "info");
+  } catch(e) { window.showToast("Failed to remove item.", "error"); }
+};
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  NPC CLASS + SKILL TREE  (2 skills unlock per rank tier)
+//  Tiers: Wanderer/Follower          = basic
+//         Disciple/Master            = +intermediate
+//         Exalted → Eternal          = +advanced
+// ─────────────────────────────────────────────────────────────────────────────
+const NPC_CLASSES = ["Warrior","Guardian","Arcanist","Hunter","Assassin","Cleric","Summoner"];
+
+const NPC_SKILL_TREE = {
+  Warrior:  {
+    basic:        ["Cleave","Battle Cry","Crushing Blow"],
+    intermediate: ["War Stomp","Bleeding Edge","Iron Momentum","Blood Gamble"],
+    advanced:     ["Titan Breaker","Berserker's Oath","War God's Fury"],
+  },
+  Guardian: {
+    basic:        ["Shield Bash","Fortify","Iron Guard"],
+    intermediate: ["Stone Skin","Reinforced Core","Taunting Roar","Pain Conversion"],
+    advanced:     ["Aegis of Eternity","Colossus Form","Unbreakable Will"],
+  },
+  Arcanist: {
+    basic:        ["Arcane Bolt","Mana Pulse","Robust Mind"],
+    intermediate: ["Astral Lance","Mind Burn","Echo-strike","Rune Sacrifice"],
+    advanced:     ["Meteorfall","Arcane Shower","Hex"],
+  },
+  Hunter:   {
+    basic:        ["Pierce","Hunter's Poison","Quick Shot"],
+    intermediate: ["Split Arrow","Ensnare","Falcon Sight","Vital Shot"],
+    advanced:     ["Slayer","Predator's Instinct","Executioner"],
+  },
+  Assassin: {
+    basic:        ["Backstab","Scorching Blade","Shadow Step"],
+    intermediate: ["Thunder Strike","Venom Surge","Trickster","Blood Pact"],
+    advanced:     ["Death Mark","Phantom Assault","Predator"],
+  },
+  Cleric:   {
+    basic:        ["Healing Light","Sacred Spark","Neptune's Embrace"],
+    intermediate: ["Divine Barrier","Purify","Radiant Pulse","Life Exchange"],
+    advanced:     ["Sanctuary","Divine Ascension","Lazarus"],
+  },
+  Summoner: {
+    basic:        ["Lashing","Soul Bind","Essence Sap"],
+    intermediate: ["Beastmaster","Beast Empowerment","Usurper","Offering"],
+    advanced:     ["Leviathan","Abyssal-touch","Profane Lord"],
+  },
+};
+
+const NPC_RANKS = [
+  { value: "Wanderer",  label: "Wanderer  — A soul merely stepping into the world",  levels: "1–100"   },
+  { value: "Follower",  label: "Follower  — A soul who admires a certain path",        levels: "101–200" },
+  { value: "Disciple",  label: "Disciple  — Now walks a certain path",                 levels: "201–300" },
+  { value: "Master",    label: "Master    — Is now a master of that path",             levels: "301–400" },
+  { value: "Exalted",   label: "Exalted   — Praised as a lord of his path",           levels: "401–500" },
+  { value: "Crown",     label: "Crown     — A leader",                                 levels: "501–600" },
+  { value: "Supreme",   label: "Supreme   — An absolute monarch",                      levels: "601–700" },
+  { value: "Legend",    label: "Legend    — A being spoken of in legends",             levels: "701–800" },
+  { value: "Myth",      label: "Myth      — A true fable",                             levels: "801–900" },
+  { value: "Eternal",   label: "Eternal   — An everlasting being",                     levels: "901–1000"},
+];
+
+const NPC_RANK_TIERS = {
+  "Wanderer" : "basic",
+  "Follower" : "basic",
+  "Disciple" : "intermediate",
+  "Master"   : "intermediate",
+  "Exalted"  : "advanced",
+  "Crown"    : "advanced",
+  "Supreme"  : "advanced",
+  "Legend"   : "advanced",
+  "Myth"     : "advanced",
+  "Eternal"  : "advanced",
+};
+
+// Returns all skills available up to and including the rank tier
+function getNpcAvailableSkills(charClass, rank) {
+  const tree = NPC_SKILL_TREE[charClass];
+  if (!tree) return [];
+  const tier = NPC_RANK_TIERS[rank] || "basic";
+  const tiers = tier === "basic"        ? ["basic"]
+              : tier === "intermediate" ? ["basic","intermediate"]
+              : ["basic","intermediate","advanced"];
+  return tiers.flatMap(t => tree[t] || []);
 }
 
 function openDeityNpcForm(npcId) {
@@ -2349,7 +2963,7 @@ function openDeityNpcForm(npcId) {
     <div class="deity-modal-title">${isEdit?"✏️ Edit":"➕ New"} NPC</div>
     <div class="field-group" style="margin-bottom:10px">
       <label class="field-label">Location</label>
-      <select class="field-input" id="dnpc-location">${locationOptions}</select>
+      <select class="field-input npc-select" id="dnpc-location">${locationOptions}</select>
     </div>
     <div class="field-group" style="margin-bottom:10px">
       <label class="field-label">Name</label>
@@ -2366,6 +2980,34 @@ function openDeityNpcForm(npcId) {
     <div class="field-group" style="margin-bottom:10px">
       <label class="field-label">Description / Role</label>
       <input class="field-input" id="dnpc-desc" value="${existing.description||""}" placeholder="e.g. Blacksmith, Quest Giver"/>
+    </div>
+    <div style="display:flex;gap:10px;margin-bottom:10px">
+      <div class="field-group" style="flex:1;margin-bottom:0">
+        <label class="field-label">Rank</label>
+        <select class="field-input npc-select" id="dnpc-rank">
+          <option value="">— None —</option>
+          ${NPC_RANKS.map(r => `<option value="${r.value}" ${(existing.rank||"")===r.value?"selected":""}>${r.value} (${r.levels})</option>`).join("")}
+        </select>
+      </div>
+      <div class="field-group" style="flex:1;margin-bottom:0">
+        <label class="field-label">Level</label>
+        <input class="field-input" id="dnpc-level" type="number" min="1" max="100" value="${existing.level||1}" placeholder="1"/>
+      </div>
+    </div>
+    <div class="field-group" style="margin-bottom:10px">
+      <label class="field-label">Class</label>
+      <select class="field-input npc-select" id="dnpc-class" onchange="window._onDnpcClassOrRankChange()">
+        <option value="">— None —</option>
+        ${NPC_CLASSES.map(c=>`<option value="${c}" ${(existing.charClass||"")===c?"selected":""}>${c}</option>`).join("")}
+      </select>
+    </div>
+    <div class="field-group" style="margin-bottom:10px">
+      <label class="field-label">Skills
+        <span style="color:var(--text-dim);font-size:0.75em"> — based on class &amp; rank</span>
+      </label>
+      <div id="dnpc-skill-picker" style="background:var(--ink2);border:1px solid var(--border);border-radius:8px;padding:10px;min-height:44px;max-height:200px;overflow-y:auto">
+        <span style="color:var(--text-dim);font-size:0.8rem;font-style:italic">Select a class and rank above to see available skills.</span>
+      </div>
     </div>
     <div style="font-family:var(--ff-mono);font-size:0.6rem;color:var(--gold);letter-spacing:0.1em;margin-bottom:6px">⚡ AUTO-RESPONSES</div>
     <div style="font-size:0.75rem;color:var(--text-dim);margin-bottom:8px">When a player @tags this NPC, matching trigger → auto-reply fires. Leave trigger blank for a default reply.</div>
@@ -2400,6 +3042,65 @@ function openDeityNpcForm(npcId) {
   });
   document.body.appendChild(modal);
   modal.addEventListener("click", e => { if (e.target === modal) modal.remove(); });
+
+  // ── Init custom selects on injected modal ────────────────────────────────
+  if (typeof window.refreshCustomSelect === "function") {
+    ["dnpc-location","dnpc-rank","dnpc-class"].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) window.refreshCustomSelect(el);
+    });
+  }
+
+  // ── Dynamic skill picker ───────────────────────────────────────────────────
+  window._onDnpcClassOrRankChange = function() {
+    const charClass = document.getElementById("dnpc-class")?.value;
+    const rank      = document.getElementById("dnpc-rank")?.value;
+    const picker    = document.getElementById("dnpc-skill-picker");
+    if (!picker) return;
+    if (!charClass) {
+      picker.innerHTML = `<span style="color:var(--text-dim);font-size:0.8rem;font-style:italic">Select a class and rank above to see available skills.</span>`;
+      return;
+    }
+    const available = getNpcAvailableSkills(charClass, rank);
+    if (!available.length) {
+      picker.innerHTML = `<span style="color:var(--text-dim);font-size:0.8rem;font-style:italic">No skills available yet.</span>`;
+      return;
+    }
+    const prevChecked = Array.from(picker.querySelectorAll(".dnpc-skill-cb:checked")).map(cb => cb.value);
+    const tierOf = skill => {
+      const tree = NPC_SKILL_TREE[charClass] || {};
+      return Object.entries(tree).find(([,list]) => list.includes(skill))?.[0] || "basic";
+    };
+    const tierColor = t => t === "advanced" ? "var(--gold)" : t === "intermediate" ? "#7ec87e" : "var(--ash-light)";
+    picker.innerHTML = available.map(skill => {
+      const tier    = tierOf(skill);
+      const checked = (prevChecked.includes(skill) || (existing.skills||[]).includes(skill)) ? "checked" : "";
+      return `<label style="display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:6px;cursor:pointer;user-select:none"
+        onmouseover="this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.background=''">
+        <input type="checkbox" class="dnpc-skill-cb" value="${skill}" ${checked}
+          style="width:15px;height:15px;accent-color:var(--gold);cursor:pointer;flex-shrink:0"/>
+        <span style="font-size:0.85rem;flex:1">${skill}</span>
+        <span style="font-size:0.62rem;color:${tierColor(tier)};text-transform:uppercase;letter-spacing:0.06em;font-family:var(--ff-mono)">${tier}</span>
+      </label>`;
+    }).join("");
+  };
+
+  // Hook rank dropdown to refresh skills
+  document.getElementById("dnpc-rank")?.addEventListener("change", window._onDnpcClassOrRankChange);
+
+  // Initialise picker if editing an existing NPC that has a class
+  if (existing.charClass) {
+    setTimeout(() => {
+      window._onDnpcClassOrRankChange();
+      // Re-apply saved skill selections after render
+      setTimeout(() => {
+        const saved = existing.skills || [];
+        document.querySelectorAll("#dnpc-skill-picker .dnpc-skill-cb").forEach(cb => {
+          cb.checked = saved.includes(cb.value);
+        });
+      }, 50);
+    }, 0);
+  }
 
   window._addDnpcRow = () => {
     const c = document.getElementById("dnpc-auto-rows");
@@ -2443,7 +3144,15 @@ function openDeityNpcForm(npcId) {
         return;
       }
     }
-    const data = { name, avatar: avatar||"🧙", description: desc||"", autoResponses, locationId, updatedAt: serverTimestamp() };
+    const rank      = document.getElementById("dnpc-rank")?.value || "";
+    const level     = parseInt(document.getElementById("dnpc-level")?.value) || 1;
+    const charClass = document.getElementById("dnpc-class")?.value || "";
+    const skills    = Array.from(document.querySelectorAll("#dnpc-skill-picker .dnpc-skill-cb:checked")).map(cb => cb.value);
+    const data = { name, avatar: avatar||"🧙", description: desc||"", autoResponses, locationId, updatedAt: serverTimestamp(),
+      ...(rank      ? { rank, level } : {}),
+      ...(charClass ? { charClass }   : {}),
+      skills,
+    };
     try {
       if (npcId) await setDoc(doc(db,"npcs",locationId,"list",npcId), data, { merge:true });
       else       await addDoc(collection(db,"npcs",locationId,"list"), data);
@@ -2669,6 +3378,23 @@ async function switchDeityChat(locationId) {
 
       const locColPath = `chats/${locationId}/messages`;
 
+      // ── WORLD EVENT bubble ────────────────────────────────────────
+      if (msg.isWorldEvent && msg.uid === 'system') {
+        const isUnexpected = msg.eventType === 'unexpected';
+        el.className = `chat-msg world-event-msg world-event-${msg.eventType || 'unexpected'}`;
+        el.innerHTML = `
+          <div class="world-event-bubble">
+            <div class="world-event-header">
+              <span class="world-event-icon">${isUnexpected ? '⚡' : '📖'}</span>
+              <span class="world-event-label">[${msg.eventLabel || (isUnexpected ? 'UNEXPECTED DEVELOPMENT' : 'LOGICAL DEVELOPMENT')}]</span>
+              <span class="world-event-time">${time}</span>
+            </div>
+            <div class="world-event-text">${formatChatText(msg.text || '')}</div>
+          </div>`;
+        container.appendChild(el);
+        return;
+      }
+
       if (isMe) {
         el.innerHTML = `
           <div class="chat-msg-body">
@@ -2745,15 +3471,16 @@ async function sendDeityChat() {
     if (_deityReplyTo) payload.replyTo = _deityReplyTo;
     await addDoc(collection(db,"chats",_deityChatLocation,"messages"), payload);
   } else {
-    // Send as an NPC
+    // Send as an NPC — use real rank/level/class from NPC data
     const npcId = speakAs.replace("npc_","");
     const npc   = _deityLocationNpcs.find(n => n.id === npcId) || {};
     const payload = {
       uid:        `npc_${npcId}`,
       charName:   npc.name || "NPC",
       avatarUrl:  npc.avatar || "🧙",
-      rank:       "NPC",
-      level:      0,
+      rank:       npc.rank || "NPC",
+      level:      npc.level || 1,
+      charClass:  npc.charClass || "",
       title:      npc.description || "",
       location:   _deityChatLocation,
       text,
@@ -2895,6 +3622,23 @@ function _startGeneralChatListener() {
       el.className = `chat-msg${isMe ? " own" : ""}${isNpc ? " npc-msg" : ""}`;
       el.dataset.msgId = docId;
 
+      // ── WORLD EVENT bubble ────────────────────────────────────────
+      if (msg.isWorldEvent && msg.uid === 'system') {
+        const isUnexpected = msg.eventType === 'unexpected';
+        el.className = `chat-msg world-event-msg world-event-${msg.eventType || 'unexpected'}`;
+        el.innerHTML = `
+          <div class="world-event-bubble">
+            <div class="world-event-header">
+              <span class="world-event-icon">${isUnexpected ? '⚡' : '📖'}</span>
+              <span class="world-event-label">[${msg.eventLabel || (isUnexpected ? 'UNEXPECTED DEVELOPMENT' : 'LOGICAL DEVELOPMENT')}]</span>
+              <span class="world-event-time">${time}</span>
+            </div>
+            <div class="world-event-text">${formatChatText(msg.text || '')}</div>
+          </div>`;
+        container.appendChild(el);
+      return;
+      }
+
       const gcColPath = `general-chat/global/messages`;
 
       if (isMe) {
@@ -2977,8 +3721,9 @@ async function sendDeityChatPatched() {
         uid:       `npc_${npcId}`,
         charName:  npc.name  || "NPC",
         avatarUrl: npc.avatar || "🧙",
-        rank:      "NPC",
-        level:     0,
+        rank:      npc.rank || "NPC",
+        level:     npc.level || 1,
+        charClass: npc.charClass || "",
         title:     npc.description || "",
         text,
         isNpc:     true,

@@ -9,6 +9,30 @@
 <link rel="stylesheet" href="../css/duel.css"/>
 <link rel="stylesheet" href="../css/trade.css"/>
 <style>
+/* ── Mobile touch: eliminate 300ms double-tap delay on all buttons ─────────── */
+button,
+[onclick],
+.nav-item,
+.vendor-buy-btn,
+.btn-primary,
+.btn-secondary,
+.btn-ghost,
+.chat-send-btn,
+.chat-tab,
+.inv-tab,
+.market-tab,
+.sidebar-tab-btn,
+.popup-action-btn,
+.battle-action-btn,
+.stat-btn,
+.zone-card,
+.profession-card,
+.avatar-preset,
+.nav-toggle,
+.notification-bell {
+  touch-action: manipulation;
+}
+
 /* ── Duel forfeit button ───────────────────────── */
 .duel-forfeit-row {
   display: flex;

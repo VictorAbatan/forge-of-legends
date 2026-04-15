@@ -378,6 +378,43 @@
 .field-input option { background: var(--ink2); }
 textarea.field-input { resize: vertical; line-height: 1.5; min-height: 70px; }
 
+/* ── NPC Form Styled Dropdowns ───────────────────────────────────────────── */
+select.dnpc-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: rgba(255,255,255,0.04);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23a07830' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 34px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--ff-body, inherit);
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  width: 100%;
+  box-sizing: border-box;
+}
+select.dnpc-select:focus {
+  outline: none;
+  border-color: var(--gold-dim);
+  box-shadow: 0 0 0 2px rgba(160,120,48,0.15);
+}
+select.dnpc-select:hover {
+  border-color: var(--border-bright);
+}
+select.dnpc-select option {
+  background: #1a1814;
+  color: var(--text);
+  padding: 6px 10px;
+}
+select.dnpc-select option:checked {
+  background: rgba(160,120,48,0.25);
+  color: var(--gold);
+}
+
 .form-error { font-size: 0.78rem; color: var(--red-bright, #e05555); font-family: var(--ff-mono); min-height: 16px; }
 
 .btn-primary {
@@ -1257,4 +1294,142 @@ textarea.field-input { resize: vertical; line-height: 1.5; min-height: 70px; }
     padding-left: 12px;
     padding-right: 12px;
   }
+}
+/* ── NPC rank badge ────────────────────────────────── */
+.npc-rank-badge {
+  color: var(--gold);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+/* ── Deity dashboard touch targets ─────────────────── */
+button,
+.deity-nav-item,
+.deity-mini-btn,
+.btn-primary,
+.btn-secondary,
+.reward-picker-tab,
+.reward-picker-item,
+[onclick] {
+  touch-action: manipulation;
+}
+/* ═══════════════════════════════════════════════════
+   WORLD EVENT BUBBLES
+═══════════════════════════════════════════════════ */
+.world-event-msg { display: block; margin: 10px 0; }
+.world-event-bubble {
+  width: 100%; border-radius: 10px; padding: 12px 16px;
+  background: rgba(10,8,6,0.85);
+  border-left: 4px solid #e05555;
+  box-shadow: 0 0 18px rgba(224,85,85,0.18), inset 0 0 30px rgba(0,0,0,0.3);
+}
+.world-event-msg.world-event-logical .world-event-bubble {
+  border-left-color: #c9a84c;
+  box-shadow: 0 0 18px rgba(201,168,76,0.18), inset 0 0 30px rgba(0,0,0,0.3);
+}
+.world-event-header {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+}
+.world-event-icon { font-size: 1rem; }
+.world-event-label {
+  font-family: var(--ff-mono); font-size: 0.7rem; font-weight: 700;
+  letter-spacing: 0.12em; color: #e05555; text-transform: uppercase;
+  flex: 1;
+}
+.world-event-msg.world-event-logical .world-event-label { color: #c9a84c; }
+.world-event-time { font-family: var(--ff-mono); font-size: 0.52rem; color: var(--ash); }
+.world-event-text {
+  font-size: 0.9rem; color: var(--text); line-height: 1.6;
+  font-style: italic;
+}
+
+/* ── World Event toggle button ── */
+.dchat-world-event-toggle {
+  background: rgba(255,255,255,0.05); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 0 10px; color: var(--gold-dim);
+  font-size: 1rem; cursor: pointer; flex-shrink: 0; height: 38px;
+  transition: background 0.2s, border-color 0.2s;
+}
+.dchat-world-event-toggle:hover { background: rgba(201,168,76,0.12); border-color: var(--gold-dim); }
+
+/* ── World Event bar ── */
+.dchat-world-event-bar {
+  background: rgba(20,16,12,0.95); border: 1px solid rgba(224,85,85,0.35);
+  border-radius: 10px; padding: 12px; margin-bottom: 8px;
+}
+.dchat-we-types { display: flex; gap: 8px; margin-bottom: 8px; }
+.dchat-we-type-btn {
+  flex: 1; padding: 6px 10px; border-radius: 6px;
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+  color: var(--text-dim); font-family: var(--ff-mono); font-size: 0.72rem;
+  letter-spacing: 0.05em; cursor: pointer; transition: all 0.15s;
+}
+.dchat-we-type-btn.active {
+  background: rgba(224,85,85,0.15); border-color: rgba(224,85,85,0.5);
+  color: #e05555;
+}
+#we-type-logical.active {
+  background: rgba(201,168,76,0.15); border-color: rgba(201,168,76,0.5);
+  color: #c9a84c;
+}
+.dchat-we-input { min-height: 52px; resize: none; }
+
+/* ═══════════════════════════════════════════════════
+   COMPLETION TYPE TOGGLE
+═══════════════════════════════════════════════════ */
+.completion-type-toggle { display: flex; gap: 10px; margin-top: 4px; }
+.completion-type-btn {
+  flex: 1; display: flex; flex-direction: column; align-items: flex-start;
+  gap: 2px; padding: 10px 14px; border-radius: 8px; cursor: pointer;
+  background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+  text-align: left; transition: all 0.15s;
+}
+.completion-type-btn:hover { border-color: var(--border-bright); }
+.completion-type-btn.active {
+  background: rgba(201,168,76,0.1); border-color: var(--gold-dim);
+}
+.ctype-icon { font-size: 1.1rem; }
+.ctype-label {
+  font-family: var(--ff-display); font-size: 0.78rem; color: var(--gold);
+  letter-spacing: 0.06em;
+}
+.completion-type-btn:not(.active) .ctype-label { color: var(--text-dim); }
+.ctype-desc {
+  font-size: 0.68rem; color: var(--ash); line-height: 1.4;
+}
+
+/* ── Quest one-time badge ── */
+.quest-onetime-badge {
+  font-family: var(--ff-mono); font-size: 0.6rem; letter-spacing: 0.08em;
+  padding: 2px 7px; border-radius: 8px;
+  background: rgba(160,80,220,0.15); border: 1px solid rgba(160,80,220,0.4);
+  color: #b06de0;
+}
+.quest-onetime-badge.open {
+  background: rgba(80,180,120,0.12); border-color: rgba(80,180,120,0.35);
+  color: #5cb87a;
+}
+
+/* ═══════════════════════════════════════════════════
+   PUNISH MODAL
+═══════════════════════════════════════════════════ */
+.punish-item-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 6px; border-radius: 6px; cursor: pointer;
+  font-size: 0.85rem; user-select: none;
+}
+.punish-item-row:hover { background: rgba(255,255,255,0.04); }
+.punish-item-icon { font-size: 1rem; flex-shrink: 0; }
+.punish-item-name { flex: 1; color: var(--text); }
+
+/* Punish button style */
+.deity-mini-btn.punish {
+  background: rgba(160,80,220,0.12);
+  border-color: rgba(160,80,220,0.4);
+  color: #b06de0;
+}
+.deity-mini-btn.punish:hover {
+  background: rgba(160,80,220,0.22);
+  border-color: rgba(160,80,220,0.65);
 }

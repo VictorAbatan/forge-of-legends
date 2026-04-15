@@ -885,7 +885,7 @@
 
 /* ── Inventory ── */
 .inv-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
-.inv-tab { padding: 8px 16px; background: none; border: none; font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em; color: var(--text-dim); cursor: pointer; transition: color 0.2s; text-transform: uppercase; position: relative; }
+.inv-tab { padding: 10px 16px; min-height: 40px; background: none; border: none; font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em; color: var(--text-dim); cursor: pointer; transition: color 0.2s; text-transform: uppercase; position: relative; touch-action: manipulation; }
 .inv-tab.active { color: var(--gold); }
 .inv-tab.active::after { content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 1px; background: var(--gold); }
 
@@ -1016,8 +1016,9 @@
 .stat-alloc-name { font-size: 0.88rem; color: var(--text); display: block; }
 .stat-alloc-desc { font-size: 0.72rem; color: var(--text-dim); font-style: italic; }
 .stat-alloc-controls { display: flex; align-items: center; gap: 12px; }
-.stat-btn { width: 28px; height: 28px; border-radius: 50%; background: rgba(201,168,76,0.08); border: 1px solid var(--border); color: var(--gold); font-size: 1rem; cursor: pointer; transition: all 0.15s; display: flex; align-items: center; justify-content: center; line-height: 1; }
+.stat-btn { width: 36px; height: 36px; border-radius: 50%; background: rgba(201,168,76,0.08); border: 1px solid var(--border); color: var(--gold); font-size: 1rem; cursor: pointer; transition: all 0.15s; display: flex; align-items: center; justify-content: center; line-height: 1; touch-action: manipulation; }
 .stat-btn:hover { background: rgba(201,168,76,0.18); border-color: var(--border-bright); }
+@media (max-width: 768px) { .stat-btn { width: 44px; height: 44px; font-size: 1.1rem; } }
 .stat-alloc-val { font-family: var(--font-display); font-size: 1.1rem; color: var(--gold); min-width: 28px; text-align: center; }
 
 /* ── Deity ingredients ── */
@@ -1388,7 +1389,7 @@
 
 /* Tabs */
 .chat-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
-.chat-tab { background: transparent; border: 1px solid var(--border); border-radius: var(--radius); padding: 7px 18px; color: var(--text-dim); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em; cursor: pointer; transition: all 0.2s; }
+.chat-tab { background: transparent; border: 1px solid var(--border); border-radius: var(--radius); padding: 9px 18px; min-height: 40px; color: var(--text-dim); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em; cursor: pointer; transition: all 0.2s; touch-action: manipulation; }
 .chat-tab.active { background: var(--gold-dim); border-color: var(--gold-dim); color: var(--ink); }
 .chat-tab:hover:not(.active) { border-color: var(--border-bright); color: var(--text); }
 
@@ -1461,7 +1462,7 @@
 .chat-mention { color: var(--gold); font-weight: 600; }
 .chat-input { flex: 1; min-width: 0; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px; color: var(--text); font-family: var(--font-body); font-size: 0.9rem; resize: none; outline: none; height: 42px; transition: border-color 0.2s; }
 .chat-input:focus { border-color: var(--border-bright); }
-.chat-send-btn { background: var(--gold-dim); border: none; border-radius: var(--radius); padding: 10px 18px; color: var(--ink); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.12em; cursor: pointer; transition: background 0.2s; white-space: nowrap; }
+.chat-send-btn { background: var(--gold-dim); border: none; border-radius: var(--radius); padding: 10px 18px; min-height: 44px; color: var(--ink); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.12em; cursor: pointer; transition: background 0.2s; white-space: nowrap; touch-action: manipulation; }
 .chat-send-btn:hover { background: var(--gold); }
 .chat-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text-dim); font-style: italic; font-size: 0.88rem; gap: 8px; }
 
@@ -1481,7 +1482,8 @@
   background: transparent;
   border: 1px solid var(--border);
   border-radius: 20px;
-  padding: 3px 11px;
+  padding: 6px 14px;
+  min-height: 36px;
   font-family: var(--font-mono);
   font-size: 0.58rem;
   letter-spacing: 0.07em;
@@ -1489,6 +1491,7 @@
   cursor: pointer;
   transition: all 0.18s;
   white-space: nowrap;
+  touch-action: manipulation;
 }
 .sidebar-tab-btn.active {
   background: rgba(201,168,76,0.15);
@@ -1586,7 +1589,7 @@
    MARKETPLACE
 ══════════════════════════════════════ */
 .market-tabs { display: flex; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
-.market-tab { padding: 10px 20px; background: none; border: none; font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em; color: var(--text-dim); cursor: pointer; transition: color 0.2s; text-transform: uppercase; position: relative; }
+.market-tab { padding: 12px 20px; min-height: 44px; background: none; border: none; font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em; color: var(--text-dim); cursor: pointer; transition: color 0.2s; text-transform: uppercase; position: relative; touch-action: manipulation; }
 .market-tab.active { color: var(--gold); }
 .market-tab.active::after { content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 1px; background: var(--gold); }
 
@@ -1601,8 +1604,9 @@
 .vendor-item:last-child { border-bottom: none; }
 .vendor-item-name { font-size: 0.82rem; color: var(--text); }
 .vendor-item-price { font-family: var(--font-mono); font-size: 0.65rem; color: var(--gold); }
-.vendor-buy-btn { padding: 4px 12px; background: rgba(201,168,76,0.1); border: 1px solid var(--border); border-radius: var(--radius); color: var(--gold-dim); font-family: var(--font-mono); font-size: 0.58rem; letter-spacing: 0.08em; cursor: pointer; transition: all 0.2s; }
+.vendor-buy-btn { padding: 6px 14px; min-height: 36px; background: rgba(201,168,76,0.1); border: 1px solid var(--border); border-radius: var(--radius); color: var(--gold-dim); font-family: var(--font-mono); font-size: 0.58rem; letter-spacing: 0.08em; cursor: pointer; transition: all 0.2s; touch-action: manipulation; }
 .vendor-buy-btn:hover { background: rgba(201,168,76,0.2); border-color: var(--border-bright); color: var(--gold); }
+@media (max-width: 768px) { .vendor-buy-btn { min-height: 44px; padding: 8px 16px; } }
 
 .player-market-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
 .market-success-msg { padding: 12px; margin-bottom: 12px; background: rgba(76, 201, 100, 0.1); color: #4cc964; border: 1px solid rgba(76, 201, 100, 0.3); border-radius: var(--radius); text-align: center; font-weight: 500; font-size: 0.85rem; }
@@ -1879,10 +1883,11 @@
 
 .battle-actions { display: flex; gap: 10px; }
 .battle-action-btn {
-  flex: 1; padding: 14px 10px; border-radius: var(--radius); border: 1px solid var(--border);
+  flex: 1; padding: 14px 10px; min-height: 64px; border-radius: var(--radius); border: 1px solid var(--border);
   background: rgba(255,255,255,0.03); cursor: pointer; transition: all 0.2s;
   display: flex; flex-direction: column; align-items: center; gap: 4px;
   font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em; color: var(--text-dim);
+  touch-action: manipulation;
 }
 .battle-action-btn:hover:not(:disabled) { border-color: var(--border-bright); color: var(--text); }
 .battle-action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -2156,7 +2161,8 @@
   background: rgba(201,168,76,0.15);
   border: 0.5px solid var(--border-bright);
   border-radius: var(--radius);
-  padding: 8px 12px;
+  padding: 10px 14px;
+  min-height: 44px;
   color: var(--gold);
   font-family: var(--font-display);
   font-size: 0.75rem;
@@ -2165,6 +2171,7 @@
   transition: all 0.15s;
   text-transform: uppercase;
   white-space: nowrap;
+  touch-action: manipulation;
 }
 .popup-action-btn:hover {
   background: rgba(201,168,76,0.3);
@@ -5280,3 +5287,30 @@
     padding-right: 12px;
   }
 }
+/* ═══════════════════════════════════════════════════
+   WORLD EVENT BUBBLES (player chat)
+═══════════════════════════════════════════════════ */
+.world-event-msg { display: block; margin: 10px 0; width: 100%; }
+.world-event-bubble {
+  width: 100%; border-radius: 10px; padding: 12px 16px;
+  background: rgba(10,8,6,0.88);
+  border-left: 4px solid #e05555;
+  box-shadow: 0 0 18px rgba(224,85,85,0.15);
+}
+.world-event-msg.world-event-logical .world-event-bubble {
+  border-left-color: #c9a84c;
+  box-shadow: 0 0 18px rgba(201,168,76,0.15);
+}
+.world-event-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.world-event-icon { font-size: 1rem; }
+.world-event-label {
+  font-family: var(--font-mono); font-size: 0.68rem; font-weight: 700;
+  letter-spacing: 0.12em; color: #e05555; text-transform: uppercase; flex: 1;
+}
+.world-event-msg.world-event-logical .world-event-label { color: #c9a84c; }
+.world-event-time { font-family: var(--font-mono); font-size: 0.52rem; color: var(--ash); }
+.world-event-text { font-size: 0.88rem; color: var(--text); line-height: 1.6; font-style: italic; }
+
+/* ── Locked-out quest badge ── */
+.sq-badge--claimed,
+.sq-badge--closed { background: rgba(180,50,50,0.15); color: #c08080; border-color: rgba(180,50,50,0.3); }

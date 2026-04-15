@@ -264,7 +264,7 @@ async function createCharacter() {
     statPoints: WELCOME_STAT_POINTS, // 20 unallocated welcome points
 
     // Economy
-    gold: 100, // Starting gold
+    gold: 500, // Starting gold
 
     // Progression
     titles:       ["Wanderer"],
