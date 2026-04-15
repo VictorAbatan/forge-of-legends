@@ -21,7 +21,7 @@ service cloud.firestore {
     match /characters/{uid} {
       allow read:   if isAuth();
       allow create: if isOwner(uid);
-      allow update: if isOwner(uid);
+      allow update: if isOwner(uid) || isDeity();
       allow delete: if false;
     }
 
@@ -47,7 +47,8 @@ service cloud.firestore {
     }
 
     match /chats/{locationId}/messages/{msgId} {
-      allow read:   if isAuth();
+      allow read: if isAuth();
+
       allow create: if isAuth()
         && hasField('uid')
         && hasField('text')
@@ -63,10 +64,13 @@ service cloud.firestore {
             && request.resource.data.isAutoReply == true
           )
         );
+
       allow update: if isAuth() && (
         resource.data.uid == request.auth.uid
         || resource.data.uid == 'system'
+        || isDeity()
       );
+
       allow delete: if isAuth() && (
         resource.data.uid == request.auth.uid
         || isDeity()
@@ -74,7 +78,8 @@ service cloud.firestore {
     }
 
     match /general-chat/{docId}/messages/{msgId} {
-      allow read:   if isAuth();
+      allow read: if isAuth();
+
       allow create: if isAuth()
         && hasField('uid')
         && hasField('text')
@@ -86,10 +91,13 @@ service cloud.firestore {
           || isDeity()
         )
         && request.resource.data.text.size() <= 1000;
+
       allow update: if isAuth() && (
         resource.data.uid == request.auth.uid
         || resource.data.uid == 'system'
+        || isDeity()
       );
+
       allow delete: if isAuth() && (
         resource.data.uid == request.auth.uid
         || isDeity()
@@ -105,6 +113,7 @@ service cloud.firestore {
 
     match /marketplace/{listingId} {
       allow read: if isAuth();
+
       allow create: if isAuth()
         && hasField('sellerUid')
         && hasField('itemName')
@@ -113,20 +122,22 @@ service cloud.firestore {
         && request.resource.data.sellerUid == request.auth.uid
         && request.resource.data.pricePerUnit > 0
         && request.resource.data.qty > 0;
+
       allow update: if isAuth()
         && (
           request.auth.uid == resource.data.sellerUid
-          ||
-          (
+          || (
             request.resource.data.qty >= 0
             && request.resource.data.qty <= resource.data.qty
           )
         );
+
       allow delete: if isAuth();
     }
 
     match /marketListings/{listingId} {
       allow read: if isAuth();
+
       allow create: if isAuth()
         && hasField('sellerUid')
         && hasField('itemName')
@@ -135,6 +146,7 @@ service cloud.firestore {
         && request.resource.data.sellerUid == request.auth.uid
         && request.resource.data.pricePerUnit > 0
         && request.resource.data.qty > 0;
+
       allow update, delete: if false;
     }
 
@@ -153,11 +165,13 @@ service cloud.firestore {
     }
 
     match /activity/{uid}/events/{eventId} {
-      allow read:   if isOwner(uid);
+      allow read: if isOwner(uid);
+
       allow create: if isOwner(uid)
         && hasField('icon')
         && hasField('message')
         && hasField('timestamp');
+
       allow update: if false;
       allow delete: if false;
     }
@@ -170,14 +184,14 @@ service cloud.firestore {
     }
 
     match /divineVisions/{uid}/messages/{msgId} {
-      allow read:   if (isAuth() && request.auth.uid == uid) || isDeity();
+      allow read: if (isAuth() && request.auth.uid == uid) || isDeity();
       allow create: if isDeity();
       allow update: if isAuth() && request.auth.uid == uid;
       allow delete: if isAuth() && request.auth.uid == uid;
     }
 
     match /storyQuests/{questId} {
-      allow read:   if isAuth();
+      allow read: if isAuth();
       allow create: if isDeity();
       allow update: if isDeity() || (
         isAuth()
@@ -191,27 +205,33 @@ service cloud.firestore {
         resource.data.uid == request.auth.uid
         || isDeity()
       );
+
       allow list: if isAuth();
+
       allow create: if isAuth()
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.status == 'pending'
         && request.resource.data.questId is string
         && request.resource.data.playerName is string;
+
       allow update: if isAuth() && (
         (
+          // Player resubmitting their own
           resource.data.uid == request.auth.uid
           && request.resource.data.status == 'pending'
           && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['status', 'submittedAt', 'note', 'activitySnapshot'])
+              .hasOnly(['status', 'submittedAt', 'note', 'activitySnapshot', 'proof'])
         )
         ||
         (
+          // Deity can approve, reject, or punish
           isDeity()
-          && request.resource.data.status in ['approved', 'rejected']
+          && request.resource.data.status in ['approved', 'rejected', 'punished']
           && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['status', 'reviewedAt', 'reward'])
+              .hasOnly(['status', 'reviewedAt', 'reward', 'punishedAt'])
         )
       );
+
       allow delete: if false;
     }
 
@@ -220,35 +240,41 @@ service cloud.firestore {
         resource.data.uid == request.auth.uid
         || isDeity()
       );
+
       allow list: if isAuth();
+
       allow create: if isAuth()
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.status == 'pending'
         && request.resource.data.questId is string
         && request.resource.data.playerName is string;
+
       allow update: if isAuth() && (
         (
+          // Player resubmitting their own
           resource.data.uid == request.auth.uid
           && request.resource.data.status == 'pending'
           && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['status', 'submittedAt', 'note', 'activitySnapshot'])
+              .hasOnly(['status', 'submittedAt', 'note', 'activitySnapshot'])
         )
         ||
         (
+          // Deity can approve, reject, or punish
           isDeity()
-          && request.resource.data.status in ['approved', 'rejected']
+          && request.resource.data.status in ['approved', 'rejected', 'punished']
           && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['status', 'reviewedAt', 'reward'])
+              .hasOnly(['status', 'reviewedAt', 'reward', 'punishedAt'])
         )
       );
+
       allow delete: if false;
     }
 
     match /npcs/{locationId}/list/{npcId} {
-      allow read:   if isAuth();
-      allow create: if isDeity();
-      allow update: if isDeity();
-      allow delete: if isDeity();
+      allow read, list: if isAuth();
+      allow create:     if isDeity();
+      allow update:     if isDeity();
+      allow delete:     if isDeity();
     }
 
     match /quests/{questId} {
@@ -271,16 +297,20 @@ service cloud.firestore {
         || resource.data.targetId == request.auth.uid
         || (resource.data.participants is list && request.auth.uid in resource.data.participants)
       );
+
       allow list: if isAuth();
+
       allow create: if isAuth()
         && request.resource.data.challengerId == request.auth.uid
         && request.resource.data.targetId is string
         && request.resource.data.challengerId is string
         && request.resource.data.status is string;
+
       allow update: if isAuth() && (
         resource.data.challengerId == request.auth.uid
         || resource.data.targetId == request.auth.uid
       );
+
       allow delete: if isAuth() && (
         resource.data.challengerId == request.auth.uid
         || isDeity()
@@ -323,7 +353,7 @@ service cloud.firestore {
           || isDeity()
         )
         && request.resource.data.initiatorId == resource.data.initiatorId
-        && request.resource.data.targetId    == resource.data.targetId;
+        && request.resource.data.targetId == resource.data.targetId;
 
       allow delete: if isDeity();
     }
@@ -331,12 +361,16 @@ service cloud.firestore {
     match /factionMissions/{missionId} {
       allow read:   if isAuth();
       allow create: if isDeity();
-      allow update: if isDeity();
+      allow update: if isDeity() || (
+        isAuth()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['completedBy'])
+      );
       allow delete: if isDeity();
     }
 
     match /faction_chats/{docId} {
       allow read: if isAuth();
+
       allow create: if isAuth()
         && hasField('faction')
         && hasField('sender')
@@ -345,6 +379,7 @@ service cloud.firestore {
         && hasField('uid')
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.text.size() <= 200;
+
       allow update: if isAuth() && resource.data.uid == request.auth.uid;
       allow delete: if isAuth() && resource.data.uid == request.auth.uid;
     }

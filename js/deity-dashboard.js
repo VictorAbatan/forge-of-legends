@@ -211,6 +211,17 @@ async function loadFactionLeaders() {
     const fqItems = document.getElementById("fq-reward-items");
     if (fqItems) fqItems.closest("div")?.after(fqCompRow);
   }
+  // Inject fq-expires input if not already present
+  if (!document.getElementById("fq-expires")) {
+    const fqExpRow = document.createElement("div");
+    fqExpRow.style.cssText = "margin-bottom:10px";
+    fqExpRow.innerHTML = `
+      <label style="font-size:0.78rem;font-family:var(--font-mono);color:var(--text-dim);letter-spacing:0.05em;display:block;margin-bottom:4px">EXPIRES IN (HOURS, LEAVE BLANK = NO EXPIRY)</label>
+      <input id="fq-expires" type="number" min="1" placeholder="e.g. 72"
+        style="width:100%;box-sizing:border-box;background:var(--ink3);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text-light);font-size:0.85rem;font-family:var(--font-mono)">`;
+    const fqCompType = document.getElementById("fq-completion-type");
+    if (fqCompType) fqCompType.closest("div")?.after(fqExpRow);
+  }
   // Also load quests for this faction (submissions are awaited inside loadFactionMissions)
   loadFactionMissions();
 }
@@ -1545,6 +1556,8 @@ async function postFactionMission() {
   const exp      = parseInt(document.getElementById("fq-reward-exp")?.value) || 0;
   const itemsRaw       = document.getElementById("fq-reward-items")?.value.trim();
   const completionType = document.getElementById("fq-completion-type")?.value || "open";
+  const expiresInHrs   = parseInt(document.getElementById("fq-expires")?.value) || null;
+  const expiresAt      = expiresInHrs ? new Date(Date.now() + expiresInHrs * 3600000) : null;
   const errEl    = document.getElementById("faction-quest-error");
   const btn      = document.querySelector("button[onclick='doPostFactionQuest()']");
   const origText = btn?.textContent;
@@ -1572,6 +1585,7 @@ async function postFactionMission() {
       status: "active",
       completionType,
       completedBy: [],
+      expiresAt: expiresAt || null,
       createdAt: serverTimestamp(),
     });
     // Notify all faction members — appears to come from leader
@@ -1583,7 +1597,7 @@ async function postFactionMission() {
       read: false,
       timestamp: serverTimestamp(),
     })));
-    ["fq-title","fq-desc","fq-reward-gold","fq-reward-exp","fq-reward-items","fq-completion-type"].forEach(id => {
+    ["fq-title","fq-desc","fq-reward-gold","fq-reward-exp","fq-reward-items","fq-completion-type","fq-expires"].forEach(id => {
       const el = document.getElementById(id); if (el) el.value = "";
     });
     window.showToast(`Quest posted to ${faction}!`, "success");
@@ -4166,10 +4180,12 @@ function escapeHtml(str) {
 
 // ── @mention highlighter (mirrors player dashboard) ──────────────────────────
 function formatChatText(str) {
-  return escapeHtml(str).replace(
-    /@([A-Za-z0-9_][A-Za-z0-9_\- ]{1,31})(?=[^A-Za-z0-9_\- ]|$)/g,
-    '<span class="chat-mention">@$1</span>'
-  );
+  return escapeHtml(str)
+    .replace(/\n/g, '<br>')
+    .replace(
+      /@([A-Za-z0-9_][A-Za-z0-9_\- ]{1,31})(?=[^A-Za-z0-9_\- ]|$)/g,
+      '<span class="chat-mention">@$1</span>'
+    );
 }
 
 // ── Deity reply state & helpers ───────────────────────────────────────────────

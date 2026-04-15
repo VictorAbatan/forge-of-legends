@@ -1291,10 +1291,17 @@ function renderFactionQuestItems(snap, factionList) {
     return;
   }
 
+  const _fqNow = Date.now();
   snap.forEach(docSnap => {
     // Skip cards the player has dismissed
     if (window._dismissedFactionQuests?.has(docSnap.id)) return;
     const q = docSnap.data();
+    // ── Expiry check ──────────────────────────────────────────────────────────
+    const fqExpiresAt  = q.expiresAt?.toDate?.() || null;
+    const fqIsExpired  = fqExpiresAt && fqExpiresAt.getTime() < _fqNow;
+    const fqIsClosed   = q.status === 'closed' || fqIsExpired;
+    if (fqIsClosed) return; // hide expired/closed quests from the player list entirely
+    // ─────────────────────────────────────────────────────────────────────────
     let rewardStr = '';
     if (q.reward) {
       const parts = [];
@@ -1337,7 +1344,11 @@ function renderFactionQuestItems(snap, factionList) {
     const fqCtypeBadge = q.completionType === 'one_time'
       ? `<span class="sq-badge" style="background:rgba(160,60,60,0.2);color:#e09090;font-size:0.68rem;padding:2px 7px;border-radius:4px;margin-left:6px">🔒 One-time</span>`
       : '';
-    el.innerHTML = `<div class="faction-quest-title"><span class="faction-quest-bullet"></span>${q.title}${fqCtypeBadge}</div><div class="faction-quest-desc">${descHtml}</div><div class="faction-quest-reward">${rewardStr}</div><div class="faction-quest-submit-row">${submitHtml}</div>`;
+    let fqExpiryHtml = '';
+    if (fqExpiresAt) {
+      fqExpiryHtml = `<span class="sq-expiry" style="font-size:0.72rem;font-family:var(--font-mono);color:var(--text-dim);display:block;margin-top:4px">⏱ Expires ${fqExpiresAt.toLocaleString()}</span>`;
+    }
+    el.innerHTML = `<div class="faction-quest-title"><span class="faction-quest-bullet"></span>${q.title}${fqCtypeBadge}</div><div class="faction-quest-desc">${descHtml}</div><div class="faction-quest-reward">${rewardStr}</div>${fqExpiryHtml}<div class="faction-quest-submit-row">${submitHtml}</div>`;
     itemsWrap.appendChild(el);
   });
 }
@@ -1424,6 +1435,46 @@ window._submitFactionQuestForReview = async function(questId, evt) {
       } catch(e) { console.warn('Could not fetch activity snapshot:', e); }
 
       const proof = { location, what, witnesses: witnesses || null };
+
+      // ── One-time race-condition guard ─────────────────────────────────────
+      // Before writing, check if ANY other player already has a pending or
+      // approved submission for this quest. If so, the slot is already taken.
+      const _fqDoc = window._lastFactionQuestSnap?.docs?.find(d => d.id === questId);
+      // Guard: quest may have expired while the modal was open
+      const _fqExpAt = _fqDoc?.data()?.expiresAt?.toDate?.() || null;
+      if (_fqExpAt && _fqExpAt.getTime() < Date.now()) {
+        btn.disabled = false; btn.textContent = '📜 Submit';
+        errEl.textContent = '⏱ This quest has already expired.';
+        errEl.style.display = 'block';
+        return;
+      }
+      if (_fqDoc?.data()?.completionType === 'one_time') {
+        const rivalSnap = await getDocs(query(
+          collection(db, 'factionQuestSubmissions'),
+          where('questId', '==', questId),
+          where('status', 'in', ['pending', 'approved'])
+        ));
+        const rivalTaken = rivalSnap.docs.some(d => d.data().uid !== _uid);
+        if (rivalTaken) {
+          btn.disabled = false; btn.textContent = '📜 Submit';
+          errEl.textContent = '🔒 This quest was just claimed by another player.';
+          errEl.style.display = 'block';
+          // Refresh local render so the card locks immediately
+          if (_fqDoc) {
+            const liveSnap = await getDocs(query(collection(db, 'factionMissions'), where('__name__', '==', questId)));
+            if (!liveSnap.empty) {
+              const liveData = liveSnap.docs[0].data();
+              if (!liveData.completedBy?.length) {
+                await updateDoc(doc(db, 'factionMissions', questId), {
+                  completedBy: arrayUnion({ uid: rivalSnap.docs.find(d => d.data().uid !== _uid).data().uid, playerName: '?', completedAt: new Date() })
+                }).catch(() => {});
+              }
+            }
+          }
+          return;
+        }
+      }
+      // ─────────────────────────────────────────────────────────────────────
 
       const existingQ = query(
         collection(db, 'factionQuestSubmissions'),
@@ -5312,6 +5363,31 @@ window._submitQuestForReview = async function(questId, questTitle) {
 
       const proof = { location, what, witnesses: witnesses || null };
 
+      // ── One-time race-condition guard ─────────────────────────────────────
+      // Before writing, check if ANY other player already has a pending or
+      // approved submission for this quest. If so, the slot is already taken.
+      const _sqLocal = STORY_QUESTS.find(q => q.id === questId);
+      if (_sqLocal?.completionType === 'one_time') {
+        const rivalSnap = await getDocs(query(
+          collection(db, 'questSubmissions'),
+          where('questId', '==', questId),
+          where('status', 'in', ['pending', 'approved'])
+        ));
+        const rivalTaken = rivalSnap.docs.some(d => d.data().uid !== _uid);
+        if (rivalTaken) {
+          btn.disabled = false; btn.textContent = '📜 Submit';
+          errEl.textContent = '🔒 This quest was just claimed by another player.';
+          errEl.style.display = 'block';
+          // Mark lockedOut in the local STORY_QUESTS entry so the card closes on next render
+          _sqLocal.lockedOut = true;
+          _sqLocal.status = 'closed';
+          _renderStoryQuests();
+          modal.remove();
+          return;
+        }
+      }
+      // ─────────────────────────────────────────────────────────────────────
+
       const existingQ = query(
         collection(db, 'questSubmissions'),
         where('uid', '==', _uid),
@@ -5973,8 +6049,10 @@ function set(id, val)    { const e = document.getElementById(id); if (e) e.textC
 function css(id, p, v)   { const e = document.getElementById(id); if (e) e.style[p] = v; }
 function escapeHtml(str) { const d = document.createElement("div"); d.textContent = str; return d.innerHTML; }
 function formatChatText(str) {
-  return escapeHtml(str).replace(/@([A-Za-z0-9_][A-Za-z0-9_\- ]{1,31})(?=[^A-Za-z0-9_\- ]|$)/g,
-    '<span class="chat-mention">@$1</span>');
+  return escapeHtml(str)
+    .replace(/\n/g, '<br>')
+    .replace(/@([A-Za-z0-9_][A-Za-z0-9_\- ]{1,31})(?=[^A-Za-z0-9_\- ]|$)/g,
+      '<span class="chat-mention">@$1</span>');
 }
 function formatTime(date) {
   const h = date.getHours(), m = date.getMinutes();
@@ -6377,6 +6455,7 @@ function renderFactionImmersiveView(faction, leaderData) {
           <div class="fiv-motto">&ldquo;${faction.motto}&rdquo;</div>
           <div class="fiv-alignment">${faction.alignment}</div>
         </div>
+        <button class="faction-leave-btn faction-leave-btn--header" onclick="window._confirmLeaveFaction('${faction.name}')">Leave Faction</button>
       </div>
 
       <!-- Two-column: info + leader -->
@@ -6403,10 +6482,6 @@ function renderFactionImmersiveView(faction, leaderData) {
       <!-- Chat -->
       <div id="faction-chat-section" class="fiv-section"></div>
 
-      <!-- Leave -->
-      <div class="fiv-footer">
-        <button class="faction-leave-btn" onclick="window.leaveFaction('${faction.name}')">Leave Faction</button>
-      </div>
     </div>
   `;
   loadFactionMembers(faction.name, leaderName);
@@ -6826,6 +6901,25 @@ window.assignLeaveTask = async function(memberUid) {
 };
 
 // Leave a faction
+window._confirmLeaveFaction = function(factionName) {
+  // Remove any existing modal first
+  document.getElementById('faction-leave-confirm-modal')?.remove();
+  const modal = document.createElement('div');
+  modal.id = 'faction-leave-confirm-modal';
+  modal.className = 'ink-confirm-overlay';
+  modal.innerHTML = `
+    <div class="ink-confirm-box">
+      <div class="ink-confirm-title">Leave Faction?</div>
+      <div class="ink-confirm-msg">Are you sure you want to leave <b>${factionName}</b>? This may have consequences depending on your standing.</div>
+      <div class="ink-confirm-btns">
+        <button class="ink-confirm-cancel" onclick="document.getElementById('faction-leave-confirm-modal').remove()">Cancel</button>
+        <button class="ink-confirm-ok danger-btn" onclick="document.getElementById('faction-leave-confirm-modal').remove(); window.leaveFaction('${factionName}')">Leave</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+};
+
 window.leaveFaction = async function(factionName) {
   if (!_charData) return;
   if (_charData.faction !== factionName) { window.showToast("Not in this faction.", "error"); return; }
