@@ -1617,7 +1617,7 @@ window._renderFactionSubmissionsFor = function(q) {
   if (!subs.length) return `<div class="dq-sub-empty">No submissions yet.</div>`;
   return subs.map(s => {
     const ts = s.submittedAt?.toDate ? s.submittedAt.toDate().toLocaleString() : '—';
-    const statusColor = { pending: '#c9a84c', approved: '#7ec87e', rejected: '#c08080' }[s.status] || '#888';
+    const statusColor = { pending: '#c9a84c', approved: '#7ec87e', rejected: '#c08080', punished: '#b06020' }[s.status] || '#888';
     const proof = s.proof || {};
     const actSnap = s.activitySnapshot || [];
     return `<div class="dq-sub-item" id="dqsubitem-fq-${s.id}">
@@ -1640,15 +1640,12 @@ window._renderFactionSubmissionsFor = function(q) {
         ${actSnap.map(e => `<div class="dq-sub-activity-item">${e}</div>`).join('')}
       </div>` : '<div class="dq-sub-proof-row" style="color:var(--text-dim);font-style:italic">No activity snapshot available.</div>'}
 
-      ${s.status === 'pending' ? `
+      ${(s.status === 'pending' || s.status === 'punished') ? `
       <div class="dq-sub-actions">
         <button class="deity-mini-btn success" onclick="window._approveFactionSubmission('${s.id}','${q.id}')">✓ Approve</button>
         <button class="deity-mini-btn danger"  onclick="window._rejectFactionSubmission('${s.id}')">✕ Reject</button>
-        <button class="deity-mini-btn punish"  onclick="window._openPunishModal('${s.uid||s.id}','${(s.playerName||'?').replace(/'/g,"\'")}')">⚖️ Punish</button>
-      </div>` : `
-      <div class="dq-sub-actions" style="margin-top:6px">
-        <button class="deity-mini-btn punish" onclick="window._openPunishModal('${s.uid||s.id}','${(s.playerName||'?').replace(/'/g,"\'")}')">⚖️ Punish</button>
-      </div>`}
+        ${s.status === 'pending' ? `<button class="deity-mini-btn punish" onclick="window._openPunishModal('${s.uid||s.id}','${(s.playerName||'?').replace(/'/g,"\'")}','${s.id}','factionQuestSubmissions')">⚖️ Punish</button>` : ''}
+      </div>` : ''}
     </div>`;
   }).join('');
 };
@@ -2027,7 +2024,7 @@ window._renderSubmissionsFor = function(q) {
   if (!subs.length) return `<div class="dq-sub-empty">No submissions yet.</div>`;
   return subs.map(s => {
     const ts = s.submittedAt?.toDate ? s.submittedAt.toDate().toLocaleString() : '—';
-    const statusColor = { pending: '#c9a84c', approved: '#7ec87e', rejected: '#c08080' }[s.status] || '#888';
+    const statusColor = { pending: '#c9a84c', approved: '#7ec87e', rejected: '#c08080', punished: '#b06020' }[s.status] || '#888';
     const proof = s.proof || {};
     const actSnap = s.activitySnapshot || [];
     return `<div class="dq-sub-item" id="dqsubitem-${s.id}">
@@ -2050,15 +2047,12 @@ window._renderSubmissionsFor = function(q) {
         ${actSnap.map(e => `<div class="dq-sub-activity-item">${e}</div>`).join('')}
       </div>` : '<div class="dq-sub-proof-row" style="color:var(--text-dim);font-style:italic">No activity snapshot available.</div>'}
 
-      ${s.status === 'pending' ? `
+      ${(s.status === 'pending' || s.status === 'punished') ? `
       <div class="dq-sub-actions">
         <button class="deity-mini-btn success" onclick="window._approveSubmission('${s.id}','${q.id}')">✓ Approve</button>
         <button class="deity-mini-btn danger"  onclick="window._rejectSubmission('${s.id}')">✕ Reject</button>
-        <button class="deity-mini-btn punish"  onclick="window._openPunishModal('${s.uid||s.id}','${(s.playerName||'?').replace(/'/g,"\\'")}')">⚖️ Punish</button>
-      </div>` : `
-      <div class="dq-sub-actions" style="margin-top:6px">
-        <button class="deity-mini-btn punish" onclick="window._openPunishModal('${s.uid||s.id}','${(s.playerName||'?').replace(/'/g,"\\'")}')">⚖️ Punish</button>
-      </div>`}
+        ${s.status === 'pending' ? `<button class="deity-mini-btn punish" onclick="window._openPunishModal('${s.uid||s.id}','${(s.playerName||'?').replace(/'/g,"\\'")}','${s.id}','questSubmissions')">⚖️ Punish</button>` : ''}
+      </div>` : ''}
     </div>`;
   }).join('');
 };
@@ -2204,7 +2198,7 @@ window._endQuest = async id => {
 // ═══════════════════════════════════════════════════
 //  PUNISH SYSTEM
 // ═══════════════════════════════════════════════════
-window._openPunishModal = async function(playerUid, playerName) {
+window._openPunishModal = async function(playerUid, playerName, subId, subCollection) {
   document.getElementById('punish-modal')?.remove();
 
   // Fetch player's current inventory and gold
@@ -2259,16 +2253,19 @@ window._openPunishModal = async function(playerUid, playerName) {
 
       <div class="form-error" id="punish-error" style="margin-bottom:8px"></div>
       <div style="display:flex;gap:10px">
-        <button class="btn-primary danger-btn" onclick="window._executePunish('${playerUid}','${playerName.replace(/'/g,"\'")}')">⚖️ EXECUTE PUNISHMENT</button>
+        <button class="btn-primary danger-btn" id="punish-execute-btn">⚖️ EXECUTE PUNISHMENT</button>
         <button class="btn-secondary" onclick="document.getElementById('punish-modal').remove()">CANCEL</button>
       </div>
     </div>`;
 
   document.body.appendChild(modal);
   modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  modal.querySelector('#punish-execute-btn').addEventListener('click', () => window._executePunish(playerUid, playerName));
 
-  // Store current inv on window for execute step
+  // Store context for execute step
   window._punishCurrentInv = currentInv;
+  window._punishSubId = subId || null;
+  window._punishSubCollection = subCollection || null;
 };
 
 window._executePunish = async function(playerUid, playerName) {
@@ -2323,6 +2320,21 @@ window._executePunish = async function(playerUid, playerName) {
       timestamp: serverTimestamp(),
     });
 
+    // Stamp 'punished' on only this specific submission (not all player submissions)
+    if (window._punishSubId && window._punishSubCollection) {
+      try {
+        await updateDoc(doc(db, window._punishSubCollection, window._punishSubId), {
+          status: 'punished',
+          punishedAt: serverTimestamp(),
+        });
+        // Refresh the relevant quest list
+        if (window._punishSubCollection === 'factionQuestSubmissions') {
+          window._loadFactionQuestSubmissions?.();
+        } else {
+          window._loadDeityQuestSubmissions?.();
+        }
+      } catch(e) { console.warn('Could not stamp punished on submission:', e); }
+    }
     document.getElementById('punish-modal')?.remove();
     window.showToast(`${playerName} has been punished.`, 'success');
   } catch(e) {
