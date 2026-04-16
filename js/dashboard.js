@@ -7478,7 +7478,7 @@ async function _clientBattleTurn(action, skillName) {
       dotActive: newTurns > 0, dotTurns: newTurns
     });
     if (playerHp <= 0) {
-      const halfInv = (char.inventory||[]).slice(0, Math.floor((char.inventory||[]).length/2));
+      const halfInv = (char.inventory||[]).map(item => ({ ...item, qty: Math.max(1, Math.floor((item.qty ?? 1) / 2)) }));
       const resurrectAt = new Date(Date.now() + 24*60*60*1000);
       await updateDoc(doc(db, "characters", uid), { hp:0, inventory:halfInv, resurrectAt, isDead:true });
       await updateDoc(doc(db, "battles", uid), { status:"defeat" });
@@ -7644,7 +7644,7 @@ async function _clientBattleTurn(action, skillName) {
 
   // ── Defeat ──
   if (playerHp <= 0) {
-    const halfInv = (char.inventory||[]).slice(0, Math.floor((char.inventory||[]).length/2));
+    const halfInv = (char.inventory||[]).map(item => ({ ...item, qty: Math.max(1, Math.floor((item.qty ?? 1) / 2)) }));
     const resurrectAt = new Date(Date.now() + 24*60*60*1000);
     await updateDoc(doc(db, "characters", uid), { hp:0, inventory:halfInv, resurrectAt, isDead:true });
     await updateDoc(doc(db, "battles", uid), { status:"defeat" });
@@ -7770,7 +7770,7 @@ async function _clientAutoBattle(grade, maxTurns=15, zoneName=null) {
     logActivity('⚔️', `<b>Defeated ${monster.name}</b>${isElite ? ' <span style="color:#e8d070">[Elite]</span>' : ''} · +${drops.gold}💰 +${expGain} EXP`, isElite ? '#e8d070' : '#e05555');
     return { status:"victory", log, updates, drops, expGain, leveledUp, newLevel, newRank };
   } else if (status === "defeat") {
-    const halfInv = (char.inventory||[]).slice(0, Math.floor((char.inventory||[]).length/2));
+    const halfInv = (char.inventory||[]).map(item => ({ ...item, qty: Math.max(1, Math.floor((item.qty ?? 1) / 2)) }));
     const resurrectAt = new Date(Date.now() + 24*60*60*1000);
     Object.assign(updates, { hp:0, inventory:halfInv, resurrectAt, isDead:true });
     log.push("💀 You were defeated in auto-battle!");
@@ -8294,7 +8294,7 @@ function _launchAutoBattleLoop(grade, zoneName) {
     if (playerHp <= 0) {
       addBattleLog('💀 You were defeated during auto-battle!');
       _autoBattleRunning = false;
-      const halfInv     = (char.inventory||[]).slice(0, Math.floor((char.inventory||[]).length / 2));
+      const halfInv     = (char.inventory||[]).map(item => ({ ...item, qty: Math.max(1, Math.floor((item.qty ?? 1) / 2)) }));
       const resurrectAt = new Date(Date.now() + 24*60*60*1000);
       await updateDoc(doc(db, 'characters', _uid), { hp:0, inventory:halfInv, resurrectAt, isDead:true });
       await refreshCharData();
@@ -8677,6 +8677,38 @@ window._resurrect = async function() {
   } catch(err) {
     window.showToast(err.message || 'Cannot resurrect yet.', 'error');
     btn.disabled = false; btn.textContent = 'RESURRECT';
+  }
+};
+
+// ── Admin/Beta bypass: instantly revive a dead player (console use: adminRevivePlayer()) ──
+window.adminRevivePlayer = async function(targetUid) {
+  const uid = targetUid || _uid;
+  if (!uid) { window.showToast('No UID available.', 'error'); return; }
+  try {
+    const charRef = doc(db, 'characters', uid);
+    const snap = await getDoc(charRef);
+    if (!snap.exists()) { window.showToast('Character not found.', 'error'); return; }
+    const data = snap.data();
+    if (!data.isDead) { window.showToast('Player is not dead.', 'info'); return; }
+    await updateDoc(charRef, {
+      isDead: false,
+      hp: data.hpMax || 100,
+      mana: data.manaMax || 50,
+      resurrectAt: null
+    });
+    if (uid === _uid) {
+      await refreshCharData();
+      const banner = document.getElementById('battle-dead-banner');
+      const zoneArea = document.getElementById('battle-zone-select');
+      if (banner)   banner.style.display   = 'none';
+      if (zoneArea) zoneArea.style.display = 'block';
+      updateZoneLocks();
+    }
+    window.showToast(`✅ Admin revive applied${targetUid ? ' for ' + uid : ''}.`, 'success');
+    console.log(`[ADMIN] Revived character: ${uid}`);
+  } catch(err) {
+    window.showToast('Admin revive failed: ' + err.message, 'error');
+    console.error('[ADMIN] Revive error:', err);
   }
 };
  
