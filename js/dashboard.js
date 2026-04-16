@@ -2402,6 +2402,7 @@ export function initDashboard() {
       window.startBestowWatcher();
       window.startFaithWatcher();
       populateDashboard(_charData);
+      _initPassiveRegen(); // begin offline catch-up + live regen interval
 
       // Show Deity View button if user has deity role
       try {
@@ -10509,6 +10510,7 @@ function renderPotionRecipes(type) {
 
 // Initialize the new crafting UI
 function initCrafting() {
+  _renderRegenInCrafting(); // show passive regen rates at top of crafting panel
   // All accordion panels start closed by default
   document.querySelectorAll('.accordion-panel').forEach(p => p.style.display = 'none');
   document.querySelectorAll('.accordion-arrow').forEach(a => a.textContent = '▼');
@@ -10815,6 +10817,141 @@ async function refreshCharData() {
       }
     }
   } catch(e) { console.error(e); }
+}
+
+// ═══════════════════════════════════════════════════
+//  PASSIVE HP / MANA REGEN  (timestamp-based + client interval)
+//  Rules:
+//   • +10 HP per minute, +5 Mana per minute, capped at hpMax / manaMax
+//   • No regen while dead, or while an auto-battle is running
+//   • On login: calculate minutes elapsed since lastActive, apply bulk catch-up
+//   • While online: client interval ticks every 60 s for the same rates
+//   • lastActive is written to Firestore every tick and on login
+// ═══════════════════════════════════════════════════
+const _REGEN_HP_PER_MIN   = 10;
+const _REGEN_MANA_PER_MIN =  5;
+let   _regenInterval      = null; // single interval handle — never stack
+
+/** Apply regen for `minutes` elapsed, return updated { hp, mana } (clamped to max). */
+function _calcPassiveRegen(hp, mana, hpMax, manaMax, minutes) {
+  if (minutes <= 0) return { hp, mana };
+  const newHp   = Math.min(hpMax,   hp   + Math.floor(_REGEN_HP_PER_MIN   * minutes));
+  const newMana = Math.min(manaMax, mana + Math.floor(_REGEN_MANA_PER_MIN * minutes));
+  return { hp: newHp, mana: newMana };
+}
+
+/** Returns true when regen should be blocked. */
+function _regenBlocked() {
+  return !!(_charData?.isDead) || !!_autoBattleRunning;
+}
+
+/**
+ * Called once on login (after _charData is loaded).
+ * Calculates offline catch-up from lastActive, writes back to Firestore,
+ * then starts the live interval.
+ */
+async function _initPassiveRegen() {
+  if (!_uid || !_charData) return;
+
+  // Cleanup any stale interval from a previous session (hot-reload guard)
+  if (_regenInterval) { clearInterval(_regenInterval); _regenInterval = null; }
+
+  if (!_regenBlocked()) {
+    const now          = Date.now();
+    const lastActive   = _charData.lastActive ?? now; // ms epoch stored in Firestore
+    const elapsedMs    = Math.max(0, now - lastActive);
+    const elapsedMins  = elapsedMs / 60000;
+
+    if (elapsedMins >= 1) {
+      const hpMax   = _charData.hpMax   ?? 100;
+      const manaMax = _charData.manaMax ?? 50;
+      const { hp: newHp, mana: newMana } = _calcPassiveRegen(
+        _charData.hp   ?? hpMax,
+        _charData.mana ?? manaMax,
+        hpMax, manaMax,
+        elapsedMins
+      );
+      const regenHp   = newHp   - (_charData.hp   ?? hpMax);
+      const regenMana = newMana - (_charData.mana ?? manaMax);
+
+      if (regenHp > 0 || regenMana > 0) {
+        _charData.hp   = newHp;
+        _charData.mana = newMana;
+        window._charData = _charData;
+        _syncAllDisplays(_charData);
+        try {
+          await updateDoc(doc(db, 'characters', _uid), {
+            hp: newHp, mana: newMana, lastActive: now
+          });
+        } catch(e) { console.warn('[Regen] Catch-up write failed:', e); }
+        const mins = Math.floor(elapsedMins);
+        window.showToast(
+          `💤 Rested for ${mins} min — +${regenHp} HP, +${regenMana} Mana`,
+          'success'
+        );
+      } else {
+        // Still update lastActive even if already at max
+        try {
+          await updateDoc(doc(db, 'characters', _uid), { lastActive: now });
+        } catch(e) {}
+      }
+    } else {
+      // Less than a minute — just stamp lastActive
+      try {
+        await updateDoc(doc(db, 'characters', _uid), { lastActive: now });
+      } catch(e) {}
+    }
+  }
+
+  // Start live tick — fires every 60 s while online
+  _regenInterval = setInterval(_regenTick, 60000);
+}
+
+/** One live regen tick (+10 HP, +5 Mana). Writes to Firestore and updates UI. */
+async function _regenTick() {
+  if (!_uid || !_charData) return;
+  if (_regenBlocked()) return; // skip ticks during battle or while dead
+  const hpMax   = _charData.hpMax   ?? 100;
+  const manaMax = _charData.manaMax ?? 50;
+  const curHp   = _charData.hp      ?? hpMax;
+  const curMana = _charData.mana    ?? manaMax;
+
+  // Nothing to do if already full
+  if (curHp >= hpMax && curMana >= manaMax) {
+    // Still stamp lastActive so offline catch-up stays accurate
+    try { await updateDoc(doc(db, 'characters', _uid), { lastActive: Date.now() }); } catch(e) {}
+    return;
+  }
+
+  const newHp   = Math.min(hpMax,   curHp   + _REGEN_HP_PER_MIN);
+  const newMana = Math.min(manaMax, curMana + _REGEN_MANA_PER_MIN);
+  _charData.hp   = newHp;
+  _charData.mana = newMana;
+  window._charData = _charData;
+  _syncAllDisplays(_charData);
+  try {
+    await updateDoc(doc(db, 'characters', _uid), {
+      hp: newHp, mana: newMana, lastActive: Date.now()
+    });
+  } catch(e) { console.warn('[Regen] Tick write failed:', e); }
+}
+
+/** Inject passive regen rates into the crafting panel stat block. */
+function _renderRegenInCrafting() {
+  const el = document.getElementById('crafting-regen-info');
+  if (!el) return; // element not present in this build yet — safe no-op
+  el.innerHTML = `
+    <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:center;padding:10px 14px;
+      background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:10px;
+      font-size:0.82rem;color:var(--text-dim);margin-bottom:12px;">
+      <span style="color:var(--gold);font-weight:700;font-size:0.85rem;letter-spacing:0.04em">
+        ⏳ PASSIVE REGEN
+      </span>
+      <span>❤️ <b style="color:#e05555">+${_REGEN_HP_PER_MIN} HP</b> / min</span>
+      <span>💠 <b style="color:#5b9fe0">+${_REGEN_MANA_PER_MIN} Mana</b> / min</span>
+      <span style="color:var(--ash)">Max: <b>${_charData?.hpMax ?? 100} HP</b> · <b>${_charData?.manaMax ?? 50} Mana</b></span>
+      <span style="color:var(--ash);font-style:italic">Paused during battle</span>
+    </div>`;
 }
 
 // Hook into panel switching for guild and crafting init
