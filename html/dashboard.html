@@ -722,7 +722,19 @@ button,
 
     <!-- MARKET -->
     <div class="panel" id="panel-market">
-      <div class="panel-header"><h2>MARKETPLACE</h2><p>Buy from NPC vendors or trade with other players</p></div>
+      <div class="panel-header">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <div>
+            <h2>MARKETPLACE</h2>
+            <p>Buy from NPC vendors or trade with other players</p>
+          </div>
+          <div class="market-gold-badge">
+            <span class="market-gold-icon">🪙</span>
+            <span class="market-gold-label">YOUR GOLD</span>
+            <span class="market-gold-value" id="market-gold-display">—</span>
+          </div>
+        </div>
+      </div>
       <div class="market-tabs">
         <button class="market-tab active" onclick="switchMarketTab(this,'npc')">NPC Vendors</button>
         <button class="market-tab" onclick="switchMarketTab(this,'player')">Player Market</button>
@@ -1107,6 +1119,14 @@ button,
                 <div class="battle-bar"><div class="battle-bar-fill mp-fill" id="player-mp-fill" style="width:100%"></div></div>
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- Quick-use potion strip -->
+        <div class="battle-potion-wrap">
+          <div class="battle-potion-label">⚗️ QUICK USE</div>
+          <div class="battle-potion-strip" id="battle-potion-strip">
+            <span style="font-size:0.72rem;color:var(--ash);font-style:italic">No potions in inventory</span>
           </div>
         </div>
 

@@ -3506,6 +3506,8 @@ window.useItem = async function(itemName, kind) {
   window.showToast(toastMsg, 'success');
   await _incrementQuest(kind, 1);
   logActivity('🧪', `Used <b>${itemName}</b>.`, '#888');
+  // Re-render potion strip if battle is active
+  if (document.getElementById('battle-arena')?.style.display !== 'none') _renderBattlePotionStrip();
 };
 
 // ═══════════════════════════════════════════════════
@@ -8146,6 +8148,7 @@ window._startAutoBattle = async function(grade, zoneName) {
 // ── Live auto-battle loop — one monster at a time, real-time bars ──
 let _autoBattleRunning   = false;
 let _autoBattleForceMelee = false;
+let _autoBattlePotionPending = false; // set true when a potion is used mid-battle
 
 window._toggleAutoBattleMelee = function() {
   _autoBattleForceMelee = !_autoBattleForceMelee;
@@ -8205,6 +8208,7 @@ function _launchAutoBattleLoop(grade, zoneName) {
       : `<span style="font-size:2.2rem">${av || '⚔️'}</span>`;
   }
   updateBattleBars(0, 1, playerHp, playerHpMax, playerMana, playerManaMax);
+  _renderBattlePotionStrip(); // show potions at battle start
 
   const logEl = document.getElementById('battle-log');
   if (logEl) logEl.innerHTML = '';
@@ -8231,6 +8235,12 @@ function _launchAutoBattleLoop(grade, zoneName) {
 
     // Combat loop for this monster
     while (monHp > 0 && playerHp > 0 && _autoBattleRunning) {
+      // Pull potion heal from _charData only when a potion was actually just used
+      if (_autoBattlePotionPending) {
+        playerHp   = Math.max(playerHp,   _charData?.hp   ?? playerHp);
+        playerMana = Math.max(playerMana, _charData?.mana ?? playerMana);
+        _autoBattlePotionPending = false;
+      }
       // Passive mana regen per tick
       playerMana = Math.min(playerManaMax, playerMana + Math.floor(playerManaMax * 0.05));
 
@@ -8271,6 +8281,9 @@ function _launchAutoBattleLoop(grade, zoneName) {
       }
 
       updateBattleBars(monHp, monster.hp, playerHp, playerHpMax, playerMana, playerManaMax);
+      // Keep live values accessible so _useBattlePotion can sync _charData before healing
+      window._autoBattleLiveHp   = playerHp;
+      window._autoBattleLiveMana = playerMana;
       await new Promise(r => setTimeout(r, 420));
     }
 
@@ -8353,6 +8366,8 @@ window._stopAutoBattle = function() {
 };
 
 async function _stopAutoBattleCleanup(playerHp, playerMana) {
+  window._autoBattleLiveHp   = undefined;
+  window._autoBattleLiveMana = undefined;
   document.getElementById('auto-battle-hud').style.display    = 'none';
   document.getElementById('auto-battle-bar').style.display    = 'none';
   document.getElementById('battle-arena').style.display       = 'none';
@@ -8415,6 +8430,7 @@ function showBattleArena(monster, playerHp, playerMana) {
   document.getElementById('battle-result').style.display      = 'none';
   document.getElementById('battle-actions').style.display     = 'flex';
   document.getElementById('auto-battle-bar').style.display    = 'none';
+  _renderBattlePotionStrip();
 
   // Re-enable battle action buttons for new battle
   const btns = document.querySelectorAll('.battle-action-btn');
@@ -8574,6 +8590,58 @@ function showBattleResult(d) {
   }
 }
  
+// ── Battle quick-use potion strip ───────────────────────────────────────────
+function _renderBattlePotionStrip() {
+  const strip = document.getElementById('battle-potion-strip');
+  if (!strip || !_charData) return;
+  const inv = _charData.inventory || [];
+
+  // Collect HP and Mana potions from inventory
+  const hpPotions   = inv.filter(i => i.name && (i.name.includes('HP Potion') || i.name.includes('Health Potion')));
+  const manaPotions = inv.filter(i => i.name && i.name.includes('Mana Potion'));
+  const allPotions  = [...hpPotions, ...manaPotions];
+
+  if (!allPotions.length) {
+    strip.innerHTML = `<span style="font-size:0.72rem;color:var(--ash);font-style:italic">No potions in inventory</span>`;
+    return;
+  }
+
+  strip.innerHTML = allPotions.map(item => {
+    const isHp   = item.name.includes('HP Potion') || item.name.includes('Health Potion');
+    const icon   = isHp ? '🫧' : '💠';
+    const col    = isHp ? '#e05555' : '#5b9fe0';
+    const pct    = item.name.includes('Minor') ? '20%' : item.name.includes('Greater') ? '70%' : '40%';
+    return `<button class="battle-potion-btn" title="${item.name} — restores ${pct} ${isHp?'HP':'Mana'} (×${item.qty||1})"
+      onclick="window._useBattlePotion('${item.name.replace(/'/g,"\'")}','${isHp?'hp':'mana'}')"
+      style="border-color:${col}44;color:${col}">
+      ${icon}
+      <span class="bp-name">${item.name.replace(' Potion','').replace(' Health','')}</span>
+      <span class="bp-qty">×${item.qty||1}</span>
+    </button>`;
+  }).join('');
+}
+
+// Use a potion from the battle strip — calls existing useItem then re-renders strip + battle bars
+window._useBattlePotion = async function(itemName, kind) {
+  // Sync the live battle HP/Mana into _charData before useItem reads it,
+  // otherwise useItem sees stale (often max) values and heals for 0.
+  if (_charData && window._autoBattleLiveHp !== undefined)  _charData.hp   = window._autoBattleLiveHp;
+  if (_charData && window._autoBattleLiveMana !== undefined) _charData.mana = window._autoBattleLiveMana;
+  await window.useItem(itemName, 'potion');
+  _autoBattlePotionPending = true; // signal the auto-battle loop to pick up the healed values
+  _renderBattlePotionStrip();
+  // Also update the live battle bars with current HP/Mana from _charData
+  const curHp   = _charData?.hp   ?? 0;
+  const curMana = _charData?.mana ?? 0;
+  const hpMax   = _charData?.hpMax   || 100;
+  const manaMax = _charData?.manaMax || 50;
+  // Update player bars — monster bars unchanged (pass current values from DOM)
+  const monHpEl  = document.getElementById('monster-hp-text');
+  const monHpStr = monHpEl?.textContent || '0 / 100';
+  const [monCur, monMax] = monHpStr.split('/').map(s => parseInt(s.trim()) || 0);
+  updateBattleBars(monCur, monMax || 1, curHp, hpMax, curMana, manaMax);
+};
+
 function updateBattleBars(monHp, monMax, plHp, plMax, plMana, plManaMax) {
   const monPct  = Math.max(0, Math.round((monHp  / monMax)    * 100));
   const plPct   = Math.max(0, Math.round((plHp   / plMax)     * 100));
@@ -10703,6 +10771,7 @@ function _syncAllDisplays(c) {
   const cont    = contRaw ? contRaw.toUpperCase() : '';
   // Overview cards
   set('stat-gold',      gold);
+  set('market-gold-display', gold); // Market panel gold display
   set('stat-hp',        hp);
   set('stat-mana',      mana);
   set('stat-level',     `Level ${level}`);
@@ -10756,6 +10825,7 @@ window._onPanelSwitch = function(name) {
   if (name === 'battle')   { checkDeathState(); updateZoneLocks(); }
   if (name === 'crafting') initCrafting();
   if (name === 'guild')    initGuild();
+  if (name === 'market')   _syncAllDisplays(_charData); // keep gold display fresh on panel open
   if (name === 'map')      { window._initLayeredMap?.(); }
   if (name === 'activity') renderActivityFeed();
   if (name === 'companion') window.renderCompanionPanel?.();
