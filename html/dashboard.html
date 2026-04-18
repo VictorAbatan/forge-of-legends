@@ -146,6 +146,18 @@ button,
   </div>
 </div>
 
+<!-- ITEM STAT MODAL -->
+<div class="confirm-modal" id="item-stat-modal" style="display:none" onclick="if(event.target===this)closeItemStatModal()">
+  <div class="confirm-modal-box" style="max-width:320px">
+    <div class="confirm-modal-icon" id="istat-icon">📦</div>
+    <div class="confirm-modal-title" id="istat-name">Item</div>
+    <div id="istat-body" style="margin:12px 0 4px;text-align:left"></div>
+    <div class="confirm-modal-actions" style="margin-top:14px">
+      <button class="btn-secondary" onclick="closeItemStatModal()">CLOSE</button>
+    </div>
+  </div>
+</div>
+
 <!-- SELL MODAL -->
 <div class="sell-modal" id="sell-modal" style="display:none">
   <div class="sell-modal-box">
@@ -411,6 +423,8 @@ button,
               <tr><td>EXP</td><td id="s-xp">0 / 100</td></tr>
               <tr><td>Faith Level</td><td id="s-faith">0</td></tr>
               <tr><td>Reputation</td><td id="s-rep">0</td></tr>
+              <!-- Passive regen — injected by _renderRegenInCrafting() on panel open -->
+              <tbody id="char-regen-info"></tbody>
             </table>
           </div>
           <div class="card" style="margin-bottom:12px">
@@ -745,30 +759,30 @@ button,
           <div class="vendor-card">
             <div class="vendor-card-header"><span class="vendor-icon">🔨</span><div><div class="vendor-name">BLACKSMITH</div><div class="vendor-role">Converts ores into gear</div></div></div>
             <div class="vendor-items">
-              <div class="vendor-item"><span class="vendor-item-name">Rusted Greatsword</span><span class="vendor-item-price">220 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Rusted Greatsword','⚔️',220,'weapon')">BUY</button></div>
-              <div class="vendor-item"><span class="vendor-item-name">Iron Dagger</span><span class="vendor-item-price">200 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Iron Dagger','🗡️',200,'weapon')">BUY</button></div>
-              <div class="vendor-item"><span class="vendor-item-name">Crude Bow</span><span class="vendor-item-price">210 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Crude Bow','🏹',210,'weapon')">BUY</button></div>
-              <div class="vendor-item"><span class="vendor-item-name">Leather Vest</span><span class="vendor-item-price">200 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Leather Vest','🥋',200,'armor')">BUY</button></div>
-              <div class="vendor-item"><span class="vendor-item-name">Iron Plate</span><span class="vendor-item-price">230 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Iron Plate','🛡️',230,'armor')">BUY</button></div>
+              <div class="vendor-item"><span class="vendor-item-name">Rusted Greatsword</span><span class="vendor-item-price">220 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Rusted Greatsword')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Rusted Greatsword','⚔️',220,'weapon')">BUY</button></div></div>
+              <div class="vendor-item"><span class="vendor-item-name">Iron Dagger</span><span class="vendor-item-price">200 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Iron Dagger')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Iron Dagger','🗡️',200,'weapon')">BUY</button></div></div>
+              <div class="vendor-item"><span class="vendor-item-name">Crude Bow</span><span class="vendor-item-price">210 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Crude Bow')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Crude Bow','🏹',210,'weapon')">BUY</button></div></div>
+              <div class="vendor-item"><span class="vendor-item-name">Leather Vest</span><span class="vendor-item-price">200 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Leather Vest')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Leather Vest','🥋',200,'armor')">BUY</button></div></div>
+              <div class="vendor-item"><span class="vendor-item-name">Iron Plate</span><span class="vendor-item-price">230 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Iron Plate')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Iron Plate','🛡️',230,'armor')">BUY</button></div></div>
             </div>
           </div>
           <div class="vendor-card">
             <div class="vendor-card-header"><span class="vendor-icon">⚗️</span><div><div class="vendor-name">ALCHEMIST</div><div class="vendor-role">Potions &amp; elixirs</div></div></div>
             <div class="vendor-items">
-              <div class="vendor-item"><span class="vendor-item-name">Minor HP Potion</span><span class="vendor-item-price">50 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Minor HP Potion','🧪',50,'consumable')">BUY</button></div>
-              <div class="vendor-item"><span class="vendor-item-name">Standard HP Potion</span><span class="vendor-item-price">125 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Standard HP Potion','🧪',125,'consumable')">BUY</button></div>
-              <div class="vendor-item"><span class="vendor-item-name">Minor Mana Potion</span><span class="vendor-item-price">50 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Minor Mana Potion','💧',50,'consumable')">BUY</button></div>
-              <div class="vendor-item"><span class="vendor-item-name">Minor Luck Potion</span><span class="vendor-item-price">50 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Minor Luck Potion','🍀',50,'consumable')">BUY</button></div>
-              <div class="vendor-item"><span class="vendor-item-name">Minor EXP Potion</span><span class="vendor-item-price">50 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Minor EXP Potion','✨',50,'consumable')">BUY</button></div>
+              <div class="vendor-item"><span class="vendor-item-name">Minor HP Potion</span><span class="vendor-item-price">50 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Minor HP Potion')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Minor HP Potion','🧪',50,'consumable')">BUY</button></div></div>
+              <div class="vendor-item"><span class="vendor-item-name">Standard HP Potion</span><span class="vendor-item-price">125 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Standard HP Potion')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Standard HP Potion','🧪',125,'consumable')">BUY</button></div></div>
+              <div class="vendor-item"><span class="vendor-item-name">Minor Mana Potion</span><span class="vendor-item-price">50 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Minor Mana Potion')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Minor Mana Potion','💧',50,'consumable')">BUY</button></div></div>
+              <div class="vendor-item"><span class="vendor-item-name">Minor Luck Potion</span><span class="vendor-item-price">50 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Minor Luck Potion')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Minor Luck Potion','🍀',50,'consumable')">BUY</button></div></div>
+              <div class="vendor-item"><span class="vendor-item-name">Minor EXP Potion</span><span class="vendor-item-price">50 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Minor EXP Potion')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Minor EXP Potion','✨',50,'consumable')">BUY</button></div></div>
             </div>
           </div>
           <div class="vendor-card">
             <div class="vendor-card-header"><span class="vendor-icon">🍳</span><div><div class="vendor-name">COOK</div><div class="vendor-role">Stat-boosting foods</div></div></div>
             <div class="vendor-items">
-              <div class="vendor-item"><span class="vendor-item-name">Grilled Meat Skewer</span><span class="vendor-item-price">30 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Grilled Meat Skewer','🍖',30,'consumable')">BUY</button></div>
-              <div class="vendor-item"><span class="vendor-item-name">Herb Fish Soup</span><span class="vendor-item-price">30 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Herb Fish Soup','🍲',30,'consumable')">BUY</button></div>
-              <div class="vendor-item"><span class="vendor-item-name">Roasted Carp</span><span class="vendor-item-price">30 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Roasted Carp','🐟',30,'consumable')">BUY</button></div>
-              <div class="vendor-item"><span class="vendor-item-name">Fried Sardine</span><span class="vendor-item-price">25 🪙</span><button class="vendor-buy-btn" onclick="openBuyModal('Fried Sardine','🐟',25,'consumable')">BUY</button></div>
+              <div class="vendor-item"><span class="vendor-item-name">Grilled Meat Skewer</span><span class="vendor-item-price">30 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Grilled Meat Skewer')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Grilled Meat Skewer','🍖',30,'consumable')">BUY</button></div></div>
+              <div class="vendor-item"><span class="vendor-item-name">Herb Fish Soup</span><span class="vendor-item-price">30 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Herb Fish Soup')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Herb Fish Soup','🍲',30,'consumable')">BUY</button></div></div>
+              <div class="vendor-item"><span class="vendor-item-name">Roasted Carp</span><span class="vendor-item-price">30 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Roasted Carp')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Roasted Carp','🐟',30,'consumable')">BUY</button></div></div>
+              <div class="vendor-item"><span class="vendor-item-name">Fried Sardine</span><span class="vendor-item-price">25 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Fried Sardine')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Fried Sardine','🐟',25,'consumable')">BUY</button></div></div>
             </div>
           </div>
           <div class="vendor-card">
@@ -906,6 +920,10 @@ button,
         <div class="battle-dead-desc">You can resurrect after 24 hours. All inventory item quantities have been halved.</div>
         <div class="battle-dead-timer" id="battle-dead-timer">—</div>
         <button class="btn-primary" style="max-width:200px;margin-top:16px" id="btn-resurrect" onclick="attemptResurrect()">RESURRECT</button>
+        <div id="btn-use-res-potion-wrap" style="margin-top:10px;display:none">
+          <button class="btn-secondary" style="max-width:240px;font-size:0.8rem;border-color:var(--gold-dim);color:var(--gold)" onclick="useItem('Resurrection Potion','potion')">💀 USE RESURRECTION POTION</button>
+          <div style="font-size:0.72rem;color:var(--ash);margin-top:4px">Revive instantly at full HP &amp; Mana</div>
+        </div>
       </div>
 
       <!-- Zone select (Farming) -->
@@ -1197,8 +1215,33 @@ button,
         <h2>CRAFTING</h2>
         <p>Submit materials to NPC craftsmen to forge equipment, potions and food</p>
       </div>
-      <!-- Passive regen info bar — populated by _renderRegenInCrafting() in dashboard.js -->
-      <div id="crafting-regen-info"></div>
+      <!-- Consumable stacking rules info box -->
+      <div class="crafting-rules-box">
+        <div class="crafting-rules-title">📖 CONSUMABLE RULES</div>
+        <div class="crafting-rules-grid">
+          <div class="crafting-rule-item">
+            <span class="crafting-rule-icon">❤️💠</span>
+            <div>
+              <div class="crafting-rule-label">HP &amp; Mana Potions</div>
+              <div class="crafting-rule-desc">Can be used as many times as needed. No daily limit.</div>
+            </div>
+          </div>
+          <div class="crafting-rule-item">
+            <span class="crafting-rule-icon">🍀⭐</span>
+            <div>
+              <div class="crafting-rule-label">Luck &amp; EXP Potions</div>
+              <div class="crafting-rule-desc">Maximum <b>3 uses per day</b>. Non-stackable — each use replaces the previous buff. Each lasts <b>1 hour</b>.</div>
+            </div>
+          </div>
+          <div class="crafting-rule-item">
+            <span class="crafting-rule-icon">🍖🍲</span>
+            <div>
+              <div class="crafting-rule-label">Food Buffs</div>
+              <div class="crafting-rule-desc">One active buff per stat at a time. Using the same stat food overwrites the previous.</div>
+            </div>
+          </div>
+        </div>
+      </div>
       <!-- Collapsible Crafting Sections -->
       <div class="craft-accordion">
         <!-- Equipment Section -->

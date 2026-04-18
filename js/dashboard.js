@@ -1,3 +1,22 @@
+import { auth, db, storage } from "../firebase/firebase.js";
+import {
+  onAuthStateChanged, signOut
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {
+  doc, getDoc, setDoc, updateDoc, addDoc, deleteDoc,
+  collection, query, where, orderBy, limit,
+  onSnapshot, serverTimestamp, getDocs, increment,
+  arrayUnion, arrayRemove
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import {
+  ref as storageRef,
+  uploadBytes,
+  getDownloadURL
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
+import { logoutUser, showToast, hideLoading } from "./auth.js";
+import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
+import { getApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+
 // ═══════════════════════════════════════════════════
 //  WORLD DEVELOPMENT EVENTS (PLAYER VIEW)
 // ═══════════════════════════════════════════════════
@@ -978,6 +997,13 @@ function _getLuckMult(charData) {
   if (!buff || !buff.expiry || Date.now() > buff.expiry) return 1;
   return 1 + (buff.pct / 100);
 }
+
+function _getExpBuffMult(charData) {
+  // Returns EXP gain multiplier from active EXP potion buff
+  const buff = charData?.expBuff;
+  if (!buff || !buff.expiry || Date.now() > buff.expiry) return 1;
+  return 1 + (buff.pct / 100);
+}
 // ═══════════════════════════════════════════════════
 //  EQUIPMENT NAME LISTS (for accurate filtering)
 // ═══════════════════════════════════════════════════
@@ -1538,22 +1564,6 @@ window.updateQuestPanels = function() {
 
 // Call updateQuestPanels() after _charData is loaded/updated
 
-import { auth, db, storage } from "../firebase/firebase.js";
-import {
-  onAuthStateChanged, signOut
-} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import {
-  doc, getDoc, setDoc, updateDoc, addDoc, deleteDoc,
-  collection, query, where, orderBy, limit,
-  onSnapshot, serverTimestamp, getDocs, increment,
-  arrayUnion, arrayRemove
-} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import {
-  ref as storageRef,
-  uploadBytes,
-  getDownloadURL
-} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
-import { logoutUser, showToast, hideLoading } from "./auth.js";
 
 // ═══════════════════════════════════════════════════
 //  STATIC DATA
@@ -3100,7 +3110,7 @@ const ITEM_ICONS = {
   "Minor EXP Potion":         "✨", "Standard EXP Potion":      "⭐", "Greater EXP Potion":       "🌟",
   "Health Potion":            "🫧", "Mana Potion":              "💠",
   "Class Reset Potion":       "⚗️", "Race Rebirth Potion":      "🌀", "Divine Shift Potion":      "🔮",
-  "Stat Reset Potion":        "🔄", "Companion Change Potion":  "🐾",
+  "Stat Reset Potion":        "🔄", "Companion Change Potion":  "🐾", "Resurrection Potion":      "💀",
 
   // ── FOOD — STRENGTH ──────────────────────────────────────
   "Grilled Meat Skewer":      "🍢", "Spiced Steak":             "🥩", "Hunter's Feast":           "🍖",
@@ -3120,20 +3130,26 @@ const ITEM_ICONS = {
 
   // ── MINER RESOURCES ──────────────────────────────────────
   "Iron":                     "⬛", "Coal":                     "🪨", "Copper":                   "🟤",
-  "Rough Stone":              "🪨", "Silver Ore":               "⬜", "Gold Ore":                 "🟡",
-  "Obsidian":                 "🖤", "Quartz Crystal":           "💎",
+  "Tin":                      "🪙", "Limestone":                "🟫", "Silver":                   "⬜",
+  "Bronze":                   "🟠", "Gold":                     "🟡", "Mythril":                  "💜",
+  "Palladium":                "🔵", "Obsidian":                 "🖤", "Marble":                   "🏛️",
+  "Quartz":                   "💎", "Titanium":                 "🔩", "Adamantium":               "⚙️",
+  "Aetherium":                "🌌",
   "Runestone Fragment":       "🔷", "Starstone":                "⭐", "Darkore":                  "🌑",
   "Ancient Ore":              "🏺", "Core Fragment":            "🔮",
   "Primordial Stone":         "🌋",
 
   // ── FORAGER RESOURCES ────────────────────────────────────
-  "Apple":                    "🍎", "Blueberry":                "🫐", "Melon":                    "🍈",
-  "Wild Berry":               "🍓", "Garlic":                   "🧄",
+  "Apples":                   "🍎", "Blueberries":              "🫐", "Melons":                   "🍈",
+  "Golden Pears":             "🍐", "Moon Grapes":              "🍇", "Sunfruit":                 "🌞",
+  "Crystal Berries":          "💎", "Bitter Root":              "🌱", "Spirit Plum":              "🟣",
+  "Frost Apples":             "❄️", "Ember Fruit":              "🔥", "Celestial Fig":            "🍇",
+  "Dragonfruit":              "🐉", "Eden's Tear":              "💧",
+  "Garlic":                   "🧄",
   "Silverleaf":               "🍃", "Basil Sprigs":             "🌿", "Goldroot":                 "🌾",
   "Lotus":                    "🌸",
-  "Moonpetal":                "🌙", "Phantom Herb":             "👻", "Stardust Bloom":           "✨",
-  "Fruit of World Tree":      "🌳", "Ancient Root":             "🪱",
-  "World Flower":             "🌺",
+  "Nightshade":               "🌑", "Glowleaf":                 "💚", "Spirit Herb":              "🌿",
+  "Jade Vine":                "🪴", "Ghost Root":               "👻", "Void Orchid":              "🟣",
 
   // ── HERBALIST RESOURCES ──────────────────────────────────
   "Mint Leaves":              "🌿", "Soft Bark":                "🪵", "Wild Herbs":               "🌱",
@@ -3144,16 +3160,19 @@ const ITEM_ICONS = {
   "Tears of The Endless Goldfish": "💧",
 
   // ── ANGLER RESOURCES ─────────────────────────────────────
-  "Trout":                    "🐟", "Carp":                     "🐠", "Sardine":                  "🐡",
-  "River Bass":               "🎣",
-  "Goldfish":                 "🟡", "Moonfish":                 "🌙", "Ironscale Carp":           "⚙️",
-  "Deep Sea Tuna":            "🐋", "Shadow Eel":               "🐍", "Crystal Perch":            "💎",
-  "Leviathan Scale":          "🦎", "Sea Dragon Fin":           "🐉",
-  "Abyssal Pearl":            "🪬",
+  "Trout":                    "🐟", "Carp":                     "🐠", "Catfish":                  "🐡",
+  "Sardine":                  "🐡", "Pufferfish":               "🐡",
+  "Silverfin":                "⬜", "Glowfish":                 "💚", "Spotted Eel":              "🐍",
+  "Coral Snapper":            "🪸", "Red Minnow":               "🔴",
+  "Shadowfish":               "🖤", "Flamefish":                "🔥", "Ying Koi":                 "🟡",
+  "Celestial Whale":          "🐳", "Black Unagi":              "🖤", "Cosmic Leviathan":         "🌌",
 
   // ── HUNTER RESOURCES ─────────────────────────────────────
   "Raw Meat":                 "🥩", "Bone Fragments":           "🦴", "Tough Hide":               "🟤",
-  "Leather":                  "🟫",
+  "Leather":                  "🟫", "Feathers":                 "🪶", "Animal Fat":               "🫙",
+  "Fangs":                    "🦷", "Fur":                      "🦊", "Horns":                    "🦌",
+  "Claws":                    "🐾", "Spirit Venison":           "✨", "Shadow Hide":              "🖤",
+  "Drake Meat":               "🐉", "Titan Heart":              "❤️‍🔥",
   "Quality Pelt":             "🦊", "Wolf Fang":                "🐺", "Bear Claw":                "🐻",
   "Beast Core":               "💠", "Phantom Feather":          "🪶", "Blood Crystal":            "🔴",
   "Divine Bull Essence":      "🐂", "Heart of the Red Phoenix": "🔥",
@@ -3245,10 +3264,26 @@ const ITEM_ICONS = {
 };
 
 const ITEM_TYPES = {
-  consumable: ["Potion","Elixir","Food","Soup","Skewer","Carp","Sardine","Meat","Food","Herb Fish","Grilled","Roasted","Fried"],
-  equipment:  ["Sword","Dagger","Bow","Vest","Plate","Armor","Shield","Staff","Robe","Axe","Spear"],
-  material:   ["Ore","Crystal","Rune","Wood","Herb","Bone","Leather","Thread","Essence","Dust","Shard"],
-  quest:      ["Heart of","Gem of","Void-Eye","Orb of","Crown of","Tears of","Core of","Fruit of","Divine Heart","Forgotten","Scales of","Adonai","Ink of","Eye of"],
+  consumable: ["Potion","Elixir","Food","Soup","Skewer","Carp","Sardine","Meat","Herb Fish","Grilled","Roasted","Fried"],
+  equipment:  ["Sword","Dagger","Bow","Vest","Plate","Armor","Shield","Staff","Robe","Axe","Spear","Blade","Wand","Mace","Knife","Rod","Bow","Cloak","Cuirass","Chainmail","Fortress","Mantle","Shroud","Tunic","Greatsword","Cleaver","Warplate","Warbreaker","Longbow","Spellknife","Spellhammer"],
+  material:   ["Ore","Crystal","Rune","Wood","Herb","Bone","Thread","Essence","Dust","Shard","Leaf","Bark","Sprigs","Root","Bloom","Petal","Scale","Fang","Hide","Meat","Pelt","Claw","Horn","Fat","Feather","Stone","Fragment","Moss","Seed"],
+  quest:      [
+    // Generic catch patterns
+    "Heart of","Gem of","Void-Eye","Orb of","Crown of","Tears of","Core of","Fruit of","Forgotten",
+    "Scales of","Eye of","Divine Heart","Adonai","Ink of","Branch of","Ancient Scroll",
+    // Exact deity ingredient names
+    "Scales of Equilibrium","The Void-Eye","Gem of Luminance",
+    "Crimson Toad Moss","Branch of Soul Tree","Bloom Petals","Moon Petals",
+    "Ancient Scroll Fragments","White Mystic Woods","Truths","Crystallized Night Dews",
+    "Oil-stained Feathers","Ephemeral Footprints","Devil-Spring Water",
+    "Iron Oaths","Broken Shackles","Verdict Quill","Volcanic Roots","Ash of Elder Trees",
+    "Ephemeral Footprints","Whispering Purple Sands",
+    // Ascension ingredients
+    "Ink of Time","Forgotten Desire Seed","Divine Bull Essence","Heart of the Red Phoenix",
+    "Leviathan Scale","Sea Dragon Fin","Abyssal Pearl",
+    "Orb of Silence","Eye of All-knowing","Tears of The Endless Goldfish",
+    "Void Crystal","Ancient Rune","Ancient Root","Spirit Root","Blood Crystal","Beast Core",
+  ],
 };
 
 function getItemType(name) {
@@ -3334,8 +3369,8 @@ window.previewSellMaterial = function(itemName) {
   const SELL_RATES = { mythic:10000, legendary:500, rare:150, uncommon:40, common:10 };
   const MYTHIC    = ["Aetherium","Eden’s Tear","Cosmic Leviathan","Void Orchid","Titan Heart"];
   const LEGENDARY = ["Titanium","Adamantium","Celestial Fig","Dragonfruit","Celestial Whale","Black Unagi","Phoenix Bloom","Middlemist","Cyclops Eye","Dragon Scales"];
-  const RARE      = ["Gold","Mythril","Spirit Plum","Frost Apples","Shadowfish","Flamefish","Spirit Herb","Jade Vine","Spirit Venison","Shadow Hide"];
-  const UNCOMMON  = ["Silver","Bronze","Obsidian","Golden Pears","Moon Grapes","Silverfin","Glowfish","Silverleaf","Goldroot","Leather","Fangs"];
+  const RARE      = ["Gold","Mythril","Palladium","Spirit Plum","Frost Apples","Ember Fruit","Shadowfish","Flamefish","Ying Koi","Spirit Herb","Jade Vine","Ghost Root","Spirit Venison","Shadow Hide","Drake Meat"];
+  const UNCOMMON  = ["Silver","Bronze","Marble","Obsidian","Quartz","Golden Pears","Moon Grapes","Sunfruit","Crystal Berries","Bitter Root","Silverfin","Glowfish","Spotted Eel","Coral Snapper","Red Minnow","Silverleaf","Goldroot","Nightshade","Glowleaf","Lotus","Leather","Fangs","Fur","Horns","Claws"];
   const tier = MYTHIC.includes(itemName) ? "mythic"
              : LEGENDARY.includes(itemName) ? "legendary"
              : RARE.includes(itemName) ? "rare"
@@ -3359,8 +3394,8 @@ window.convertMaterialToGold = async function(itemName) {
   };
   const MYTHIC    = ['Aetherium','Eden’s Tear','Cosmic Leviathan','Void Orchid','Titan Heart'];
   const LEGENDARY = ['Titanium','Adamantium','Celestial Fig','Dragonfruit','Celestial Whale','Black Unagi','Phoenix Bloom','Middlemist','Cyclops Eye','Dragon Scales'];
-  const RARE      = ['Gold','Mythril','Spirit Plum','Frost Apples','Shadowfish','Flamefish','Spirit Herb','Jade Vine','Spirit Venison','Shadow Hide'];
-  const UNCOMMON  = ['Silver','Bronze','Obsidian','Golden Pears','Moon Grapes','Silverfin','Glowfish','Silverleaf','Goldroot','Leather','Fangs'];
+  const RARE      = ['Gold','Mythril','Palladium','Spirit Plum','Frost Apples','Ember Fruit','Shadowfish','Flamefish','Ying Koi','Spirit Herb','Jade Vine','Ghost Root','Spirit Venison','Shadow Hide','Drake Meat'];
+  const UNCOMMON  = ['Silver','Bronze','Marble','Obsidian','Quartz','Golden Pears','Moon Grapes','Sunfruit','Crystal Berries','Bitter Root','Silverfin','Glowfish','Spotted Eel','Coral Snapper','Red Minnow','Silverleaf','Goldroot','Nightshade','Glowleaf','Lotus','Leather','Fangs','Fur','Horns','Claws'];
   const tier = MYTHIC.includes(itemName) ? 'mythic'
              : LEGENDARY.includes(itemName) ? 'legendary'
              : RARE.includes(itemName) ? 'rare'
@@ -3423,29 +3458,44 @@ window.useItem = async function(itemName, kind) {
     updates.mana = Math.min(maxMana, curMana + applied);
     toastMsg = `Used ${itemName} — restored ${applied} Mana (+${Math.round(pct*100)}% of max)`;
   } else if (itemName.includes('EXP Potion') || itemName.includes('Insight')) {
-    // Spec: Minor=+5% EXP gain buff, Standard=+15%, Greater=+20%
-    // We apply the gain as a bonus on current xpMax to award right now
-    const pct  = itemName.includes('Minor') ? 0.05 : itemName.includes('Greater') ? 0.20 : 0.15;
-    const gain = Math.max(1, Math.round((_charData.xpMax || 100) * pct));
-    const { newXp, newLevel, newRank, newXpMax, leveledUp } = _processExp(
-      _charData.xp||0, _charData.xpMax||100, _charData.level||1,
-      _charData.rank||'Wanderer', gain, _charData.charClass
-    );
-    updates.xp=newXp; updates.xpMax=newXpMax; updates.level=newLevel; updates.rank=newRank;
-    if (leveledUp) { updates.statPoints=(_charData.statPoints||0)+3; updates.hpMax=(_charData.hpMax||100)+10; updates.manaMax=(_charData.manaMax||50)+5; }
-    toastMsg = `Used ${itemName} — +${gain} EXP (${Math.round(pct*100)}% of level bar)`;
-    if (leveledUp) {
-      window.showToast(`🎉 LEVEL UP! Now Level ${newLevel}!`, 'success');
-      logActivity('⬆️', `<b>Level Up!</b> You reached <b>Level ${newLevel}</b>.`, '#e8d070');
-      if (newRank !== (_charData.rank || 'Wanderer')) {
-        logActivity('👑', `<b>Rank Ascension!</b> You are now <b>${newRank}</b>.`, '#c9a84c');
-      }
+    // Docs: +5/15/20% EXP gain buff, lasts 3 hours, once per day, cannot stack
+    const pct = itemName.includes('Minor') ? 5 : itemName.includes('Greater') ? 20 : 15;
+    const now = Date.now();
+    const existing = _charData.expBuff;
+    // Block if already active
+    if (existing?.expiry > now) {
+      const minsLeft = Math.ceil((existing.expiry - now) / 60000);
+      window.showToast(`EXP buff already active — ${minsLeft}m remaining.`, 'info');
+      return;
     }
+    // Block if already used today
+    const todayStr = new Date().toDateString();
+    if (existing?.usedDate === todayStr) {
+      window.showToast('EXP Potion already used today. Resets at midnight.', 'info');
+      return;
+    }
+    const expiry = now + 3 * 60 * 60 * 1000;
+    updates.expBuff = { pct, expiry, usedDate: todayStr };
+    toastMsg = `Used ${itemName} — +${pct}% EXP gain active for 3 hours!`;
   } else if (itemName.includes('Luck Potion')) {
-    // Spec: Minor=+5% Luck, Standard=+15%, Greater=+30% — stored as timed buff on charData
+    // Docs: +5/15/30% Luck buff, lasts 3 hours, once per day, cannot stack
     const pct = itemName.includes('Minor') ? 5 : itemName.includes('Greater') ? 30 : 15;
-    const expiry = Date.now() + 3 * 60 * 60 * 1000; // 3 hours per spec
-    updates.luckBuff = { pct, expiry };
+    const now = Date.now();
+    const existing = _charData.luckBuff;
+    // Block if already active
+    if (existing?.expiry > now) {
+      const minsLeft = Math.ceil((existing.expiry - now) / 60000);
+      window.showToast(`Luck buff already active — ${minsLeft}m remaining.`, 'info');
+      return;
+    }
+    // Block if already used today
+    const todayStr = new Date().toDateString();
+    if (existing?.usedDate === todayStr) {
+      window.showToast('Luck Potion already used today. Resets at midnight.', 'info');
+      return;
+    }
+    const expiry = now + 3 * 60 * 60 * 1000;
+    updates.luckBuff = { pct, expiry, usedDate: todayStr };
     toastMsg = `Used ${itemName} — +${pct}% Luck active for 3 hours!`;
   } else if (kind === 'food') {
     // Food buffs per spec: stat% for timed duration, 1 active per stat at a time
@@ -3487,9 +3537,92 @@ window.useItem = async function(itemName, kind) {
     } else {
       toastMsg = `Consumed ${itemName}`;
     }
+  } else if (itemName === 'Resurrection Potion') {
+    // Can only use while dead
+    if (!_charData?.isDead) {
+      window.showToast('You are not dead. Save this for when you need it.', 'info');
+      return;
+    }
+    const confirmed = await inkConfirm('Use your <b>Resurrection Potion</b>?<br><span style="font-size:0.85rem;color:var(--ash)">You will be instantly revived at full HP and Mana.</span>');
+    if (!confirmed) return;
+    // Consume the item first
+    if (inv[idx].qty > 1) inv[idx].qty--; else inv.splice(idx, 1);
+    await updateDoc(doc(db, 'characters', _uid), {
+      isDead: false,
+      hp: _charData.hpMax || 100,
+      mana: _charData.manaMax || 50,
+      resurrectAt: null,
+      inventory: inv
+    });
+    Object.assign(_charData, { isDead: false, hp: _charData.hpMax || 100, mana: _charData.manaMax || 50, resurrectAt: null, inventory: inv });
+    window._allInvItems = inv;
+    await refreshCharData();
+    const banner   = document.getElementById('battle-dead-banner');
+    const zoneArea = document.getElementById('battle-zone-select');
+    if (banner)   banner.style.display   = 'none';
+    if (zoneArea) zoneArea.style.display = 'block';
+    updateZoneLocks();
+    _syncAllDisplays(_charData);
+    window._refreshInvDisplay();
+    window.showToast('💀➡️✨ Resurrection Potion used — you have returned!', 'success');
+    logActivity('💀', `Used a <b>Resurrection Potion</b> and returned from death.`, '#c9a84c');
+    return;
+
+  } else if (itemName === 'Class Reset Potion') {
+    const confirmed = await inkConfirm('Use <b>Class Reset Potion</b>?<br><span style="font-size:0.85rem;color:var(--ash)">Your class, skills, and stances will be cleared. Stat points earned are kept.</span>');
+    if (!confirmed) return;
+    if (inv[idx].qty > 1) inv[idx].qty--; else inv.splice(idx, 1);
+    await updateDoc(doc(db, 'characters', _uid), { charClass: null, classRole: null, skills: [], stances: [], inventory: inv });
+    Object.assign(_charData, { charClass: null, classRole: null, skills: [], stances: [], inventory: inv });
+    window._allInvItems = inv;
+    await refreshCharData(); _syncAllDisplays(_charData); window._refreshInvDisplay();
+    window.showToast('⚗️ Class Reset! Choose a new class from your profile.', 'success');
+    logActivity('⚗️', 'Used a <b>Class Reset Potion</b>. Class cleared — choose again.', '#c9a84c');
+    if (typeof switchPanel === 'function') switchPanel('character');
+    return;
+
+  } else if (itemName === 'Stat Reset Potion') {
+    const confirmed = await inkConfirm('Use <b>Stat Reset Potion</b>?<br><span style="font-size:0.85rem;color:var(--ash)">All stats reset to 10. Your earned stat points are refunded for redistribution.</span>');
+    if (!confirmed) return;
+    if (inv[idx].qty > 1) inv[idx].qty--; else inv.splice(idx, 1);
+    const baseStats = { str:10, int:10, def:10, dex:10 };
+    const earnedPoints = Math.max(0, ((_charData.level || 1) - 1) * 3);
+    await updateDoc(doc(db, 'characters', _uid), { stats: baseStats, statPoints: earnedPoints, inventory: inv });
+    Object.assign(_charData, { stats: baseStats, statPoints: earnedPoints, inventory: inv });
+    window._allInvItems = inv;
+    await refreshCharData(); _syncAllDisplays(_charData); window._refreshInvDisplay();
+    window.showToast(`🔄 Stat Reset! ${earnedPoints} stat points refunded.`, 'success');
+    logActivity('🔄', `Used a <b>Stat Reset Potion</b>. Stats reset to base, ${earnedPoints} points refunded.`, '#c9a84c');
+    if (typeof switchPanel === 'function') switchPanel('character');
+    return;
+
+  } else if (itemName === 'Race Rebirth Potion') {
+    const confirmed = await inkConfirm('Use <b>Race Rebirth Potion</b>?<br><span style="font-size:0.85rem;color:var(--ash)">Your race and racial attribute will be cleared. Choose a new race from your profile.</span>');
+    if (!confirmed) return;
+    if (inv[idx].qty > 1) inv[idx].qty--; else inv.splice(idx, 1);
+    await updateDoc(doc(db, 'characters', _uid), { race: null, raceAttr: null, inventory: inv });
+    Object.assign(_charData, { race: null, raceAttr: null, inventory: inv });
+    window._allInvItems = inv;
+    await refreshCharData(); _syncAllDisplays(_charData); window._refreshInvDisplay();
+    window.showToast('🌀 Race Rebirth! Choose your new race from your profile.', 'success');
+    logActivity('🌀', 'Used a <b>Race Rebirth Potion</b>. Race cleared — choose again.', '#c9a84c');
+    if (typeof switchPanel === 'function') switchPanel('character');
+    return;
+
+  } else if (itemName === 'Divine Shift Potion') {
+    const confirmed = await inkConfirm('Use <b>Divine Shift Potion</b>?<br><span style="font-size:0.85rem;color:var(--ash)">Your deity will be cleared and Faith Level reset to 0. Choose a new deity from your profile.</span>');
+    if (!confirmed) return;
+    if (inv[idx].qty > 1) inv[idx].qty--; else inv.splice(idx, 1);
+    await updateDoc(doc(db, 'characters', _uid), { deity: null, deityTitle: null, faithLevel: 0, blessing: null, blessingDesc: null, inventory: inv });
+    Object.assign(_charData, { deity: null, deityTitle: null, faithLevel: 0, blessing: null, blessingDesc: null, inventory: inv });
+    window._allInvItems = inv;
+    await refreshCharData(); _syncAllDisplays(_charData); window._refreshInvDisplay();
+    window.showToast('🔮 Divine Shift! Faith Level reset. Choose a new deity from your profile.', 'success');
+    logActivity('🔮', 'Used a <b>Divine Shift Potion</b>. Deity cleared, Faith reset to 0.', '#c9a84c');
+    if (typeof switchPanel === 'function') switchPanel('character');
+    return;
+
   } else {
-    toastMsg = `Consumed ${itemName}`;
-  }
 
   // Consume 1 of the item
   if (inv[idx].qty > 1) inv[idx].qty--;
@@ -3509,6 +3642,7 @@ window.useItem = async function(itemName, kind) {
   logActivity('🧪', `Used <b>${itemName}</b>.`, '#888');
   // Re-render potion strip if battle is active
   if (document.getElementById('battle-arena')?.style.display !== 'none') _renderBattlePotionStrip();
+  } // close else block
 };
 
 // ═══════════════════════════════════════════════════
@@ -4858,6 +4992,81 @@ async function buyItem({ name, icon, price, type, qty = 1 }) {
   }
 }
 
+// ── Item stat preview modal ───────────────────────────────────────────────────
+window.openItemStatModal = function(name) {
+  const weaponStats = EQUIP_WEAPON_STATS[name];
+  const armorStats  = EQUIP_ARMOR_STATS[name];
+  const isEquip = weaponStats || armorStats;
+  const stats   = weaponStats || armorStats;
+
+  // Try to find the item in crafting recipes for full data (grade, requires)
+  let grade = '', recipeData = null;
+  for (const [g, items] of Object.entries(window.CANONICAL_EQUIP_RECIPES || {})) {
+    const found = items.find(i => i.name === name);
+    if (found) { grade = g; recipeData = found; break; }
+  }
+
+  // Try potion data
+  let potionData = null;
+  for (const items of Object.values(window.CANONICAL_POTION_RECIPES || {})) {
+    const found = items.find(i => i.name === name);
+    if (found) { potionData = found; break; }
+  }
+
+  // Try food data
+  let foodData = null;
+  for (const items of Object.values(window.CANONICAL_FOOD_RECIPES || {})) {
+    const found = items.find(i => i.name === name);
+    if (found) { foodData = found; break; }
+  }
+
+  const icon = recipeData?.icon || potionData?.icon || foodData?.icon || getItemIcon(name);
+
+  // Build stat lines for equipment
+  const STAT_LABELS = { str:'Strength', int:'Intelligence', def:'Defense', dex:'Dexterity', hp:'HP Bonus' };
+  const GRADE_COLOURS = { E:'#aaa', D:'#70c090', C:'#5b9fe0', B:'#c9a84c', A:'#b86fde', S:'#e05555' };
+  let bodyHtml = '';
+
+  if (isEquip && stats) {
+    const statLines = Object.entries(stats)
+      .map(([k, v]) => `<div class="istat-row"><span class="istat-label">${STAT_LABELS[k]||k.toUpperCase()}</span><span class="istat-val">+${v}</span></div>`)
+      .join('');
+    const gradeLabel = grade
+      ? `<span style="font-family:var(--font-mono);font-size:0.6rem;padding:2px 8px;border-radius:4px;background:rgba(255,255,255,0.05);color:${GRADE_COLOURS[grade]||'#aaa'};border:1px solid ${GRADE_COLOURS[grade]||'#aaa'}">GRADE ${grade}</span>`
+      : '';
+    const typeLabel = `<span style="font-family:var(--font-mono);font-size:0.6rem;color:var(--ash);text-transform:uppercase">${weaponStats?'Weapon':'Armor'}</span>`;
+    const enchantNote = `<div style="font-size:0.7rem;color:var(--ash);margin-top:10px;font-style:italic">✨ Can be enchanted up to +5 for additional stat bonuses.</div>`;
+    bodyHtml = `
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+        ${typeLabel} ${gradeLabel}
+      </div>
+      <div class="istat-grid">${statLines}</div>
+      ${enchantNote}`;
+  } else if (potionData) {
+    const usageRule = name.includes('Luck') || name.includes('EXP') || name.includes('Insight')
+      ? `<div style="font-size:0.7rem;color:#c9a84c;margin-top:8px;padding:6px 10px;background:rgba(201,168,76,0.08);border-radius:6px;border:1px solid rgba(201,168,76,0.2)">⚠️ Max 3 uses/day · Non-stackable · Each use lasts 1 hour</div>`
+      : '';
+    bodyHtml = `
+      <div class="istat-effect">${potionData.effect}</div>
+      ${usageRule}`;
+  } else if (foodData) {
+    bodyHtml = `
+      <div class="istat-effect">${foodData.effect}</div>
+      <div style="font-size:0.7rem;color:var(--ash);margin-top:6px">Grade: ${foodData.grade||'—'}</div>`;
+  } else {
+    bodyHtml = `<div style="color:var(--ash);font-size:0.85rem;font-style:italic">No stat data available for this item.</div>`;
+  }
+
+  const modal = document.getElementById('item-stat-modal');
+  document.getElementById('istat-icon').textContent  = icon;
+  document.getElementById('istat-name').textContent  = name;
+  document.getElementById('istat-body').innerHTML    = bodyHtml;
+  modal.style.display = 'flex';
+};
+window.closeItemStatModal = function() {
+  document.getElementById('item-stat-modal').style.display = 'none';
+};
+
 async function sellItem() {
   console.log('[DEBUG] sellItem called');
   const errEl = document.getElementById("sell-error");
@@ -4953,15 +5162,20 @@ window.renderPlayerMarketListings = function() {
     if (l.qty <= 0) return;
     const el = document.createElement("div");
     el.className = "listing-card";
+    const hasStatView = (l.itemType === 'weapon' || l.itemType === 'armor' || l.itemType === 'consumable' || l.itemType === 'equipment');
+    const viewBtn = hasStatView
+      ? `<button class="vendor-buy-btn" style="margin-bottom:4px;width:100%" onclick="openItemStatModal('${l.itemName.replace(/'/g,"\\'")}')">VIEW STATS</button>`
+      : '';
+    const buyBtn = l.sellerUid !== _uid
+      ? `<button class="vendor-buy-btn" style="width:100%" onclick="window._buyListing('${l.id}','${l.itemName}','${l.itemIcon}',${l.pricePerUnit},'${l.itemType}',${l.qty})">BUY</button>`
+      : `<button class="vendor-buy-btn" style="opacity:0.5;cursor:not-allowed;width:100%">Your listing</button>`;
     el.innerHTML = `
       <div class="listing-item-icon">${l.itemIcon && l.itemIcon !== '📦' ? l.itemIcon : getItemIcon(l.itemName)}</div>
       <div class="listing-item-name">${l.itemName}</div>
       <div class="listing-item-qty">Qty: ${l.qty}</div>
       <div class="listing-price">${l.pricePerUnit} 🪙 <span class="listing-price-sub">per unit</span></div>
       <div class="listing-seller">by ${l.sellerName}</div>
-      ${l.sellerUid !== _uid
-        ? `<button class="vendor-buy-btn" onclick="window._buyListing('${l.id}','${l.itemName}','${l.itemIcon}',${l.pricePerUnit},'${l.itemType}',${l.qty})">BUY</button>`
-        : `<button class="vendor-buy-btn" style="opacity:0.5;cursor:not-allowed">Your listing</button>`}`;
+      <div style="margin-top:8px">${viewBtn}${buyBtn}</div>`;
     container.appendChild(el);
   });
 };
@@ -5600,19 +5814,19 @@ async function _saveAllQuestProgress() {
 
 const PROF_RESOURCES = {
   Miner:     {
-    common:    ["Iron","Coal","Copper","Rough Stone"],
-    uncommon:  ["Silver Ore","Gold Ore","Obsidian","Quartz Crystal"],
-    rare:      ["Runestone Fragment","Starstone","Darkore"],
-    legendary: ["Ancient Ore","Core Fragment"],
-    mythic:    ["Primordial Stone"],
+    common:    ["Iron","Coal","Copper","Tin","Limestone"],
+    uncommon:  ["Silver","Bronze","Obsidian","Marble","Quartz"],
+    rare:      ["Gold","Mythril","Palladium"],
+    legendary: ["Titanium","Adamantium"],
+    mythic:    ["Aetherium"],
     deityMats: ["Scales of Equilibrium","The Void-Eye","Gem of Luminance"],
   },
   Forager:   {
-    common:    ["Apple","Blueberry","Melon","Wild Berry","Garlic"],
-    uncommon:  ["Silverleaf","Basil Sprigs","Goldroot","Lotus"],
-    rare:      ["Moonpetal","Phantom Herb","Stardust Bloom"],
-    legendary: ["Fruit of World Tree","Ancient Root"],
-    mythic:    ["World Flower"],
+    common:    ["Apples","Blueberries","Garlic","Melons","Golden Pears"],
+    uncommon:  ["Moon Grapes","Sunfruit","Crystal Berries","Bitter Root","Silverleaf","Basil Sprigs","Goldroot","Lotus"],
+    rare:      ["Spirit Plum","Frost Apples","Ember Fruit","Nightshade","Glowleaf","Spirit Herb","Jade Vine","Ghost Root"],
+    legendary: ["Celestial Fig","Dragonfruit","Phoenix Bloom","Void Orchid"],
+    mythic:    ["Eden's Tear"],
     deityMats: ["Crimson Toad Moss","Branch of Soul Tree","Bloom Petals","Moon Petals"],
   },
   Herbalist: {
@@ -5624,18 +5838,18 @@ const PROF_RESOURCES = {
     deityMats: ["Ancient Scroll Fragments","White Mystic Woods","Truths","Crystallized Night Dews"],
   },
   Angler:    {
-    common:    ["Trout","Carp","Sardine","River Bass"],
-    uncommon:  ["Goldfish","Moonfish","Ironscale Carp"],
-    rare:      ["Deep Sea Tuna","Shadow Eel","Crystal Perch"],
-    legendary: ["Leviathan Scale","Sea Dragon Fin"],
-    mythic:    ["Abyssal Pearl"],
+    common:    ["Trout","Carp","Catfish","Sardine","Pufferfish"],
+    uncommon:  ["Silverfin","Glowfish","Spotted Eel","Coral Snapper","Red Minnow"],
+    rare:      ["Shadowfish","Flamefish","Ying Koi"],
+    legendary: ["Celestial Whale","Black Unagi"],
+    mythic:    ["Cosmic Leviathan"],
     deityMats: ["Oil-stained Feathers","Ephemeral Footprints","Devil-Spring Water"],
   },
   Hunter:    {
-    common:    ["Raw Meat","Bone Fragments","Tough Hide","Leather"],
-    uncommon:  ["Quality Pelt","Wolf Fang","Bear Claw"],
-    rare:      ["Beast Core","Phantom Feather","Blood Crystal"],
-    legendary: ["Divine Bull Essence","Heart of the Red Phoenix"],
+    common:    ["Raw Meat","Bone Fragments","Tough Hide","Feathers","Animal Fat"],
+    uncommon:  ["Leather","Fangs","Fur","Horns","Claws","Quality Pelt","Wolf Fang","Bear Claw"],
+    rare:      ["Spirit Venison","Shadow Hide","Drake Meat","Beast Core","Phantom Feather","Blood Crystal"],
+    legendary: ["Titan Heart","Divine Bull Essence","Heart of the Red Phoenix"],
     mythic:    ["Forgotten Desire Seed"],
     deityMats: ["Iron Oaths","Broken Shackles","Verdict Quill","Volcanic Roots","Ash of Elder Trees"],
   },
@@ -6065,9 +6279,6 @@ function formatTime(date) {
 // ═══════════════════════════════════════════════════
 //  CLOUD FUNCTIONS CALLER
 // ═══════════════════════════════════════════════════
-import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
-import { getApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-
 // Custom stepper logic for sell modal
 window.stepInput = function(id, delta) {
   const input = document.getElementById(id);
@@ -7563,7 +7774,7 @@ async function _clientBattleTurn(action, skillName) {
   if (monster.hp <= 0) {
     const drops  = _rollDrops(b.grade);
     const _veilExpBonus = _charData?.deity === 'Veil' ? (1 + _getFaithBlessingPct(_charData)) : 1;
-        const expGain = Math.round((MONSTER_EXP_LOCAL[b.grade] || 10) * _getRaceExpMult(_charData?.race) * _getCompanionExpMult(_charData?.companion?.name) * _veilExpBonus);
+        const expGain = Math.round((MONSTER_EXP_LOCAL[b.grade] || 10) * _getRaceExpMult(_charData?.race) * _getCompanionExpMult(_charData?.companion?.name) * _veilExpBonus * _getExpBuffMult(_charData));
     const inv = [...(char.inventory||[])];
     drops.items.forEach(item => {
       const ex = inv.find(i => i.name === item.name);
@@ -7724,7 +7935,7 @@ async function _clientAutoBattle(grade, maxTurns=15, zoneName=null) {
   if (status === "victory") {
     const drops   = _rollDrops(grade);
     const _veilExpBonus2 = _charData?.deity === 'Veil' ? (1 + _getFaithBlessingPct(_charData)) : 1;
-    const expGain = Math.round((MONSTER_EXP_LOCAL[grade] || 10) * _getRaceExpMult(_charData?.race) * _getCompanionExpMult(_charData?.companion?.name) * _veilExpBonus2);
+    const expGain = Math.round((MONSTER_EXP_LOCAL[grade] || 10) * _getRaceExpMult(_charData?.race) * _getCompanionExpMult(_charData?.companion?.name) * _veilExpBonus2 * _getExpBuffMult(_charData));
     const inv = [...(char.inventory||[])];
     drops.items.forEach(item => {
       const ex = inv.find(i => i.name === item.name);
@@ -8307,7 +8518,7 @@ function _launchAutoBattleLoop(grade, zoneName) {
     killCount++;
     const drops   = _rollDrops(grade);
     const _veilExpBonus2 = _charData?.deity === 'Veil' ? (1 + _getFaithBlessingPct(_charData)) : 1;
-    const expGain = Math.round((MONSTER_EXP_LOCAL[grade] || 10) * _getRaceExpMult(_charData?.race) * _getCompanionExpMult(_charData?.companion?.name) * _veilExpBonus2);
+    const expGain = Math.round((MONSTER_EXP_LOCAL[grade] || 10) * _getRaceExpMult(_charData?.race) * _getCompanionExpMult(_charData?.companion?.name) * _veilExpBonus2 * _getExpBuffMult(_charData));
     const inv = [...(char.inventory||[])];
     drops.items.forEach(item => {
       const ex = inv.find(i => i.name === item.name);
@@ -8953,6 +9164,13 @@ function checkDeathState() {
   if (_charData?.isDead) {
     if (banner)   banner.style.display   = 'flex';
     if (zoneArea) zoneArea.style.display = 'none';
+
+    // Show resurrection potion button only if player has one
+    const resPotionWrap = document.getElementById('btn-use-res-potion-wrap');
+    if (resPotionWrap) {
+      const hasPotion = (_charData?.inventory || []).some(i => i.name === 'Resurrection Potion' && (i.qty ?? 1) > 0);
+      resPotionWrap.style.display = hasPotion ? 'block' : 'none';
+    }
 
     const resurrectAt = _charData.resurrectAt?.toDate?.() || new Date(_charData.resurrectAt);
     if (resurrectAt) {
@@ -10383,9 +10601,9 @@ window.CANONICAL_EQUIP_RECIPES = {
 // Canonical food recipes with correct category names and all foods
 window.CANONICAL_FOOD_RECIPES = {
   "STRENGTH FOODS": [
-    { name:"Grilled Meat Skewer", icon:"🍢", grade:"Common", effect:"+5% STR (10 mins)", cost:30, requires:[{name:"Meat",qty:1},{name:"Garlic",qty:1},{name:"Apples",qty:1}] },
-    { name:"Spiced Steak", icon:"🥩", grade:"Uncommon", effect:"+10% STR (15 mins)", cost:60, requires:[{name:"Meat",qty:2},{name:"Golden Pears",qty:1},{name:"Bitter Root",qty:1}] },
-    { name:"Hunter’s Feast", icon:"🍖", grade:"Rare", effect:"+15% STR (20 mins)", cost:140, requires:[{name:"Spirit Plum",qty:1},{name:"Shadow Fish",qty:1},{name:"Meat",qty:3}] },
+    { name:"Grilled Meat Skewer", icon:"🍢", grade:"Common", effect:"+5% STR (10 mins)", cost:30, requires:[{name:"Raw Meat",qty:1},{name:"Garlic",qty:1},{name:"Apples",qty:1}] },
+    { name:"Spiced Steak", icon:"🥩", grade:"Uncommon", effect:"+10% STR (15 mins)", cost:60, requires:[{name:"Raw Meat",qty:2},{name:"Golden Pears",qty:1},{name:"Bitter Root",qty:1}] },
+    { name:"Hunter’s Feast", icon:"🍖", grade:"Rare", effect:"+15% STR (20 mins)", cost:140, requires:[{name:"Spirit Plum",qty:1},{name:"Shadowfish",qty:1},{name:"Raw Meat",qty:3}] },
     { name:"Dragonfire Roast", icon:"🔥", grade:"Legendary", effect:"+20% STR (30 mins)", cost:350, requires:[{name:"Dragonfruit",qty:1},{name:"Black Unagi",qty:1},{name:"Raw Meat",qty:2}] },
     { name:"Eden Banquet", icon:"🌺", grade:"Mythic", effect:"+25% STR (40 mins)", cost:900, requires:[{name:"Eden’s Tear",qty:1},{name:"Cosmic Leviathan",qty:1},{name:"Ying Koi",qty:1},{name:"Moon Grapes",qty:1}] },
   ],
@@ -10434,6 +10652,7 @@ window.CANONICAL_POTION_RECIPES = {
     { name:"Greater EXP Potion", icon:"🌟", type:"Insight", effect:"+20 EXP gain (250-400 Coins)", cost:250, requires:[{name:"Spirit Herb",qty:2},{name:"Ghost Root",qty:1}] },
   ],
   Other: [
+    { name:"Resurrection Potion", icon:"💀", effect:"Instantly revive from death without waiting 24 hours. Restores HP and Mana to full. Can be used from the death screen.", cost:5000 },
     { name:"Class Reset Potion", icon:"⚗️", effect:"Allows players to reset class, and thus, skilltree. Keeps stat points that have been gathered prior.", cost:5000 },
     { name:"Race Rebirth Potion", icon:"🌀", effect:"Allows players to change their race.", cost:10000 },
     { name:"Divine Shift Potion", icon:"✨", effect:"Allows players to change their Deity. However, this results in a reset of “Faith level” too.", cost:15000 },
@@ -10484,15 +10703,23 @@ function renderEquipmentRecipes(grade) {
   const grid = document.getElementById('recipes-equipment');
   if (!grid) return;
   const recipes = (window.CANONICAL_EQUIP_RECIPES && window.CANONICAL_EQUIP_RECIPES[grade]) ? window.CANONICAL_EQUIP_RECIPES[grade] : [];
+  const STAT_LABELS = { str:'STR', int:'INT', def:'DEF', dex:'DEX', hp:'HP' };
   grid.innerHTML = recipes.map(r => {
     const reqs = r.requires.map(req => `${req.qty}x ${req.name}`).join(', ');
+    const statsHtml = r.stats
+      ? `<div class="recipe-stats">${Object.entries(r.stats).map(([k,v]) => `<span class="recipe-stat-badge">+${v} ${STAT_LABELS[k]||k.toUpperCase()}</span>`).join('')}</div>`
+      : '';
     return `<div class="recipe-card">
       <div class="recipe-icon">${r.icon||getItemIcon(r.name)}</div>
       <div class="recipe-name">${r.name}</div>
       <div class="recipe-type">${r.type}</div>
+      ${statsHtml}
       <div class="recipe-requires">${reqs}</div>
       <div class="recipe-cost">${r.cost} 🪙</div>
-      <button class="btn-primary recipe-craft-btn" onclick="doCraft('blacksmith','${r.name}')">CRAFT</button>
+      <div style="display:flex;gap:6px">
+        <button class="btn-primary recipe-craft-btn" onclick="doCraft('blacksmith','${r.name}')">CRAFT</button>
+        <button class="btn-secondary recipe-craft-btn" style="background:transparent" onclick="openItemStatModal('${r.name}')">VIEW</button>
+      </div>
     </div>`;
   }).join('');
 }
@@ -10503,9 +10730,13 @@ function renderFoodRecipes(type) {
   const recipes = (window.CANONICAL_FOOD_RECIPES && window.CANONICAL_FOOD_RECIPES[type]) ? window.CANONICAL_FOOD_RECIPES[type] : [];
   grid.innerHTML = recipes.map(r => {
     const reqs = r.requires ? r.requires.map(req => `${req.qty}x ${req.name}`).join(', ') : '';
+    const effectHtml = r.effect ? `<div class="recipe-effect">${r.effect}</div>` : '';
+    const gradeHtml  = r.grade  ? `<div class="recipe-type">${r.grade}</div>` : '';
     return `<div class="recipe-card">
       <div class="recipe-icon">${r.icon||getItemIcon(r.name)}</div>
       <div class="recipe-name">${r.name}</div>
+      ${gradeHtml}
+      ${effectHtml}
       <div class="recipe-requires">${reqs}</div>
       <div class="recipe-cost">${r.cost} 🪙</div>
       <button class="btn-primary recipe-craft-btn" onclick="doCraft('cook','${r.name}')">CRAFT</button>
@@ -10518,12 +10749,15 @@ function renderPotionRecipes(type) {
   if (!grid) return;
   const recipes = (window.CANONICAL_POTION_RECIPES && window.CANONICAL_POTION_RECIPES[type]) ? window.CANONICAL_POTION_RECIPES[type] : [];
   grid.innerHTML = recipes.map(r => {
-    // For 'Other' potions, show effect and cost as description, but also allow CRAFT
+    const isLuckOrExp = (type === 'Luck' || type === 'Insight');
+    const stackBadge  = isLuckOrExp
+      ? `<div class="recipe-stack-note">⚠️ Max 3/day · 1 hour · Non-stackable</div>`
+      : '';
     if (type === 'Other') {
       return `<div class="recipe-card">
         <div class="recipe-icon">${r.icon||getItemIcon(r.name)}</div>
         <div class="recipe-name">${r.name}</div>
-        <div class="recipe-requires">${r.effect}</div>
+        <div class="recipe-effect">${r.effect}</div>
         <div class="recipe-cost">${r.cost} 🪙</div>
         <button class="btn-primary recipe-craft-btn" onclick="doCraft('alchemist','${r.name}')">CRAFT</button>
       </div>`;
@@ -10533,6 +10767,8 @@ function renderPotionRecipes(type) {
       <div class="recipe-icon">${r.icon||getItemIcon(r.name)}</div>
       <div class="recipe-name">${r.name}</div>
       <div class="recipe-type">${r.type}</div>
+      <div class="recipe-effect">${r.effect}</div>
+      ${stackBadge}
       <div class="recipe-requires">${reqs}</div>
       <div class="recipe-cost">${r.cost} 🪙</div>
       <button class="btn-primary recipe-craft-btn" onclick="doCraft('alchemist','${r.name}')">CRAFT</button>
@@ -10542,7 +10778,6 @@ function renderPotionRecipes(type) {
 
 // Initialize the new crafting UI
 function initCrafting() {
-  _renderRegenInCrafting(); // show passive regen rates at top of crafting panel
   // All accordion panels start closed by default
   document.querySelectorAll('.accordion-panel').forEach(p => p.style.display = 'none');
   document.querySelectorAll('.accordion-arrow').forEach(a => a.textContent = '▼');
@@ -10784,6 +11019,11 @@ function _getActiveFoodDesc(c) {
     const minsLeft = Math.ceil((luck.expiry - now) / 60000);
     lines.push(`+${luck.pct}% Luck (${minsLeft}m left)`);
   }
+  const exp = c.expBuff;
+  if (exp?.expiry > now) {
+    const minsLeft = Math.ceil((exp.expiry - now) / 60000);
+    lines.push(`+${exp.pct}% EXP gain (${minsLeft}m left)`);
+  }
   return lines.join(' · ');
 }
 
@@ -10968,22 +11208,24 @@ async function _regenTick() {
   } catch(e) { console.warn('[Regen] Tick write failed:', e); }
 }
 
-/** Inject passive regen rates into the crafting panel stat block. */
+/** Inject passive regen rates into the character panel vitals card. */
 function _renderRegenInCrafting() {
-  const el = document.getElementById('crafting-regen-info');
-  if (!el) return; // element not present in this build yet — safe no-op
+  const el = document.getElementById('char-regen-info');
+  if (!el) return;
   el.innerHTML = `
-    <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:center;padding:10px 14px;
-      background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:10px;
-      font-size:0.82rem;color:var(--text-dim);margin-bottom:12px;">
-      <span style="color:var(--gold);font-weight:700;font-size:0.85rem;letter-spacing:0.04em">
-        ⏳ PASSIVE REGEN
-      </span>
-      <span>❤️ <b style="color:#e05555">+${_REGEN_HP_PER_MIN} HP</b> / min</span>
-      <span>💠 <b style="color:#5b9fe0">+${_REGEN_MANA_PER_MIN} Mana</b> / min</span>
-      <span style="color:var(--ash)">Max: <b>${_charData?.hpMax ?? 100} HP</b> · <b>${_charData?.manaMax ?? 50} Mana</b></span>
-      <span style="color:var(--ash);font-style:italic">Paused during battle</span>
-    </div>`;
+    <tr style="border-top:1px solid var(--border)">
+      <td style="padding-top:8px;color:var(--gold);font-family:var(--font-mono);font-size:0.6rem;letter-spacing:0.06em">PASSIVE REGEN</td>
+      <td style="padding-top:8px">
+        <span style="color:#e05555">❤️ +${_REGEN_HP_PER_MIN} HP</span>
+        <span style="color:var(--ash);margin:0 4px">/</span>
+        <span style="color:#5b9fe0">💠 +${_REGEN_MANA_PER_MIN} Mana</span>
+        <span style="color:var(--ash);font-size:0.7rem;margin-left:4px">per min</span>
+      </td>
+    </tr>
+    <tr>
+      <td></td>
+      <td style="font-size:0.68rem;color:var(--ash);font-style:italic;padding-bottom:2px">Paused during battle</td>
+    </tr>`;
 }
 
 // Hook into panel switching for guild and crafting init
@@ -10991,10 +11233,11 @@ const _origSwitchPanel = window.switchPanel;
 // We can't reassign here since it's in a different script block
 // Instead expose init hooks
 window._onPanelSwitch = function(name) {
-  if (name === 'battle')   { checkDeathState(); updateZoneLocks(); }
-  if (name === 'crafting') initCrafting();
-  if (name === 'guild')    initGuild();
-  if (name === 'market')   _syncAllDisplays(_charData); // keep gold display fresh on panel open
+  if (name === 'battle')    { checkDeathState(); updateZoneLocks(); }
+  if (name === 'crafting')  initCrafting();
+  if (name === 'guild')     initGuild();
+  if (name === 'character') _renderRegenInCrafting(); // renders regen into vitals card
+  if (name === 'market')    _syncAllDisplays(_charData);
   if (name === 'map')      { window._initLayeredMap?.(); }
   if (name === 'activity') renderActivityFeed();
   if (name === 'companion') window.renderCompanionPanel?.();

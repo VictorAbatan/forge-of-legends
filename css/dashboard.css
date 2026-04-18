@@ -1940,6 +1940,29 @@
 .recipe-cost     { font-family: var(--font-mono); font-size: 0.65rem; color: var(--gold-dim); margin-bottom: 10px; }
 .recipe-craft-btn { width: 100%; padding: 8px; font-size: 0.62rem; }
 
+/* ── Recipe card enhancements ── */
+.recipe-stats       { display:flex; flex-wrap:wrap; gap:4px; margin-bottom:6px; }
+.recipe-stat-badge  { font-family:var(--font-mono); font-size:0.58rem; padding:2px 7px; border-radius:4px; background:rgba(201,168,76,0.12); border:1px solid rgba(201,168,76,0.3); color:var(--gold); }
+.recipe-effect      { font-size:0.72rem; color:#7ec8a0; margin-bottom:6px; line-height:1.4; font-style:italic; }
+.recipe-stack-note  { font-size:0.62rem; color:#c9a84c; background:rgba(201,168,76,0.07); border:1px solid rgba(201,168,76,0.18); border-radius:4px; padding:3px 7px; margin-bottom:6px; }
+
+/* ── Item stat modal ── */
+.istat-grid         { display:grid; grid-template-columns:1fr 1fr; gap:6px 12px; margin-bottom:4px; }
+.istat-row          { display:contents; }
+.istat-label        { font-family:var(--font-mono); font-size:0.65rem; color:var(--text-dim); text-transform:uppercase; }
+.istat-val          { font-family:var(--font-mono); font-size:0.72rem; color:var(--gold); text-align:right; }
+.istat-effect       { font-size:0.82rem; color:var(--text); line-height:1.5; }
+
+/* ── Crafting consumable rules box ── */
+.crafting-rules-box   { background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:var(--radius); padding:14px 16px; margin-bottom:18px; }
+.crafting-rules-title { font-family:var(--font-mono); font-size:0.62rem; color:var(--gold-dim); letter-spacing:0.08em; margin-bottom:12px; }
+.crafting-rules-grid  { display:grid; grid-template-columns:1fr; gap:10px; }
+.crafting-rule-item   { display:flex; gap:12px; align-items:flex-start; }
+.crafting-rule-icon   { font-size:1.1rem; width:2rem; flex-shrink:0; text-align:center; margin-top:2px; }
+.crafting-rule-label  { font-family:var(--font-display); font-size:0.68rem; letter-spacing:0.04em; color:var(--gold); margin-bottom:2px; }
+.crafting-rule-desc   { font-size:0.72rem; color:var(--text-dim); line-height:1.4; }
+@media (min-width:600px) { .crafting-rules-grid { grid-template-columns:1fr 1fr; } }
+
 .enchant-form { max-width: 400px; }
 .enchant-info { background: var(--ink3); border-radius: var(--radius); padding: 14px; margin-bottom: 14px; display: flex; flex-direction: column; gap: 8px; }
 .enchant-info-row { display: flex; justify-content: space-between; font-size: 0.85rem; }
