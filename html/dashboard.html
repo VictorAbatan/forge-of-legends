@@ -280,6 +280,7 @@ button,
       <div class="nav-item"        data-panel="skills"    onclick="switchPanel('skills')">     <span class="nav-icon">🔮</span> Skills</div>
       <div class="nav-item"        data-panel="profession" onclick="switchPanel('profession')"><span class="nav-icon">⛏️</span> Profession</div>
       <div class="nav-item"        data-panel="crafting"  onclick="switchPanel('crafting')">   <span class="nav-icon">⚗️</span> Crafting</div>
+      <div class="nav-item"        data-panel="shrine"    onclick="switchPanel('shrine')">     <span class="nav-icon">🛕</span> Shrine</div>
 
       <div class="nav-rune-divider"><span class="nav-rune-line"></span><span class="nav-rune-glyph">◈</span><span class="nav-rune-line"></span></div>
 
@@ -557,7 +558,7 @@ button,
         <button class="inv-tab" onclick="filterInv(this,'consumable')">Consumables</button>
         <button class="inv-tab" onclick="filterInv(this,'material')">Materials</button>
         <button class="inv-tab" onclick="filterInv(this,'equipment')">Equipment</button>
-        <button class="inv-tab" onclick="filterInv(this,'quest')">Quest Items</button>
+        <button class="inv-tab" onclick="filterInv(this,'ingredient')">Deity Ingredients</button>
       </div>
       <div class="card" style="margin-bottom:16px"><div class="inventory-grid" id="inventory-grid"></div></div>
       <div class="card">
@@ -1215,6 +1216,8 @@ button,
         <h2>CRAFTING</h2>
         <p>Submit materials to NPC craftsmen to forge equipment, potions and food</p>
       </div>
+      <!-- Passive regen info bar — populated by _renderRegenInCrafting() in dashboard.js -->
+      <div id="crafting-regen-info"></div>
       <!-- Consumable stacking rules info box -->
       <div class="crafting-rules-box">
         <div class="crafting-rules-title">📖 CONSUMABLE RULES</div>
@@ -1308,6 +1311,95 @@ button,
             </div>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════
+         SHRINE / DEITY TEMPLE PANEL
+    ════════════════════════════════════════════════════ -->
+    <div class="panel" id="panel-shrine">
+      <div class="panel-header">
+        <h2 id="shrine-panel-title">DEITY SHRINE</h2>
+        <p id="shrine-panel-subtitle">You must travel to a deity shrine on the World Map.</p>
+      </div>
+
+      <!-- NOT AT A SHRINE STATE -->
+      <div id="shrine-not-at-shrine" style="display:none;text-align:center;padding:32px 16px">
+        <div style="font-size:3rem;margin-bottom:12px">🗺️</div>
+        <div style="font-size:0.95rem;color:var(--text-dim);margin-bottom:8px">You are not at a deity shrine.</div>
+        <div style="font-size:0.82rem;color:var(--ash);margin-bottom:20px">Travel to a shrine on the World Map to access its powers.</div>
+        <button class="btn-secondary" onclick="switchPanel('map')" style="width:auto;font-size:0.75rem">🗺️ OPEN WORLD MAP</button>
+      </div>
+
+      <!-- WRONG SHRINE STATE -->
+      <div id="shrine-wrong-shrine" style="display:none;padding:20px 0">
+        <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:12px;padding:18px;margin-bottom:16px;text-align:center">
+          <div style="font-size:2rem;margin-bottom:8px" id="shrine-wrong-icon">⛩️</div>
+          <div style="font-size:0.85rem;color:var(--text-dim);font-style:italic" id="shrine-wrong-msg">This is another deity's shrine.</div>
+          <div style="font-size:0.75rem;color:var(--ash);margin-top:6px">You can still explore for worship materials here.</div>
+        </div>
+        <!-- Explore at wrong shrine (still can find that deity's mats) -->
+        <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:12px;padding:18px">
+          <div style="font-size:0.7rem;letter-spacing:0.1em;color:var(--gold);text-transform:uppercase;margin-bottom:10px">⚗️ Explore Shrine Grounds</div>
+          <div style="font-size:0.82rem;color:var(--text-dim);margin-bottom:14px">Search the area for deity-worship materials. <span style="color:var(--ash)">(10% chance per explore)</span></div>
+          <button class="btn-primary" id="shrine-explore-wrong-btn" onclick="window._doShrineExplore()" style="width:100%">🔍 EXPLORE GROUNDS</button>
+          <div id="shrine-explore-log" style="margin-top:12px;display:none;font-size:0.82rem;border-radius:8px;padding:10px 12px;background:rgba(0,0,0,0.2)"></div>
+        </div>
+      </div>
+
+      <!-- OWN SHRINE STATE -->
+      <div id="shrine-own-shrine" style="display:none;padding:4px 0">
+
+        <!-- Faith Level Card -->
+        <div style="background:rgba(201,168,76,0.06);border:1px solid rgba(201,168,76,0.25);border-radius:12px;padding:16px;margin-bottom:14px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <span style="font-size:0.72rem;letter-spacing:0.1em;color:var(--gold);text-transform:uppercase">Faith Level</span>
+            <span id="shrine-faith-level" style="font-size:1.1rem;font-weight:700;color:var(--gold)">0</span>
+          </div>
+          <div style="background:rgba(255,255,255,0.06);border-radius:6px;height:7px;overflow:hidden;margin-bottom:8px">
+            <div id="shrine-faith-bar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--gold-dim),var(--gold));border-radius:6px;transition:width 0.5s ease"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:0.72rem;color:var(--text-dim)">
+            <span>Tier <span id="shrine-tier-num">0</span> — <b id="shrine-tier-label" style="color:var(--gold)">Faithless</b></span>
+            <span id="shrine-next-tier">Next: Initiate at Faith 5</span>
+          </div>
+        </div>
+
+        <!-- Blessing Card -->
+        <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px">
+          <div style="font-size:0.7rem;letter-spacing:0.1em;color:var(--gold);text-transform:uppercase;margin-bottom:8px">Active Blessing</div>
+          <div id="shrine-blessing-name" style="font-size:0.95rem;font-weight:700;color:var(--text);margin-bottom:4px">—</div>
+          <div id="shrine-blessing-desc" style="font-size:0.82rem;color:var(--text-dim);margin-bottom:8px">—</div>
+          <div style="font-size:0.72rem;color:#888">Blessing strength: <b id="shrine-blessing-mult" style="color:var(--gold)">1×</b> base (Faith Tier <span id="shrine-blessing-tier">0</span>)</div>
+        </div>
+
+        <!-- Deity Lore Card -->
+        <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px">
+          <div style="font-size:0.7rem;letter-spacing:0.1em;color:var(--gold);text-transform:uppercase;margin-bottom:8px">🏛️ Temple Lore</div>
+          <div id="shrine-lore-desc" style="font-size:0.82rem;color:var(--text-dim);line-height:1.6;margin-bottom:10px">—</div>
+          <div style="font-size:0.72rem;color:#888;margin-bottom:4px">Authorities:</div>
+          <div id="shrine-lore-authorities" style="font-size:0.8rem;color:var(--ash-light);font-style:italic">—</div>
+        </div>
+
+        <!-- Explore Card -->
+        <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px">
+          <div style="font-size:0.7rem;letter-spacing:0.1em;color:var(--gold);text-transform:uppercase;margin-bottom:8px">⚗️ Explore Temple</div>
+          <div style="font-size:0.82rem;color:var(--text-dim);margin-bottom:6px">Explore the temple grounds for deity-worship materials.</div>
+          <div style="font-size:0.75rem;color:var(--ash);margin-bottom:14px">Each explore has a <b style="color:var(--gold-dim)">10% base chance</b> to find one of your deity's worship materials.</div>
+          <div id="shrine-worship-mats-preview" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px"></div>
+          <button class="btn-primary" id="shrine-explore-btn" onclick="window._doShrineExplore()" style="width:100%">🔍 EXPLORE TEMPLE</button>
+          <div id="shrine-explore-log" style="margin-top:12px;display:none;font-size:0.82rem;border-radius:8px;padding:10px 12px;background:rgba(0,0,0,0.2)"></div>
+        </div>
+
+        <!-- Sacrifice Card -->
+        <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:12px;padding:16px">
+          <div style="font-size:0.7rem;letter-spacing:0.1em;color:var(--gold);text-transform:uppercase;margin-bottom:8px">🙏 Offer Sacrifice</div>
+          <div style="font-size:0.8rem;color:var(--text-dim);margin-bottom:12px">Sacrifice 1 of each worship material to gain <b style="color:var(--gold)">+1 Faith</b>.</div>
+          <div id="shrine-mat-list" style="display:flex;flex-direction:column;gap:7px;margin-bottom:14px"></div>
+          <button id="shrine-sacrifice-btn" class="btn-primary" onclick="window._doShrineSacrifice()" style="width:100%" disabled>🙏 OFFER SACRIFICE</button>
+          <div id="shrine-sacrifice-result" style="margin-top:8px;font-size:0.8rem;text-align:center;min-height:1.2em"></div>
+        </div>
+
       </div>
     </div>
 

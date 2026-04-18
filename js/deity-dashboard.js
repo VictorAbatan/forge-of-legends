@@ -526,25 +526,47 @@ const ITEMS = [
   // Mythic
   { name:"Aetherium",        icon:"🌟",  type:"material", rarity:"Mythic" },
   { name:"Titan Heart",      icon:"❤️‍🔥", type:"material", rarity:"Mythic" },
-  // Deity-specific
+  // Deity-specific worship materials
   { name:"Ephemeral Footprints",    icon:"✨", type:"material", rarity:"Deity" },
   { name:"Oil-stained Feathers",    icon:"✨", type:"material", rarity:"Deity" },
   { name:"Whispering Purple Sands", icon:"✨", type:"material", rarity:"Deity" },
-  { name:"The Void-Eye",            icon:"💎", type:"material", rarity:"Deity" },
-  { name:"Orb of Silence",          icon:"💎", type:"material", rarity:"Deity" },
   { name:"Magic Crystal",           icon:"💎", type:"material", rarity:"Deity" },
+
+  // ── ADVANCEMENT INGREDIENTS ──────────────────────────────
+  // Sah'run — God of Flames
+  { name:"Heart of the Red Phoenix", icon:"🔥", type:"ingredient", rarity:"Sacred" },
+  { name:"Gem of Luminance",         icon:"💛", type:"ingredient", rarity:"Sacred" },
+  // Alistor — God of Darkness
+  { name:"The Void-Eye",             icon:"🌑", type:"ingredient", rarity:"Sacred" },
+  { name:"Orb of Silence",           icon:"🔮", type:"ingredient", rarity:"Sacred" },
+  // Elionidas — God of Abundance
+  { name:"Crown of Fortune",         icon:"👑", type:"ingredient", rarity:"Sacred" },
+  { name:"Tears of The Endless Goldfish", icon:"🐟", type:"ingredient", rarity:"Sacred" },
+  // Mah'run — Goddess of Stars
+  { name:"Core of a Fallen Star",    icon:"⭐", type:"ingredient", rarity:"Sacred" },
+  { name:"Fruit of World Tree",      icon:"🌳", type:"ingredient", rarity:"Sacred" },
+  // Freyja — Goddess of Love
+  { name:"Divine Heart Essence",     icon:"💗", type:"ingredient", rarity:"Sacred" },
+  { name:"Forgotten Desire Seed",    icon:"🌸", type:"ingredient", rarity:"Sacred" },
+  // Arion — God of Justice
+  { name:"Scales of Equilibrium",    icon:"⚖️", type:"ingredient", rarity:"Sacred" },
+  { name:"Adonai Sword",             icon:"🗡️", type:"ingredient", rarity:"Sacred" },
+  // Veil — God of Knowledge
+  { name:"Ink of Time",              icon:"🖋️", type:"ingredient", rarity:"Sacred" },
+  { name:"Eye of All-knowing",       icon:"👁️", type:"ingredient", rarity:"Sacred" },
 ];
 
 const ITEM_CATEGORIES = [
-  { key: "weapon",   label: "⚔️ Weapons" },
-  { key: "armor",    label: "🛡️ Armor" },
-  { key: "potion",   label: "🧪 Potions" },
-  { key: "food",     label: "🍖 Food" },
-  { key: "material", label: "📦 Materials" },
+  { key: "weapon",     label: "⚔️ Weapons"    },
+  { key: "armor",      label: "🛡️ Armor"      },
+  { key: "potion",     label: "🧪 Potions"    },
+  { key: "food",       label: "🍖 Food"       },
+  { key: "material",   label: "📦 Materials"  },
+  { key: "ingredient", label: "✦ Ingredients" },
 ];
 
 const GRADE_COLORS = { E:"#aaa", D:"#7ec87e", C:"#5b9fe0", B:"#c97de0", A:"#e0a030", S:"#e05555" };
-const RARITY_COLORS = { Common:"#aaa", Uncommon:"#7ec87e", Rare:"#5b9fe0", Legendary:"#e0a030", Mythic:"#e05555", Deity:"#c9a84c" };
+const RARITY_COLORS = { Common:"#aaa", Uncommon:"#7ec87e", Rare:"#5b9fe0", Legendary:"#e0a030", Mythic:"#e05555", Deity:"#c9a84c", Sacred:"#d4a8ff" };
 
 function renderQuestRewardPicker() {
   const picker = document.getElementById("quest-reward-picker");
@@ -827,141 +849,84 @@ function renderFactionQuestRewardPicker() {
 }
 
 // Bestow item picker — same pattern as quest reward pickers
-function renderBestowItemPicker() {
+async function renderBestowItemPicker(targetUid) {
   const picker = document.getElementById("bestow-item-picker");
   if (!picker) return;
 
   let selected = [];
-  let currentCat = "weapon";
-  let searchQuery = "";
 
-  picker.innerHTML = `
-    <div class="reward-picker-tabs">
-      ${ITEM_CATEGORIES.map(cat => `<button class="reward-picker-tab${cat.key === currentCat ? ' active' : ''}" data-cat="${cat.key}">${cat.label}</button>`).join("")}
-    </div>
-    <input type="text" id="bestow-item-search" class="field-input" placeholder="🔍 Search items..." style="margin:8px 0;padding:6px 10px;font-size:0.82rem"/>
-    <div class="reward-picker-list"></div>
-    <div class="reward-picker-selected"></div>
-  `;
-
-  const listDiv     = picker.querySelector(".reward-picker-list");
-  const selectedDiv = picker.querySelector(".reward-picker-selected");
-  const searchInput = picker.querySelector("#bestow-item-search");
-
-  function getBadge(item) {
-    if (item.grade)  { const col = GRADE_COLORS[item.grade]   || "#aaa"; return `<span style="font-size:0.65rem;font-weight:700;padding:1px 5px;border-radius:3px;background:${col}22;color:${col};border:1px solid ${col}44;margin-left:4px">${item.grade}</span>`; }
-    if (item.rarity) { const col = RARITY_COLORS[item.rarity] || "#aaa"; return `<span style="font-size:0.65rem;font-weight:700;padding:1px 5px;border-radius:3px;background:${col}22;color:${col};border:1px solid ${col}44;margin-left:4px">${item.rarity}</span>`; }
-    return "";
+  // Fetch target player's deity and their required ingredients
+  let deityIngredients = [];
+  let targetDeity = "";
+  if (targetUid) {
+    try {
+      const snap = await getDoc(doc(db, "characters", targetUid));
+      if (snap.exists()) {
+        targetDeity = snap.data().deity || "";
+        deityIngredients = _DEITY_INGREDIENTS_MAP[targetDeity] || [];
+      }
+    } catch(e) { console.warn("Could not fetch target deity:", e); }
   }
+
+  const ING_ICONS = {
+    "Heart of the Red Phoenix":"🔥","Gem of Luminance":"💎",
+    "The Void-Eye":"👁️","Orb of Silence":"🔮",
+    "Crown of Fortune":"👑","Tears of The Endless Goldfish":"💧",
+    "Core of a Fallen Star":"⭐","Fruit of World Tree":"🌳",
+    "Divine Heart Essence":"❤️","Forgotten Desire Seed":"🌑",
+    "Scales of Equilibrium":"⚖️","Adonai Sword":"⚔️",
+    "Ink of Time":"🖊️","Eye of All-knowing":"👁️",
+  };
 
   function syncHidden() {
-    document.getElementById("bestow-items").value = selected.map(i => `${i.name}, ${i.qty}`).join("\n");
+    document.getElementById("bestow-items").value =
+      selected.map(i => `${i.name}, ${i.qty}`).join("\n");
   }
 
-  function updateSelectedDisplay() {
-    if (!selected.length) {
-      selectedDiv.innerHTML = `<div style="color:var(--text-dim);font-size:0.82rem;padding:6px 0;font-style:italic">No items selected yet.</div>`;
-    } else {
-      selectedDiv.innerHTML = `
-        <div style="font-size:0.72rem;color:var(--text-dim);margin-bottom:6px;font-family:var(--ff-mono);letter-spacing:0.06em">SELECTED ITEMS</div>
-        ${selected.map((item, idx) => `
-          <div class="reward-selected-row">
-            <span class="reward-selected-num">${idx + 1}</span>
-            <span class="reward-selected-icon">${item.icon || "📦"}</span>
-            <span class="reward-selected-name">${item.name}${getBadge(item)}</span>
-            <input type="number" min="1" value="${item.qty}" data-name="${item.name}" class="reward-qty-input"/>
-            <button data-name="${item.name}" class="reward-remove-btn">✕</button>
-          </div>`).join("")}`;
-    }
+  function updateSelected() {
+    selected = [];
+    picker.querySelectorAll(".bestow-qty-input").forEach(input => {
+      const qty = parseInt(input.value) || 0;
+      if (qty > 0) selected.push({ name: input.dataset.name, qty });
+    });
     syncHidden();
-    selectedDiv.querySelectorAll(".reward-qty-input").forEach(input => {
-      input.addEventListener("input", () => {
-        const val = Math.max(1, parseInt(input.value) || 1);
-        input.value = val;
-        const item = selected.find(i => i.name === input.dataset.name);
-        if (item) { item.qty = val; syncHidden(); }
-      });
-    });
-    selectedDiv.querySelectorAll(".reward-remove-btn").forEach(btn => {
-      btn.addEventListener("click", () => {
-        selected = selected.filter(i => i.name !== btn.dataset.name);
-        updateSelectedDisplay();
-        showCategory(currentCat);
-      });
-    });
   }
 
-  function showCategory(catKey) {
-    currentCat = catKey;
-    const query = searchQuery.toLowerCase();
-    let items = ITEMS.filter(i => i.type === catKey);
-    if (query) items = items.filter(i => i.name.toLowerCase().includes(query));
-    if (!items.length) {
-      listDiv.innerHTML = `<div style="color:var(--text-dim);font-size:0.82rem;padding:8px;font-style:italic">No items found.</div>`;
-      return;
-    }
-    listDiv.innerHTML = items.map(item => {
-      const isSelected = !!selected.find(s => s.name === item.name);
-      return `<button class="reward-item-btn${isSelected ? ' selected' : ''}" data-name="${item.name}">
-        ${item.icon || "📦"} ${item.name}${getBadge(item)}
-        ${item.stats ? `<span class="reward-item-stat">${item.stats}</span>` : ""}
-        ${isSelected ? `<span class="reward-item-check">✓</span>` : ""}
-      </button>`;
-    }).join("");
-    listDiv.querySelectorAll(".reward-item-btn").forEach(btn => {
-      btn.addEventListener("click", () => {
-        const name = btn.dataset.name;
-        if (selected.find(i => i.name === name)) return;
-        const item = ITEMS.find(i => i.name === name);
-        selected.push({ ...item, qty: 1 });
-        updateSelectedDisplay();
-        showCategory(currentCat);
-      });
-    });
+  if (!deityIngredients.length) {
+    picker.innerHTML = `<div style="color:var(--text-dim);font-style:italic;font-size:0.82rem;padding:8px 0">No deity assigned — no ingredients to bestow.</div>`;
+    return;
   }
 
-  searchInput.addEventListener("input", () => {
-    searchQuery = searchInput.value;
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      const items = ITEMS.filter(i => i.name.toLowerCase().includes(query));
-      listDiv.innerHTML = items.length
-        ? items.map(item => {
-            const isSelected = !!selected.find(s => s.name === item.name);
-            return `<button class="reward-item-btn${isSelected ? ' selected' : ''}" data-name="${item.name}">
-              ${item.icon || "📦"} ${item.name}${getBadge(item)}
-              ${item.stats ? `<span class="reward-item-stat">${item.stats}</span>` : ""}
-              ${isSelected ? `<span class="reward-item-check">✓</span>` : ""}
-            </button>`;
-          }).join("")
-        : `<div style="color:var(--text-dim);font-size:0.82rem;padding:8px;font-style:italic">No items found.</div>`;
-      listDiv.querySelectorAll(".reward-item-btn").forEach(btn => {
-        btn.addEventListener("click", () => {
-          const name = btn.dataset.name;
-          if (selected.find(i => i.name === name)) return;
-          const item = ITEMS.find(i => i.name === name);
-          selected.push({ ...item, qty: 1 });
-          updateSelectedDisplay();
-          searchInput.dispatchEvent(new Event("input"));
-        });
-      });
-    } else {
-      showCategory(currentCat);
-    }
-  });
+  picker.innerHTML = `
+    <div style="font-size:0.72rem;color:var(--text-dim);margin-bottom:10px;font-family:var(--ff-mono);letter-spacing:0.06em">
+      ${targetDeity.toUpperCase()} ADVANCEMENT INGREDIENTS
+    </div>
+    <div class="bestow-ing-list">
+      ${deityIngredients.map(name => `
+        <div class="bestow-ing-row">
+          <span class="bestow-ing-icon">${ING_ICONS[name] || "✦"}</span>
+          <span class="bestow-ing-name">${name}</span>
+          <div class="bestow-ing-qty-wrap">
+            <button type="button" class="bestow-qty-btn" data-name="${name}" data-delta="-1">−</button>
+            <input type="number" min="0" value="0" class="bestow-qty-input" data-name="${name}" style="width:52px;text-align:center" />
+            <button type="button" class="bestow-qty-btn" data-name="${name}" data-delta="1">+</button>
+          </div>
+        </div>`).join("")}
+    </div>
+  `;
 
-  picker.querySelectorAll(".reward-picker-tab").forEach(tab => {
-    tab.addEventListener("click", () => {
-      picker.querySelectorAll(".reward-picker-tab").forEach(t => t.classList.remove("active"));
-      tab.classList.add("active");
-      searchQuery = "";
-      searchInput.value = "";
-      showCategory(tab.dataset.cat);
+  picker.querySelectorAll(".bestow-qty-input").forEach(input => {
+    input.addEventListener("input", updateSelected);
+  });
+  picker.querySelectorAll(".bestow-qty-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const inp = picker.querySelector(`.bestow-qty-input[data-name="${btn.dataset.name}"]`);
+      if (inp) {
+        inp.value = Math.max(0, (parseInt(inp.value) || 0) + parseInt(btn.dataset.delta));
+        updateSelected();
+      }
     });
   });
-
-  showCategory(currentCat);
-  updateSelectedDisplay();
 }
 
 // Render picker when quest modal opens
@@ -1292,15 +1257,29 @@ function _openModalForWorshipper(type, uid, name) {
     display.innerHTML = `<span class="modal-recipient-name">${name}</span>`;
     display.style.display = "flex";
   }
-  document.getElementById(modalId).style.display = "flex";
+  const modalEl = document.getElementById(modalId);
+  modalEl.style.display = "flex";
+
+  // For bestow: trigger ingredient picker pre-filled for this player
+  if (type === "bestow") {
+    modalEl.dataset.targetUid = uid;
+    setTimeout(() => renderBestowItemPicker(uid), 0);
+  }
 }
+window._openModalForWorshipper = _openModalForWorshipper;
 
 // Reset recipient field back to dropdown (called when opening from overview/Quick Actions)
 function _resetModalRecipient(type) {
   const sel     = document.getElementById(`${type}-target`);
   const display = document.getElementById(`${type}-target-display`);
-  if (sel)     { sel.value = ""; sel.style.display = ""; delete sel.dataset.preselect; }
-  if (display) { display.style.display = "none"; display.innerHTML = ""; }
+  const modalEl = document.getElementById(`${type}-modal`);
+  if (sel) {
+    sel.value = "";
+    if (sel.tagName === 'SELECT') sel.style.display = "";
+    delete sel.dataset.preselect;
+  }
+  if (display) { display.innerHTML = ""; }
+  if (modalEl) delete modalEl.dataset.targetUid;
 }
 
 function filterWorshippers(q) {
@@ -1308,7 +1287,8 @@ function filterWorshippers(q) {
 }
 
 function populateWorshipperSelects() {
-  ["vision-target","bestow-target","faith-target"].forEach(id => {
+  // Only populate vision and faith targets — bestow-target is now a hidden input set per player
+  ["vision-target","faith-target"].forEach(id => {
     const sel = document.getElementById(id);
     if (!sel) return;
     const preselect = sel.dataset.preselect || sel.value;
@@ -1449,44 +1429,56 @@ async function loadVisionHistory() {
 //  BESTOW
 // ═══════════════════════════════════════════════════
 async function doBestow() {
-  const targetUid = _getTargetUid("bestow");
-  const gold      = parseInt(document.getElementById("bestow-gold")?.value) || 0;
+  const modalEl   = document.getElementById("bestow-modal");
+  const targetUid = modalEl?.dataset.targetUid || _getTargetUid("bestow");
   const itemsRaw  = document.getElementById("bestow-items")?.value.trim();
   const errEl     = document.getElementById("bestow-error");
   errEl.textContent = "";
-  if (!targetUid) { errEl.textContent = "Select a worshipper."; return; }
+
+  if (!targetUid) { errEl.textContent = "No recipient — open this from a player's profile."; return; }
 
   const items = [];
   if (itemsRaw) {
     for (const line of itemsRaw.split("\n")) {
       const p = line.split(",").map(x => x.trim());
       if (p.length >= 2 && p[0] && parseInt(p[1]) > 0) {
-        items.push({ name: p[0], icon:"📦", type:"material", qty: parseInt(p[1]) });
+        items.push({ name: p[0], icon: "📦", type: "material", qty: parseInt(p[1]) });
       }
     }
   }
-  if (gold === 0 && !items.length) { errEl.textContent = "Enter gold or items to bestow."; return; }
+  if (!items.length) { errEl.textContent = "Select at least one ingredient to bestow."; return; }
 
-  const btn = document.querySelector("#bestow-modal .btn-primary");
+  const btn  = document.querySelector("#bestow-modal .btn-primary");
   const orig = btn?.textContent;
   if (btn) { btn.disabled = true; btn.textContent = "Bestowing..."; }
   try {
-    await fnBestowResources({ targetUid, items, gold });
-    const w = _worshippers.find(x => x.uid === targetUid);
+    await fnBestowResources({ targetUid, items, gold: 0 });
+
+    // Notify the player
+    const w           = _worshippers.find(x => x.uid === targetUid);
+    const deityName   = _deityChar?.charClass || _deityChar?.deity || "Your deity";
+    const itemDesc    = items.map(i => `${i.qty}× <b>${i.name}</b>`).join(", ");
+    await addDoc(collection(db, "notifications"), {
+      uid:       targetUid,
+      message:   `✦ <b>Divine Bestowal:</b> <b>${deityName}</b> has granted you ${itemDesc} for your advancement.`,
+      read:      false,
+      timestamp: serverTimestamp(),
+    });
+
     document.getElementById("bestow-modal").style.display = "none";
-    document.getElementById("bestow-gold").value  = "0";
     document.getElementById("bestow-items").value = "";
     document.getElementById("bestow-item-picker").innerHTML = "";
+    if (modalEl) delete modalEl.dataset.targetUid;
 
     const logEl = document.getElementById("bestow-log");
     if (logEl) {
       const entry = document.createElement("div");
       entry.className = "bestow-log-entry";
-      entry.innerHTML = `<span class="bestow-log-name">→ ${w?.name||"—"}</span><span class="bestow-log-detail">${gold>0?gold+" gold ":""}${items.map(i=>i.qty+"x "+i.name).join(", ")}</span><span class="bestow-log-time">${new Date().toLocaleTimeString()}</span>`;
-      logEl.appendChild(entry);
+      entry.innerHTML = `<span class="bestow-log-name">→ ${w?.name || "—"}</span><span class="bestow-log-detail">${items.map(i => i.qty + "x " + i.name).join(", ")}</span><span class="bestow-log-time">${new Date().toLocaleTimeString()}</span>`;
+      logEl.prepend(entry);
     }
 
-    window.showToast("Resources bestowed!", "success");
+    window.showToast(`Ingredients bestowed to ${w?.name || "player"}!`, "success");
     loadWorshippers();
   } catch(err) {
     errEl.textContent = err.message || "Failed.";
@@ -1884,6 +1876,7 @@ async function doDropQuest(questType) {
   const gold      = parseInt(document.getElementById("quest-reward-gold")?.value) || 0;
   const exp       = parseInt(document.getElementById("quest-reward-exp")?.value) || 0;
   const itemsRaw  = document.getElementById("quest-reward-items")?.value.trim();
+  const advIngQty = parseInt(document.getElementById("quest-reward-ingredient-qty")?.value) || 0;
   const targetUid = null; // story quests are always public
   const expiresIn = parseInt(document.getElementById("quest-expires")?.value) || null;
   const errEl     = document.getElementById("quest-error");
@@ -1914,7 +1907,7 @@ async function doDropQuest(questType) {
       title,
       description:    desc,
       objectives,
-      reward:         { gold, exp, items: rewardItems },
+      reward:         { gold, exp, items: rewardItems, advancementIngredientQty: advIngQty },
       assignedTo:     targetUid,
       deityUid:       _uid,
       deityName,
@@ -1927,7 +1920,7 @@ async function doDropQuest(questType) {
 
     // Clear form
     ["quest-title","quest-desc","quest-objectives","quest-reward-gold",
-     "quest-reward-exp","quest-reward-items","quest-expires"].forEach(id => {
+     "quest-reward-exp","quest-reward-items","quest-expires","quest-reward-ingredient-qty"].forEach(id => {
       const el = document.getElementById(id); if (el) el.value = "";
     });
     document.getElementById("quest-modal").style.display = "none";
@@ -1980,6 +1973,9 @@ function renderDeityQuests() {
       const rewardItems = Array.isArray(q.reward?.items) && q.reward.items.length
         ? ` · 🎁 ${q.reward.items.map(i => `${i.qty}x ${i.name}`).join(", ")}`
         : "";
+      const rewardIngredient = q.reward?.advancementIngredientQty
+        ? ` · <span style="color:#d4a8ff">✦ ${q.reward.advancementIngredientQty}× Advancement Ingredient</span>`
+        : "";
       const pendingCount = (q._submissions || []).filter(s => s.status === 'pending').length;
       const submissionsBadge = pendingCount > 0
         ? `<span class="dq-submissions-badge">${pendingCount} pending</span>`
@@ -2000,7 +1996,7 @@ function renderDeityQuests() {
         <div class="quest-card-desc">${descHtml}</div>
         ${q.objectives?.length ? `<div class="quest-objectives">${q.objectives.map(o=>`<div class="quest-obj">• ${o}</div>`).join("")}</div>` : ""}
         <div class="quest-card-footer">
-          <span class="quest-reward-tag">🪙 ${q.reward?.gold||0} gold · ✨ ${q.reward?.exp||0} exp${rewardItems}</span>
+          <span class="quest-reward-tag">🪙 ${q.reward?.gold||0} gold · ✨ ${q.reward?.exp||0} exp${rewardItems}${rewardIngredient}</span>
           <span class="quest-completions">${completedCount} completion${completedCount!==1?"s": ""}</span>
           ${q.status === "active" ? `<button class="deity-mini-btn danger" onclick="window._endQuest('${q.id}')">End Quest</button>` : ""}
         </div>
@@ -2063,10 +2059,14 @@ window._renderSubmissionsFor = function(q) {
 
       ${(s.status === 'pending' || s.status === 'punished') ? `
       <div class="dq-sub-actions">
+        <button class="deity-mini-btn profile" onclick="window._openPlayerProfile('${s.uid||s.id}','${(s.playerName||'?').replace(/'/g,"\\'")}')">👤 Profile</button>
         <button class="deity-mini-btn success" onclick="window._approveSubmission('${s.id}','${q.id}')">✓ Approve</button>
         <button class="deity-mini-btn danger"  onclick="window._rejectSubmission('${s.id}')">✕ Reject</button>
         ${s.status === 'pending' ? `<button class="deity-mini-btn punish" onclick="window._openPunishModal('${s.uid||s.id}','${(s.playerName||'?').replace(/'/g,"\\'")}','${s.id}','questSubmissions')">⚖️ Punish</button>` : ''}
-      </div>` : ''}
+      </div>` : `
+      <div class="dq-sub-actions">
+        <button class="deity-mini-btn profile" onclick="window._openPlayerProfile('${s.uid||s.id}','${(s.playerName||'?').replace(/'/g,"\\'")}')">👤 Profile</button>
+      </div>`}
     </div>`;
   }).join('');
 };
@@ -2100,6 +2100,82 @@ window._loadDeityQuestSubmissions = async function() {
     renderDeityQuests();
   });
   renderDeityQuests();
+};
+
+// ── Player profile viewer — called from submission cards ──────────────────────
+const _DEITY_INGREDIENTS_MAP = {
+  "Sah'run":   ["Heart of the Red Phoenix","Gem of Luminance"],
+  "Alistor":   ["The Void-Eye","Orb of Silence"],
+  "Elionidas": ["Crown of Fortune","Tears of The Endless Goldfish"],
+  "Mah'run":   ["Core of a Fallen Star","Fruit of World Tree"],
+  "Freyja":    ["Divine Heart Essence","Forgotten Desire Seed"],
+  "Arion":     ["Scales of Equilibrium","Adonai Sword"],
+  "Veil":      ["Ink of Time","Eye of All-knowing"],
+};
+
+window._openPlayerProfile = async function(playerUid, playerName) {
+  // Remove any existing profile modal
+  document.getElementById('player-profile-modal')?.remove();
+
+  let charData = null;
+  try {
+    const snap = await getDoc(doc(db, 'characters', playerUid));
+    if (snap.exists()) charData = snap.data();
+  } catch(e) { console.warn('Profile fetch failed:', e); }
+
+  if (!charData) {
+    window.showToast('Could not load player profile.', 'error');
+    return;
+  }
+
+  const inv         = charData.inventory || [];
+  const deity       = charData.deity || '—';
+  const rank        = charData.rank  || 'Wanderer';
+  const level       = charData.level || 1;
+  const charClass   = charData.charClass || '—';
+  const race        = charData.race  || '—';
+  const faithLevel  = charData.faithLevel || 0;
+  const ingredients = _DEITY_INGREDIENTS_MAP[deity] || [];
+
+  // Build ingredient rows showing how many they currently own
+  const ingRowsHtml = ingredients.length
+    ? ingredients.map(ing => {
+        const owned = inv.find(i => i.name === ing)?.qty ?? 0;
+        return `<div class="pp-ing-row">
+          <span class="pp-ing-name">✦ ${ing}</span>
+          <span class="pp-ing-qty" style="color:${owned > 0 ? '#d4a8ff' : 'var(--text-dim)'}">${owned} owned</span>
+        </div>`;
+      }).join('')
+    : `<div style="color:var(--text-dim);font-style:italic;font-size:0.8rem">No deity selected — no ingredients required.</div>`;
+
+  const modal = document.createElement('div');
+  modal.id = 'player-profile-modal';
+  modal.className = 'deity-modal';
+  modal.style.display = 'flex';
+  modal.innerHTML = `
+    <div class="deity-modal-box" style="max-width:420px">
+      <div class="deity-modal-title">👤 ${playerName}</div>
+
+      <div class="pp-stats-grid">
+        <div class="pp-stat"><span class="pp-stat-label">Rank</span><span class="pp-stat-val">${rank}</span></div>
+        <div class="pp-stat"><span class="pp-stat-label">Level</span><span class="pp-stat-val">${level}</span></div>
+        <div class="pp-stat"><span class="pp-stat-label">Class</span><span class="pp-stat-val">${charClass}</span></div>
+        <div class="pp-stat"><span class="pp-stat-label">Race</span><span class="pp-stat-val">${race}</span></div>
+        <div class="pp-stat"><span class="pp-stat-label">Deity</span><span class="pp-stat-val" style="color:var(--gold)">${deity}</span></div>
+        <div class="pp-stat"><span class="pp-stat-label">Faith Lv.</span><span class="pp-stat-val">${faithLevel}</span></div>
+      </div>
+
+      <div class="pp-section-title">✦ Advancement Ingredients</div>
+      <div class="pp-ing-list">${ingRowsHtml}</div>
+
+      <div style="display:flex;gap:10px;margin-top:16px">
+        <button class="btn-primary" style="flex:1" onclick="_openModalForWorshipper('bestow','${playerUid}','${playerName.replace(/'/g,"\\'")}');document.getElementById('player-profile-modal')?.remove()">✦ Bestow Ingredient</button>
+        <button class="btn-secondary" onclick="document.getElementById('player-profile-modal')?.remove()">CLOSE</button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
 };
 
 // Approve a submission: update doc, grant reward, notify player

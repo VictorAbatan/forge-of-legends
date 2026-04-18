@@ -443,12 +443,13 @@ select.dnpc-select option:checked {
 
 .toast {
   position: fixed;
-  top: 50%; left: 50%;
-  transform: translate(-50%, -46%);
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(12px);
   background: #0e0c08;
   border: 1px solid var(--gold-dim);
   border-radius: 10px;
-  padding: 7px 18px;
+  padding: 10px 20px;
   font-family: var(--ff-mono);
   font-size: 0.78rem;
   font-weight: 600;
@@ -459,7 +460,7 @@ select.dnpc-select option:checked {
   opacity: 0;
   width: auto;
   min-width: 120px;
-  max-width: min(320px, 88vw);
+  max-width: min(340px, 90vw);
   box-shadow: 0 8px 40px rgba(0,0,0,0.75), 0 0 0 1px rgba(201,168,76,0.06);
   text-align: center;
   pointer-events: none;
@@ -467,10 +468,23 @@ select.dnpc-select option:checked {
   white-space: normal;
   transition: opacity 0.22s ease, transform 0.22s ease;
 }
-.toast.show { opacity: 1; transform: translate(-50%, -50%); pointer-events: auto; }
-.toast.success { border-color: #2a5c3a; color: #6dc99a; }
-.toast.error   { border-color: #6b2a2a; color: #e07070; }
-.toast.warning { border-color: #5c4a1a; color: #c9a84c; }
+.toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  pointer-events: auto;
+}
+.toast.success { border-color: #2a5c3a; color: #6dc99a; background: #080e0a; }
+.toast.error   { border-color: #6b2a2a; color: #e07070; background: #0e0808; }
+.toast.warning { border-color: #5c4a1a; color: #c9a84c; background: #0c0a06; }
+
+@media (max-width: 480px) {
+  .toast {
+    bottom: 16px;
+    max-width: 88vw;
+    font-size: 0.74rem;
+    padding: 9px 16px;
+  }
+}
 
 /* Shared chat classes (reused from player dashboard) */
 .chat-msg { display: flex; gap: 10px; align-items: flex-end; }
@@ -1432,4 +1446,210 @@ button,
 .deity-mini-btn.punish:hover {
   background: rgba(160,80,220,0.22);
   border-color: rgba(160,80,220,0.65);
+}
+/* ── Player Profile Modal ── */
+.pp-stats-grid        { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin:12px 0 16px; }
+.pp-stat              { background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:6px; padding:8px 10px; }
+.pp-stat-label        { display:block; font-family:var(--ff-mono); font-size:0.55rem; color:var(--ash); letter-spacing:0.07em; text-transform:uppercase; margin-bottom:3px; }
+.pp-stat-val          { display:block; font-size:0.85rem; color:var(--text); font-weight:600; }
+.pp-section-title     { font-family:var(--ff-mono); font-size:0.6rem; color:#d4a8ff; letter-spacing:0.08em; text-transform:uppercase; margin-bottom:8px; }
+.pp-ing-list          { background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:8px; padding:10px; }
+.pp-ing-row           { display:flex; justify-content:space-between; align-items:center; padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.04); font-size:0.8rem; }
+.pp-ing-row:last-child{ border-bottom:none; }
+.pp-ing-name          { color:var(--text-dim); }
+.pp-ing-qty           { font-family:var(--ff-mono); font-size:0.7rem; }
+
+/* ── Profile mini-button variant ── */
+.deity-mini-btn.profile { color:rgba(140,180,255,0.8); border-color:rgba(140,180,255,0.2); }
+.deity-mini-btn.profile:hover { background:rgba(140,180,255,0.1); border-color:rgba(140,180,255,0.5); color:rgba(140,180,255,1); }
+/* ═══════════════════════════════════════════════════
+   MOBILE ALERT & UI FIXES
+   ═══════════════════════════════════════════════════ */
+
+/* ── Submission action buttons: always wrap cleanly ── */
+.dq-sub-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.dq-sub-actions .deity-mini-btn {
+  flex-shrink: 0;
+  min-height: 32px;
+  padding: 5px 12px;
+  font-size: 0.62rem;
+}
+
+/* ── Submission item: full-width on mobile ── */
+.dq-sub-item {
+  padding: 12px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+.dq-sub-player {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.dq-sub-name   { font-family: var(--ff-display); font-size: 0.82rem; color: var(--gold); }
+.dq-sub-rank   { font-size: 0.72rem; color: var(--text-dim); }
+.dq-sub-status { font-family: var(--ff-mono); font-size: 0.62rem; font-weight: 700; letter-spacing: 0.06em; margin-left: auto; }
+.dq-sub-time   { font-family: var(--ff-mono); font-size: 0.6rem; color: var(--ash-light); margin-bottom: 6px; }
+.dq-sub-proof-row { font-size: 0.8rem; color: var(--text-dim); margin-bottom: 3px; line-height: 1.5; }
+.dq-sub-empty  { font-size: 0.8rem; color: var(--text-dim); font-style: italic; padding: 8px 0; }
+.dq-sub-activity-toggle {
+  font-family: var(--ff-mono); font-size: 0.62rem; color: var(--gold-dim);
+  cursor: pointer; margin: 8px 0 4px; user-select: none;
+}
+.dq-sub-activity-toggle:hover { color: var(--gold); }
+.dq-sub-activity-list { background: rgba(0,0,0,0.2); border-radius: 6px; padding: 8px 10px; }
+.dq-sub-activity-item { font-family: var(--ff-mono); font-size: 0.62rem; color: var(--ash-light); padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.03); }
+.dq-sub-activity-item:last-child { border-bottom: none; }
+
+/* ── Submissions panel toggle ── */
+.dq-submissions-panel { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px; }
+.dq-submissions-title {
+  font-family: var(--ff-mono); font-size: 0.62rem; color: var(--gold-dim);
+  cursor: pointer; display: flex; align-items: center; gap: 6px;
+  user-select: none; padding: 4px 0;
+}
+.dq-submissions-title:hover { color: var(--gold); }
+.dq-sub-chevron { font-size: 0.75rem; transition: transform 0.18s; }
+.dq-submissions-badge {
+  background: rgba(201,168,76,0.15); border: 1px solid rgba(201,168,76,0.3);
+  border-radius: 10px; padding: 1px 7px;
+  font-family: var(--ff-mono); font-size: 0.55rem; color: var(--gold);
+  margin-left: auto;
+}
+
+/* ── Modal: tighter on small screens ── */
+@media (max-width: 480px) {
+  .deity-modal-box {
+    padding: 18px 14px 16px;
+    max-height: 92vh;
+    border-radius: 12px;
+  }
+  .deity-modal-title { font-size: 0.8rem; }
+  .deity-modal-desc  { font-size: 0.78rem; margin-bottom: 12px; }
+
+  /* Ink confirm: tighter, never clips ── */
+  .ink-confirm-box {
+    min-width: 0;
+    max-width: 92vw;
+    padding: 22px 18px 18px;
+    border-radius: 12px;
+  }
+  .ink-confirm-msg { font-size: 0.85rem; margin-bottom: 16px; }
+  .ink-confirm-btns { flex-direction: column-reverse; gap: 8px; }
+  .ink-confirm-cancel, .ink-confirm-ok {
+    width: 100%;
+    text-align: center;
+    padding: 10px 16px;
+    font-size: 0.74rem;
+  }
+}
+
+/* ── Worshipper cards: stack cleanly on very small screens ── */
+@media (max-width: 400px) {
+  .worshipper-card {
+    grid-template-columns: 36px 1fr;
+    grid-template-rows: auto auto;
+    gap: 8px 10px;
+  }
+  .worshipper-actions {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+  .deity-mini-btn { font-size: 0.6rem; padding: 5px 10px; min-height: 30px; }
+}
+
+/* ── Quest cards: buttons wrap instead of overflow ── */
+.quest-card-footer {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+@media (max-width: 480px) {
+  .quest-card { padding: 12px; }
+  .quest-card-header { gap: 5px; }
+  .quest-card-footer .deity-mini-btn { flex: 1 1 auto; text-align: center; }
+}
+
+/* ── Bestow ingredient picker: mobile-friendly rows ── */
+.bestow-ing-list { display: flex; flex-direction: column; gap: 8px; }
+.bestow-ing-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.bestow-ing-icon { font-size: 1.1rem; flex-shrink: 0; }
+.bestow-ing-name { flex: 1; font-size: 0.85rem; color: var(--text); min-width: 0; word-break: break-word; }
+.bestow-ing-qty-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.bestow-qty-btn {
+  width: 28px; height: 28px;
+  background: rgba(201,168,76,0.1); border: 1px solid rgba(201,168,76,0.25);
+  border-radius: 6px; color: var(--gold); font-size: 1rem;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s;
+  flex-shrink: 0;
+  touch-action: manipulation;
+}
+.bestow-qty-btn:hover { background: rgba(201,168,76,0.22); }
+.bestow-qty-input {
+  width: 44px; text-align: center;
+  background: var(--ink3); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text);
+  font-family: var(--ff-mono); font-size: 0.82rem;
+  padding: 4px 0;
+}
+
+/* ── Punish modal: items list scrolls, doesn't overflow ── */
+#punish-inv-list { max-height: 160px; overflow-y: auto; }
+@media (max-width: 480px) {
+  #punish-inv-list { max-height: 120px; }
+  .punish-item-qty-input { width: 48px !important; }
+}
+
+/* ── Player profile modal: stat grid responsive ── */
+@media (max-width: 400px) {
+  .pp-stats-grid { grid-template-columns: 1fr 1fr; }
+}
+
+/* ── Two-col: always single column on mobile ── */
+@media (max-width: 480px) {
+  .two-col { grid-template-columns: 1fr; gap: 12px; }
+}
+
+/* ── Reject modal: full-width buttons on mobile ── */
+@media (max-width: 480px) {
+  .reject-modal-box { max-width: 92vw !important; padding: 20px 16px; }
+  #reject-confirm-btn,
+  .reject-modal-box .btn-primary,
+  .reject-modal-box .btn-secondary { width: 100%; text-align: center; }
+  .reject-modal-box > div[style*="flex"] { flex-direction: column-reverse; gap: 8px; }
+}
+
+/* ── Vision type grid: 2 cols on very small phones ── */
+@media (max-width: 380px) {
+  .vision-type-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── Bestow warning text: readable on mobile ── */
+.bestow-warning {
+  line-height: 1.6;
+  font-size: 0.82rem;
 }

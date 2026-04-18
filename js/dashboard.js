@@ -2031,139 +2031,239 @@ function _getFaithBlessingPct(charData) {
   return (3 * current.mult) / 100; // e.g. tier 2 = 6% = 0.06
 }
 
-// Temple panel — shows faith level, tier, blessing strength, sacrifice option
+// ═══════════════════════════════════════════════════
+//  SHRINE / DEITY TEMPLE PANEL SYSTEM
+//  "Visit Temple" on the map now opens panel-shrine
+//  instead of a floating modal.
+// ═══════════════════════════════════════════════════
+
+const DEITY_LORE = {
+  "Sah'run":   { title:"God of Flames",     desc:"Sah'run is the lord of flames and embodiment of scorch, also known as The Demon of Fire.", authorities:"Flames, Luminance, Hellfire" },
+  "Alistor":   { title:"God of Darkness",   desc:"Alistor is the God of darkness, shadows and rest, also known as the Final Slumber.",       authorities:"Darkness, Slumber, Secrets" },
+  "Elionidas": { title:"God of Abundance",  desc:"Elionidas is the God of wealth, good luck and opportunities, also known as The Fortunal.", authorities:"Fate, Blessings, Riches" },
+  "Mah'run":   { title:"Goddess of Stars",  desc:"Mah'run is the Goddess of the night sky and eternal stars, also known as the Astral Mother.", authorities:"Stars, Cosmos, Guidance" },
+  "Freyja":    { title:"Goddess of Love",   desc:"Freyja is the Goddess of affection, passion and bonds, also known as the Heart Mother.",    authorities:"Love, Souls, Desire" },
+  "Arion":     { title:"God of Justice",    desc:"Arion is the God of law, balance and fairness, also known as the Divine Arbiter.",           authorities:"Justice, Balance, Retribution" },
+  "Veil":      { title:"God of Knowledge",  desc:"Veil is the God of wisdom, memory and hidden truths, also known as The Hand of Secret.",    authorities:"Knowledge, Memory, Secrets" },
+};
+
+/** Navigate to the shrine panel and populate it based on current location. */
 window._openTemplePanel = function() {
+  // Use the global switchPanel function to navigate
+  if (typeof window.switchPanel === 'function') {
+    window.switchPanel('shrine');
+  } else {
+    // Fallback: trigger nav click
+    document.querySelector('[data-panel="shrine"]')?.click();
+  }
+  _renderShrinePanel();
+};
+
+/** Full render of the shrine panel — called on nav switch too. */
+function _renderShrinePanel() {
   const c = _charData;
   if (!c) return;
 
   const loc = (c.kingdom || c.location || "").toLowerCase().replace(/_/g, " ");
   const shrineName = Object.keys(DEITY_SHRINE_MAP).find(k => loc.includes(k));
   const shrineDeity = shrineName ? DEITY_SHRINE_MAP[shrineName] : null;
+  const isAtShrine  = !!shrineDeity;
   const isOwnShrine = shrineDeity === c.deity;
-  const faithLevel = c.faithLevel || 0;
-  const { current: tier, next } = _getFaithTier(faithLevel);
-  const blessingDesc = _getBlessingDesc(c.deity, faithLevel);
-  const deityIcon = DEITY_ICONS[c.deity] || "✨";
-  const mats = DEITY_WORSHIP_MATS[c.deity] || [];
-  const inv = c.inventory || [];
 
-  // Check if player has all 3 worship materials
+  // Resolve which deity this shrine belongs to for lore/icon
+  const activeDeity = isOwnShrine ? c.deity : shrineDeity;
+  const deityIcon   = DEITY_ICONS[activeDeity] || DEITY_ICONS[c.deity] || "⛩️";
+  const lore        = DEITY_LORE[activeDeity]  || DEITY_LORE[c.deity] || {};
+
+  // Panel header
+  const titleEl = document.getElementById('shrine-panel-title');
+  const subEl   = document.getElementById('shrine-panel-subtitle');
+  if (titleEl) titleEl.textContent = isAtShrine ? `${deityIcon} Temple of ${activeDeity}` : '🛕 Deity Shrine';
+  if (subEl)   subEl.textContent   = isAtShrine ? (lore.title || '') : 'Travel to a deity shrine on the World Map.';
+
+  // Show / hide state blocks
+  const notAt   = document.getElementById('shrine-not-at-shrine');
+  const wrongEl = document.getElementById('shrine-wrong-shrine');
+  const ownEl   = document.getElementById('shrine-own-shrine');
+  if (notAt)   notAt.style.display   = (!isAtShrine)  ? 'block' : 'none';
+  if (wrongEl) wrongEl.style.display = (isAtShrine && !isOwnShrine) ? 'block' : 'none';
+  if (ownEl)   ownEl.style.display   = (isAtShrine && isOwnShrine)  ? 'block' : 'none';
+
+  // ── Wrong shrine state ──
+  if (isAtShrine && !isOwnShrine) {
+    const iconEl = document.getElementById('shrine-wrong-icon');
+    const msgEl  = document.getElementById('shrine-wrong-msg');
+    if (iconEl) iconEl.textContent = deityIcon;
+    if (msgEl)  msgEl.textContent  = `You must be at ${c.deity}'s shrine to sacrifice. This is ${shrineDeity}'s shrine.`;
+    // Reset explore log
+    const exploreLog = document.getElementById('shrine-explore-log');
+    if (exploreLog) { exploreLog.style.display = 'none'; exploreLog.innerHTML = ''; }
+    return;
+  }
+
+  if (!isOwnShrine) return; // not at any shrine — done
+
+  // ── Own shrine state ──
+  const faithLevel  = c.faithLevel || 0;
+  const { current: tier, next } = _getFaithTier(faithLevel);
+  const tierProgress = next
+    ? Math.round(((faithLevel - tier.minFaith) / (next.minFaith - tier.minFaith)) * 100)
+    : 100;
+  const blessingDesc = _getBlessingDesc(c.deity, faithLevel);
+
+  // Faith bar
+  const faithNumEl = document.getElementById('shrine-faith-level');
+  const faithBarEl = document.getElementById('shrine-faith-bar');
+  const tierNumEl  = document.getElementById('shrine-tier-num');
+  const tierLblEl  = document.getElementById('shrine-tier-label');
+  const nextTierEl = document.getElementById('shrine-next-tier');
+  if (faithNumEl) faithNumEl.textContent = faithLevel;
+  if (faithBarEl) faithBarEl.style.width = tierProgress + '%';
+  if (tierNumEl)  tierNumEl.textContent  = tier.tier;
+  if (tierLblEl)  tierLblEl.textContent  = tier.label;
+  if (nextTierEl) nextTierEl.textContent = next
+    ? `Next: ${next.label} at Faith ${next.minFaith}`
+    : 'Max Tier Reached ✦';
+
+  // Blessing
+  const blessNameEl = document.getElementById('shrine-blessing-name');
+  const blessDescEl = document.getElementById('shrine-blessing-desc');
+  const blessMultEl = document.getElementById('shrine-blessing-mult');
+  const blessTierEl = document.getElementById('shrine-blessing-tier');
+  if (blessNameEl) blessNameEl.textContent = c.blessing || '—';
+  if (blessDescEl) blessDescEl.textContent = blessingDesc;
+  if (blessMultEl) blessMultEl.textContent = tier.mult + '×';
+  if (blessTierEl) blessTierEl.textContent = tier.tier;
+
+  // Lore
+  const loreDescEl = document.getElementById('shrine-lore-desc');
+  const loreAuthEl = document.getElementById('shrine-lore-authorities');
+  if (loreDescEl) loreDescEl.textContent = lore.desc || '—';
+  if (loreAuthEl) loreAuthEl.textContent = lore.authorities || '—';
+
+  // Worship materials preview chips
+  const matsPreview = document.getElementById('shrine-worship-mats-preview');
+  const mats = DEITY_WORSHIP_MATS[c.deity] || [];
+  const inv  = c.inventory || [];
+  if (matsPreview) {
+    matsPreview.innerHTML = mats.map(mat => {
+      const owned = inv.find(i => i.name === mat);
+      const qty   = owned?.qty || 0;
+      return `<span style="background:rgba(201,168,76,0.08);border:1px solid rgba(201,168,76,0.2);
+        border-radius:20px;padding:3px 10px;font-size:0.72rem;color:${qty>0?'var(--gold-dim)':'var(--ash)'}">
+        ${mat} <b style="color:${qty>0?'var(--gold)':'#555'}">×${qty}</b></span>`;
+    }).join('');
+  }
+
+  // Sacrifice materials list
+  const matListEl = document.getElementById('shrine-mat-list');
+  const sacBtn    = document.getElementById('shrine-sacrifice-btn');
   const matStatus = mats.map(mat => {
     const owned = inv.find(i => i.name === mat);
     return { name: mat, qty: owned?.qty || 0, hasOne: (owned?.qty || 0) >= 1 };
   });
-  const canSacrifice = isOwnShrine && matStatus.every(m => m.hasOne);
-
-  // Build faith bar
-  const nextThreshold = next ? next.minFaith : faithLevel;
-  const tierProgress = next
-    ? Math.round(((faithLevel - tier.minFaith) / (next.minFaith - tier.minFaith)) * 100)
-    : 100;
-
-  // Render into a modal overlay
-  const existing = document.getElementById('_temple-modal');
-  if (existing) existing.remove();
-
-  const overlay = document.createElement('div');
-  overlay.id = '_temple-modal';
-  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
-
-  overlay.innerHTML = `
-    <div style="background:var(--bg-card,#18171c);border:1px solid var(--gold-dim,#a07830);border-radius:16px;padding:28px 22px;max-width:420px;width:100%;max-height:85vh;overflow-y:auto">
-
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px">
-        <span style="font-size:2rem">${deityIcon}</span>
-        <div>
-          <div style="font-size:0.7rem;letter-spacing:0.12em;color:var(--gold,#c9a84c);text-transform:uppercase">Temple of ${c.deity}</div>
-          <div style="font-size:0.85rem;color:var(--text-dim,#aaa)">${c.deity ? ({"Sah'run":'God of Flames','Alistor':'God of Darkness','Elionidas':'God of Abundance',"Mah'run":'Goddess of Stars','Freyja':'Goddess of Love','Arion':'God of Justice','Veil':'God of Knowledge'})[c.deity] || '' : ''}</div>
-        </div>
-        <button onclick="document.getElementById('_temple-modal').remove()" style="margin-left:auto;background:transparent;border:none;color:var(--text-dim,#aaa);font-size:1.2rem;cursor:pointer">✕</button>
-      </div>
-
-      <!-- Faith Level -->
-      <div style="background:rgba(201,168,76,0.06);border:1px solid rgba(201,168,76,0.2);border-radius:10px;padding:14px;margin-bottom:16px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <span style="font-size:0.75rem;letter-spacing:0.1em;color:var(--gold,#c9a84c);text-transform:uppercase">Faith Level</span>
-          <span style="font-size:1rem;font-weight:700;color:var(--gold,#c9a84c)">${faithLevel}</span>
-        </div>
-        <div style="background:rgba(255,255,255,0.06);border-radius:6px;height:6px;overflow:hidden;margin-bottom:8px">
-          <div style="height:100%;width:${tierProgress}%;background:var(--gold,#c9a84c);border-radius:6px;transition:width 0.4s"></div>
-        </div>
-        <div style="display:flex;justify-content:space-between;font-size:0.72rem;color:var(--text-dim,#aaa)">
-          <span>Tier ${tier.tier} — <b style="color:var(--gold,#c9a84c)">${tier.label}</b></span>
-          ${next ? `<span>Next: ${next.label} at Faith ${next.minFaith}</span>` : `<span style="color:var(--gold,#c9a84c)">Max Tier Reached</span>`}
-        </div>
-      </div>
-
-      <!-- Blessing -->
-      <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border,#333);border-radius:10px;padding:14px;margin-bottom:16px">
-        <div style="font-size:0.7rem;letter-spacing:0.1em;color:var(--gold,#c9a84c);text-transform:uppercase;margin-bottom:6px">Active Blessing</div>
-        <div style="font-size:0.9rem;font-weight:600;color:var(--text,#eee);margin-bottom:4px">${c.blessing || '—'}</div>
-        <div style="font-size:0.82rem;color:var(--text-dim,#aaa)">${blessingDesc}</div>
-        <div style="margin-top:8px;font-size:0.72rem;color:#888">Blessing strength: <b style="color:var(--gold,#c9a84c)">${tier.mult}×</b> base (Faith Tier ${tier.tier})</div>
-      </div>
-
-      <!-- Sacrifice -->
-      <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border,#333);border-radius:10px;padding:14px">
-        <div style="font-size:0.7rem;letter-spacing:0.1em;color:var(--gold,#c9a84c);text-transform:uppercase;margin-bottom:10px">Offer Sacrifice</div>
-        ${!isOwnShrine ? `
-          <div style="font-size:0.82rem;color:#888;font-style:italic">
-            You must be at <b style="color:var(--gold,#c9a84c)">${c.deity}'s</b> shrine to sacrifice.<br>
-            ${shrineName ? `This is ${shrineDeity}'s shrine.` : 'You are not at a deity shrine.'}
-          </div>` : `
-          <div style="font-size:0.8rem;color:var(--text-dim,#aaa);margin-bottom:10px">Sacrifice 1 of each worship material to gain +1 Faith.</div>
-          <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">
-            ${matStatus.map(m => `
-              <div style="display:flex;align-items:center;gap:8px;font-size:0.82rem">
-                <span style="color:${m.hasOne ? '#4fc870' : '#e05555'}">${m.hasOne ? '✓' : '✗'}</span>
-                <span style="color:${m.hasOne ? 'var(--text,#eee)' : 'var(--text-dim,#aaa)'}">${m.name}</span>
-                <span style="margin-left:auto;color:#888">×${m.qty} owned</span>
-              </div>`).join('')}
-          </div>
-          <button id="_temple-sacrifice-btn"
-            style="width:100%;padding:11px;border-radius:8px;font-weight:700;font-size:0.82rem;letter-spacing:0.08em;cursor:${canSacrifice ? 'pointer' : 'not-allowed'};
-              background:${canSacrifice ? 'var(--gold,#c9a84c)' : 'rgba(255,255,255,0.05)'};
-              color:${canSacrifice ? '#111' : '#555'};
-              border:1px solid ${canSacrifice ? 'var(--gold,#c9a84c)' : 'var(--border,#333)'}"
-            ${canSacrifice ? '' : 'disabled'}>
-            🙏 OFFER SACRIFICE
-          </button>
-          <div id="_temple-sacrifice-result" style="margin-top:8px;font-size:0.8rem;text-align:center;min-height:1.2em"></div>
-        `}
-      </div>
-    </div>`;
-
-  document.body.appendChild(overlay);
-  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-
-  if (isOwnShrine) {
-    document.getElementById('_temple-sacrifice-btn')?.addEventListener('click', window._doSacrifice);
+  const canSacrifice = matStatus.every(m => m.hasOne);
+  if (matListEl) {
+    matListEl.innerHTML = matStatus.map(m => `
+      <div style="display:flex;align-items:center;gap:8px;font-size:0.82rem">
+        <span style="color:${m.hasOne ? '#4fc870' : '#e05555'};font-size:1rem">${m.hasOne ? '✓' : '✗'}</span>
+        <span style="color:${m.hasOne ? 'var(--text)' : 'var(--text-dim)'};flex:1">${m.name}</span>
+        <span style="color:#888;font-size:0.75rem">×${m.qty} owned</span>
+      </div>`).join('');
   }
+  if (sacBtn) {
+    sacBtn.disabled = !canSacrifice;
+    sacBtn.style.opacity = canSacrifice ? '1' : '0.5';
+  }
+
+  // Reset explore log on re-render
+  const exploreLog = document.getElementById('shrine-explore-log');
+  if (exploreLog) { exploreLog.style.display = 'none'; exploreLog.innerHTML = ''; }
+  const sacResult = document.getElementById('shrine-sacrifice-result');
+  if (sacResult) sacResult.textContent = '';
+}
+
+/** Explore the shrine grounds — 10% base chance to find a worship material. */
+window._doShrineExplore = async function() {
+  const c = _charData;
+  if (!c) return;
+  if (c.isDead) { window.showToast('☠️ You are dead. You cannot explore.', 'error'); return; }
+
+  const loc        = (c.kingdom || c.location || "").toLowerCase().replace(/_/g, " ");
+  const shrineName = Object.keys(DEITY_SHRINE_MAP).find(k => loc.includes(k));
+  const shrineDeity = shrineName ? DEITY_SHRINE_MAP[shrineName] : null;
+  if (!shrineDeity) { window.showToast('Travel to a deity shrine first.', 'error'); return; }
+
+  // The worship mats we can find are for whichever shrine we're at
+  const mats = DEITY_WORSHIP_MATS[shrineDeity] || [];
+  if (!mats.length) return;
+
+  // Disable both explore buttons while working
+  const btnOwn   = document.getElementById('shrine-explore-btn');
+  const btnWrong = document.getElementById('shrine-explore-wrong-btn');
+  const logEl    = document.getElementById('shrine-explore-log');
+  if (btnOwn)   { btnOwn.disabled   = true; btnOwn.textContent   = '🔍 Exploring...'; }
+  if (btnWrong) { btnWrong.disabled = true; btnWrong.textContent = '🔍 Exploring...'; }
+  if (logEl)    { logEl.style.display = 'block'; logEl.innerHTML = '<span style="color:var(--ash);font-style:italic">Searching the grounds...</span>'; }
+
+  await new Promise(r => setTimeout(r, 1800)); // 1.8s feel of exploring
+
+  // 10% base chance, Mah'run blessing boosts special location finds
+  const mahrunBonus = (c.deity === "Mah'run") ? _getFaithBlessingPct(c) : 0;
+  const chance = 0.10 + mahrunBonus;
+  const found  = Math.random() < chance;
+
+  let logMsg = '';
+  if (found) {
+    const mat = mats[Math.floor(Math.random() * mats.length)];
+    const inv = [...(c.inventory || [])];
+    const ex  = inv.find(i => i.name === mat);
+    if (ex) ex.qty += 1; else inv.push({ name: mat, qty: 1, type: 'material' });
+    c.inventory = inv;
+    window._allInvItems = inv;
+    window._refreshInvDisplay?.();
+    try {
+      await updateDoc(doc(db, 'characters', _uid), { inventory: inv });
+    } catch(e) { console.warn('[Shrine] Inventory write failed:', e); }
+    logActivity('⚗️', `<b>Temple Explore:</b> Found <b>${mat}</b> at <b>${shrineDeity}'s shrine</b>.`, '#c9a84c');
+    await _incrementQuest('gather', 1);
+    logMsg = `<span style="color:#4fc870">✨ You found <b>${mat}</b>!</span>`;
+    window.showToast(`✨ Found: ${mat}`, 'success');
+    // Re-render panel to update mat counts
+    _renderShrinePanel();
+  } else {
+    logMsg = `<span style="color:var(--ash)">🌑 You searched carefully... but found nothing this time.</span>`;
+    window.showToast('🌑 Nothing found this time. Keep exploring!', 'info');
+  }
+
+  if (logEl) logEl.innerHTML = logMsg;
+  if (btnOwn)   { btnOwn.disabled   = false; btnOwn.textContent   = '🔍 EXPLORE TEMPLE'; }
+  if (btnWrong) { btnWrong.disabled = false; btnWrong.textContent = '🔍 EXPLORE GROUNDS'; }
 };
 
-// Perform the sacrifice
-window._doSacrifice = async function() {
-  const btn = document.getElementById('_temple-sacrifice-btn');
-  const resultEl = document.getElementById('_temple-sacrifice-result');
-  if (!btn || btn.disabled) return;
+/** Perform the sacrifice — same logic as before, now updates the panel in-place. */
+window._doShrineSacrifice = async function() {
+  const sacBtn   = document.getElementById('shrine-sacrifice-btn');
+  const resultEl = document.getElementById('shrine-sacrifice-result');
+  if (!sacBtn || sacBtn.disabled) return;
 
-  const c = _charData;
+  const c    = _charData;
   const mats = DEITY_WORSHIP_MATS[c.deity] || [];
-  const inv = [...(c.inventory || [])];
+  const inv  = [...(c.inventory || [])];
 
-  // Double-check materials
+  // Double-check all materials present
   for (const mat of mats) {
     const owned = inv.find(i => i.name === mat);
     if (!owned || owned.qty < 1) {
-      if (resultEl) resultEl.textContent = `Missing: ${mat}`;
+      if (resultEl) { resultEl.style.color = '#e05555'; resultEl.textContent = `Missing: ${mat}`; }
       return;
     }
   }
 
-  btn.disabled = true;
-  btn.textContent = 'Offering...';
+  sacBtn.disabled = true;
+  sacBtn.textContent = '🙏 Offering...';
 
-  // Consume 1 of each material
+  // Consume 1 of each
   for (const mat of mats) {
     const item = inv.find(i => i.name === mat);
     item.qty -= 1;
@@ -2189,20 +2289,22 @@ window._doSacrifice = async function() {
         : `🙏 Sacrifice accepted. Faith: ${newFaith}`;
     }
     logActivity('🙏', `<b>Sacrifice Offered</b> at <b>${c.deity}'s shrine</b>. Faith Level: <b>${newFaith}</b>${tieredUp ? ` — Advanced to <b>${newTier.label}</b>!` : ''}.`, '#c9a84c');
+    if (tieredUp) window.showToast(`🎉 Faith Tier Up! You are now ${newTier.label}!`, 'success');
 
-    // Refresh the modal after a short delay so tier/blessing update
-    setTimeout(() => {
-      document.getElementById('_temple-modal')?.remove();
-      window._openTemplePanel();
-    }, 1200);
+    sacBtn.textContent = '🙏 OFFER SACRIFICE';
+    // Re-render the panel so faith bar + mat list refresh
+    setTimeout(_renderShrinePanel, 400);
 
   } catch(e) {
     console.error(e);
     if (resultEl) { resultEl.style.color = '#e05555'; resultEl.textContent = 'Sacrifice failed. Try again.'; }
-    btn.disabled = false;
-    btn.textContent = '🙏 OFFER SACRIFICE';
+    sacBtn.disabled = false;
+    sacBtn.textContent = '🙏 OFFER SACRIFICE';
   }
 };
+
+// Keep _doSacrifice as an alias so any existing callers still work
+window._doSacrifice = window._doShrineSacrifice;
 const RANK_ORDER   = ["Wanderer","Follower","Disciple","Master","Exalted","Crown","Supreme","Legend","Myth","Eternal"];
 
 const SKILL_TREES = {
@@ -3344,7 +3446,20 @@ window.renderInventory = function(items) {
   if (!grid) return;
 
   if (!items || items.length === 0) {
-    grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--text-dim);font-style:italic;font-size:0.88rem">Your inventory is empty. Defeat monsters, gather resources, or buy from the market.</div>`;
+    const activeTab = window._activeInvTab || "all";
+    if (activeTab === "ingredient") {
+      // Deity Ingredients tab — no items means none granted yet; the tracker below handles display
+      grid.innerHTML = '';
+      return;
+    }
+    const emptyMessages = {
+      consumable: "No consumables yet. Craft or buy potions and food from the market.",
+      material:   "No materials yet. Gather resources or defeat monsters to collect them.",
+      equipment:  "No equipment yet. Craft weapons and armor or buy from a vendor.",
+      all:        "Your inventory is empty. Defeat monsters, gather resources, or buy from the market.",
+    };
+    const msg = emptyMessages[activeTab] || emptyMessages.all;
+    grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--text-dim);font-style:italic;font-size:0.88rem">${msg}</div>`;
     return;
   }
 
@@ -3653,19 +3768,30 @@ function buildDeityIngredients(deity) {
   if (!container) return;
   const ings = DEITY_INGREDIENTS[deity];
   if (!ings) { container.innerHTML = `<p style="font-size:0.85rem;color:var(--text-dim);font-style:italic">No deity selected.</p>`; return; }
+
+  // Qty required = 2^rankIndex (Wanderer=1x, Follower=2x, Disciple=4x, Master=8x, ...)
+  const rankIdx  = RANK_ORDER.indexOf(_charData?.rank || 'Wanderer');
+  const required = Math.pow(2, rankIdx);
+
   container.innerHTML = `
-    <p style="font-size:0.82rem;color:var(--text-dim);font-style:italic;margin-bottom:12px">
+    <p style="font-size:0.82rem;color:var(--text-dim);font-style:italic;margin-bottom:8px">
       Required to ascend under <strong style="color:var(--gold)">${deity}</strong>.
-      Cannot be farmed — bestowed through faith, events and achievements.
+      Cannot be farmed — granted by your Deity upon story quest completion.
+    </p>
+    <p style="font-family:var(--font-mono);font-size:0.65rem;color:var(--ash);margin-bottom:12px;letter-spacing:0.04em">
+      NEXT ASCENSION REQUIRES: <strong style="color:var(--gold-dim)">${required}×</strong> of each ingredient
+      <span style="color:var(--ash);font-size:0.6rem">(doubles each rank)</span>
     </p>
     <div class="ingredient-list">${ings.map(ing => {
-      const owned = (_charData?.inventory||[]).find(i => i.name === ing)?.qty ?? 0;
-      const has = owned > 0;
+      const owned   = (_charData?.inventory||[]).find(i => i.name === ing)?.qty ?? 0;
+      const met     = owned >= required;
+      const color   = met ? '#7ec87e' : owned > 0 ? 'var(--gold)' : 'var(--text-dim)';
+      const icon    = met ? '✅' : owned > 0 ? '✦' : '✦';
       return `
       <div class="ingredient-item">
-        <span class="ingredient-icon">${has ? '✅' : '✦'}</span>
+        <span class="ingredient-icon">${icon}</span>
         <span class="ingredient-name">${ing}</span>
-        <span class="ingredient-qty" style="color:${has ? 'var(--gold)' : 'var(--text-dim)'}">${owned} owned</span>
+        <span class="ingredient-qty" style="color:${color}">${owned} / ${required}</span>
       </div>`;
     }).join('')}
     </div>`;
@@ -11236,6 +11362,7 @@ window._onPanelSwitch = function(name) {
   if (name === 'battle')    { checkDeathState(); updateZoneLocks(); }
   if (name === 'crafting')  initCrafting();
   if (name === 'guild')     initGuild();
+  if (name === 'shrine')    _renderShrinePanel();
   if (name === 'character') _renderRegenInCrafting(); // renders regen into vitals card
   if (name === 'market')    _syncAllDisplays(_charData);
   if (name === 'map')      { window._initLayeredMap?.(); }
