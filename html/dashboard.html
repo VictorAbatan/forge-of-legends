@@ -1468,6 +1468,8 @@ button,
     document.querySelectorAll('.nav-item[data-panel]').forEach(n => n.classList.remove('active'));
     document.getElementById('panel-' + name)?.classList.add('active');
     document.querySelector(`.nav-item[data-panel="${name}"]`)?.classList.add('active');
+    // Fallback for browsers without :has() support — toggle body class for full-screen chat
+    document.body.classList.toggle('chat-panel-open', name === 'chat');
     if (name === 'chat')    window._chatInit?.();
     if (name === 'market')  window._loadPlayerListings?.();
     if (name === 'map')     { positionPlayerPin(); initMapInteraction(); }

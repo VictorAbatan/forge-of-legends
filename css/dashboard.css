@@ -1414,7 +1414,7 @@
 .player-action-btns .btn-secondary { flex: 1; padding: 7px 4px; font-size: 0.6rem; }
 .player-action-close { position: absolute; top: 8px; right: 10px; background: none; border: none; color: var(--ash); cursor: pointer; font-size: 0.85rem; }
 
-.chat-window { background: var(--ink2); border: 1px solid var(--border); border-radius: var(--radius); height: 380px; display: flex; flex-direction: column; position: relative; overflow: hidden; background-size: cover; background-position: center; background-repeat: no-repeat; }
+.chat-window { background: var(--ink2); border: 1px solid var(--border); border-radius: var(--radius); height: clamp(420px, calc(100vh - 320px), 760px); display: flex; flex-direction: column; position: relative; overflow: hidden; background-size: cover; background-position: center; background-repeat: no-repeat; }
 .chat-window::before { content: ''; position: absolute; inset: 0; background: rgba(10,10,14,0.68); pointer-events: none; z-index: 0; }
 .chat-messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; position: relative; z-index: 1; }
 .chat-input-area { border-top: 1px solid var(--border); padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 0; position: relative; z-index: 1; background: var(--ink2); }
@@ -5411,4 +5411,104 @@
 .bp-qty {
   font-family: var(--font-mono); font-size: 0.65rem;
   color: var(--ash-light); margin-left: 2px;
+}
+
+/* ══════════════════════════════════════
+   CHAT — FULL-SCREEN ON MOBILE
+   Uses body:has() to strip main-content padding when chat is open,
+   then makes the chat panel fill the full remaining viewport.
+   Background map images use cover so they fill any height naturally.
+══════════════════════════════════════ */
+
+/* When chat is the active panel, strip the container padding so the
+   chat panel can grow to fill the full height below the fixed header */
+@media (max-width: 768px) {
+  body:has(#panel-chat.active) .main-content {
+    padding-top: 0;
+    padding-bottom: 0;
+    overflow: hidden;
+  }
+
+  #panel-chat.active {
+    display: flex;
+    flex-direction: column;
+    /* 52px = fixed mobile header height */
+    height: calc(100dvh - 52px);
+    overflow: hidden;
+    /* Remove horizontal padding so chat window goes edge-to-edge */
+    padding: 0;
+    margin: 0;
+  }
+
+  /* Panel header — compact, add back horizontal padding */
+  #panel-chat.active .panel-header {
+    flex-shrink: 0;
+    padding: 12px 16px 10px;
+    margin-bottom: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* Location bar */
+  #panel-chat.active .chat-location-bar {
+    flex-shrink: 0;
+    margin: 8px 12px;
+    border-radius: var(--radius);
+  }
+
+  /* Tab row */
+  #panel-chat.active .chat-tabs {
+    flex-shrink: 0;
+    margin: 0 12px 8px;
+  }
+
+  /* Players bar */
+  #panel-chat.active .chat-players-bar {
+    flex-shrink: 0;
+    margin: 0 12px 8px;
+    border-radius: var(--radius);
+  }
+
+  /* Chat window — grows to fill everything remaining */
+  #panel-chat.active .chat-window {
+    flex: 1;
+    height: auto;
+    min-height: 0;
+    border-radius: 0;    /* edge-to-edge on mobile */
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+  }
+
+  /* Messages scroll area */
+  #panel-chat.active .chat-messages {
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* Input bar */
+  #panel-chat.active .chat-input-area {
+    flex-shrink: 0;
+  }
+}
+
+/* Fallback for browsers that don't support :has() —
+   use JS class toggle instead (see note in dashboard.js) */
+@media (max-width: 768px) {
+  body.chat-panel-open .main-content {
+    padding-top: 0;
+    padding-bottom: 0;
+    overflow: hidden;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Same rules, tighter spacing */
+  body:has(#panel-chat.active) .main-content,
+  body.chat-panel-open .main-content {
+    padding: 0;
+  }
+
+  #panel-chat.active .chat-location-bar { padding: 7px 10px; margin: 6px 10px; }
+  #panel-chat.active .chat-tabs         { margin: 0 10px 6px; }
+  #panel-chat.active .chat-players-bar  { margin: 0 10px 6px; min-height: 40px; }
 }

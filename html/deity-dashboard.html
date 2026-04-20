@@ -831,6 +831,7 @@
     document.querySelectorAll('.deity-nav-item').forEach(n => n.classList.remove('active'));
     document.getElementById('deity-panel-' + name)?.classList.add('active');
     document.querySelector(`.deity-nav-item[data-panel="${name}"]`)?.classList.add('active');
+    document.body.classList.toggle('chat-panel-open', name === 'chat');
     window._onDeityPanelSwitch?.(name);
     // Ensure image preview event is attached when switching to Factions panel
     if (name === 'factions' && typeof setupFactionLeaderImagePreview === 'function') {
