@@ -377,16 +377,17 @@
 /* Style for inventory <select> in enchantment and market */
 .field-input-select {
   width: 100%;
-  padding: 9px 12px;
+  padding: 9px 36px 9px 12px;
   border-radius: var(--radius);
   border: 1px solid var(--border);
-  background: var(--ink3);
+  background: var(--ink3) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23c9a84c' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 12px center;
   color: var(--text);
   font-family: var(--font-mono);
   font-size: 1rem;
   margin-bottom: 8px;
-  transition: border-color 0.18s, background 0.18s;
+  transition: border-color 0.18s, background-color 0.18s;
   appearance: none;
+  cursor: pointer;
 }
 .field-input-select:focus {
   border-color: var(--border-bright);
@@ -1632,6 +1633,21 @@
 .confirm-modal-title { font-family: var(--font-display); font-size: 0.88rem; color: var(--gold); margin-bottom: 6px; letter-spacing: 0.1em; }
 .confirm-modal-desc  { font-size: 0.85rem; color: var(--text-dim); margin-bottom: 20px; font-style: italic; line-height: 1.6; }
 .confirm-modal-qty { margin: 8px auto; width: 60px; text-align: center; padding: 6px; background: var(--ink1); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-family: var(--font-mono); font-size: 0.8rem; }
+
+.qty-stepper-btn {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--border-bright);
+  background: var(--ink3);
+  color: var(--gold);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+.qty-stepper-btn:hover { background: rgba(201,168,76,0.15); border-color: var(--gold); }
 .confirm-modal-actions { display: flex; gap: 10px; justify-content: center; }
 
 /* ══════════════════════════════════════

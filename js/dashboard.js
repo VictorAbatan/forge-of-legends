@@ -4133,6 +4133,7 @@ async function initChat() {
     // On General tab, fetch all active players across all locations
     if (tab === "general") {
       _loadAllPlayers();
+      _loadGeneralNpcsForSidebar();
     } else {
       // Re-listen to local presence
       if (_presenceUnsub) { _presenceUnsub(); _presenceUnsub = null; }
@@ -4218,6 +4219,21 @@ async function _loadAllPlayers() {
   } catch(e) {
     console.error("_loadAllPlayers:", e);
   }
+}
+
+// ── Load global NPCs into sidebar when on General tab ──────────────────────
+let _generalNpcs = [];
+async function _loadGeneralNpcsForSidebar() {
+  _generalNpcs = [];
+  try {
+    const snap = await getDocs(collection(db, "npcs", "global", "list"));
+    _generalNpcs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch(e) { console.warn("[_loadGeneralNpcsForSidebar]", e); }
+
+  // Rebuild the NPC sidebar toggle so "All NPCs" reflects global list
+  _locationNpcs = _generalNpcs;
+  renderNpcSidebarToggle();
+  if (_npcSidebarTab === "npcs") renderNpcList();
 }
 
 function startChatListener(locationId, tab) {
@@ -4391,17 +4407,28 @@ function startChatListener(locationId, tab) {
 
     } else if (msg.isNpc) {
       el.classList.add("npc-msg");
+      const npcReplyQuoteHTML = msg.replyTo ? `
+        <div class="chat-msg-reply-quote" onclick="window._jumpToMsg?.('${msg.replyTo.id}')">
+          <div class="chat-msg-reply-quote-bar"></div>
+          <div class="chat-msg-reply-quote-body">
+            <div class="chat-msg-reply-quote-name">${escapeHtml(msg.replyTo.charName||'')}</div>
+            <div class="chat-msg-reply-quote-text">${escapeHtml(msg.replyTo.text||'')}</div>
+          </div>
+        </div>` : '';
       el.innerHTML = `
         <div class="chat-msg-avatar npc-avatar" title="${msg.charName}">${avatarContent}</div>
         <div class="chat-msg-body">
           <div class="chat-msg-header">
             <span class="chat-msg-name npc-name">🧙 ${msg.charName||"NPC"}</span>
             ${msg.title ? `<span class="chat-msg-title npc-role">${msg.title}</span>` : ""}
-            <span class="chat-msg-rank" style="color:var(--gold);font-size:0.7rem">NPC</span>
+            <span class="chat-msg-rank" style="color:var(--gold-dim);font-size:0.7rem">${msg.rank||"NPC"} · Lv.${msg.level||1}</span>
             ${msg.isAutoReply ? `<span style="font-size:0.65rem;color:var(--ash);font-style:italic">auto</span>` : ""}
             <span class="chat-msg-time">${time}</span>
           </div>
+          ${tab === "general" ? `<div class="chat-msg-location">📍 ${msg.location||""}</div>` : ""}
+          ${npcReplyQuoteHTML}
           <div class="chat-msg-text npc-bubble">${formatChatText(msg.text||"")}</div>
+          <button class="reply-btn" onclick="window._startReply('${docId}','${escapeHtml(msg.charName||'')}','${escapeHtml(msg.text||'').replace(/'/g,"\\'")}')">↩ Reply</button>
         </div>`;
     } else {
       const replyQuoteHTML = msg.replyTo ? `
@@ -5253,6 +5280,17 @@ async function sellItem() {
       totalPrice:   price * qty,
       listedAt:    serverTimestamp(),
     });
+
+    // Deduct listed qty from player inventory
+    const inv = _charData.inventory || [];
+    const invIdx = inv.findIndex(i => i.name === item.name);
+    if (invIdx !== -1) {
+      inv[invIdx].qty -= qty;
+      if (inv[invIdx].qty <= 0) inv.splice(invIdx, 1);
+    }
+    await updateDoc(doc(db, "characters", _uid), { inventory: inv });
+    _charData.inventory = inv;
+
     window.showToast(`${item.name} listed for ${price} coins each.`, "success");
     logActivity('🏪', `<b>Listed on Market:</b> ${item.name} × ${qty} @ ${price}💰 each.`, '#c9a84c');
     await _incrementQuest("listing", 1);
@@ -7250,7 +7288,7 @@ window._confirmLeaveFaction = function(factionName) {
   modal.innerHTML = `
     <div class="ink-confirm-box">
       <div class="ink-confirm-title">Leave Faction?</div>
-      <div class="ink-confirm-msg">Are you sure you want to leave <b>${factionName}</b>? This may have consequences depending on your standing.</div>
+      <div class="ink-confirm-msg">Are you sure you want to leave <b>${factionName}</b>? This costs <b>2,000 gold</b> and applies a 7-day cooldown before you can join another faction.</div>
       <div class="ink-confirm-btns">
         <button class="ink-confirm-cancel" onclick="document.getElementById('faction-leave-confirm-modal').remove()">Cancel</button>
         <button class="ink-confirm-ok danger-btn" onclick="document.getElementById('faction-leave-confirm-modal').remove(); window.leaveFaction('${factionName}')">Leave</button>
@@ -7263,25 +7301,17 @@ window._confirmLeaveFaction = function(factionName) {
 window.leaveFaction = async function(factionName) {
   if (!_charData) return;
   if (_charData.faction !== factionName) { window.showToast("Not in this faction.", "error"); return; }
-  if ((_charData.gold||0) < 5000) { window.showToast("Not enough gold to leave (5000 required).", "error"); return; }
-  // Check for cooldown and task completion
-  const leaveInfo = _charData.factionLeaveInfo || {};
-  const now = Date.now();
-  if (leaveInfo.cooldownUntil && now < leaveInfo.cooldownUntil) {
-    const days = Math.ceil((leaveInfo.cooldownUntil - now) / (1000*60*60*24));
-    window.showToast(`You must wait ${days} more day(s) before attempting to leave again.`, "error");
-    return;
-  }
-  if (!leaveInfo.taskCompleted) {
-    // Show modal for leader task (stub)
-    showLeaderTaskModal(factionName);
-    return;
-  }
+  if ((_charData.gold||0) < 2000) { window.showToast("Not enough gold to leave (2,000 required).", "error"); return; }
   // All checks passed, allow leave
   try {
-    await updateDoc(doc(db, "characters", _uid), { faction: null, gold: (_charData.gold||0) - 5000, factionLeaveInfo: { cooldownUntil: now + 7*24*60*60*1000, taskCompleted: false } });
+    const now = Date.now();
+    await updateDoc(doc(db, "characters", _uid), {
+      faction: null,
+      gold: (_charData.gold||0) - 2000,
+      factionLeaveInfo: { cooldownUntil: now + 7*24*60*60*1000, taskCompleted: false }
+    });
     _charData.faction = null;
-    _charData.gold = (_charData.gold||0) - 5000;
+    _charData.gold = (_charData.gold||0) - 2000;
     _charData.factionLeaveInfo = { cooldownUntil: now + 7*24*60*60*1000, taskCompleted: false };
     window.showToast(`Left ${factionName}.`, "success");
     renderFactionsPanel();

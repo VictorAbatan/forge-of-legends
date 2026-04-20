@@ -3520,20 +3520,32 @@ async function switchDeityChat(locationId) {
           if (!isOpen) msgBody.classList.add("msg-hovered");
         }, { passive: true });
       } else if (isNpc) {
+        const npcSafeName = escapeHtml(msg.charName||'NPC');
+        const npcSafeText = escapeHtml(msg.text||'').replace(/'/g,"\\'");
         el.innerHTML = `
           <div class="chat-msg-avatar npc-avatar">${av}</div>
           <div class="chat-msg-body">
+            <div class="chat-msg-header">
+              <span class="chat-msg-name npc-name">🧙 ${npcSafeName}</span>
+              ${msg.title ? `<span class="chat-msg-title npc-role">${escapeHtml(msg.title)}</span>` : ""}
+              <span class="chat-msg-rank" style="color:var(--gold-dim);font-size:0.7rem">${msg.rank||"NPC"} · Lv.${msg.level||1}</span>
+              <span class="chat-msg-time">${time}</span>
+            </div>
             ${replyQuoteHTML}
             <div class="chat-msg-text npc-bubble">${formatChatText(msg.text||"")}</div>
+            <button class="reply-btn" onclick="window._deityStartReply('${docId}','${npcSafeName}','${npcSafeText}')">↩ Reply</button>
           </div>`;
       } else {
-        const safeName = escapeHtml(msg.charName||'');
-        const safeText = escapeHtml(msg.text||'').replace(/'/g,"\\'");
+        const safeName    = escapeHtml(msg.charName||'');
+        const safeText    = escapeHtml(msg.text||'').replace(/'/g,"\\'");
         const locSafeName = (msg.charName||'').replace(/'/g,"\'");
         el.innerHTML = `
           <div class="chat-msg-avatar" onclick="window._openDchatPlayerPopup('${locSafeName}')" style="cursor:pointer">${av}</div>
           <div class="chat-msg-body">
-            <div class="chat-msg-meta">
+            <div class="chat-msg-header">
+              <span class="chat-msg-name" onclick="window._openDchatPlayerPopup('${locSafeName}')" style="cursor:pointer">${safeName}</span>
+              ${msg.title ? `<span class="chat-msg-title">${escapeHtml(msg.title)}</span>` : ""}
+              <span class="chat-msg-rank">${msg.rank||"Wanderer"} · Lv.${msg.level||1}</span>
               <span class="chat-msg-time">${time}</span>
             </div>
             ${replyQuoteHTML}
@@ -3550,14 +3562,66 @@ async function switchDeityChat(locationId) {
 }
 
 async function sendDeityChat() {
-  const input  = document.getElementById("deity-chat-input");
-  const text   = input?.value.trim();
-  const asSel  = document.getElementById("deity-chat-as");
+  const input   = document.getElementById("deity-chat-input");
+  const text    = input?.value.trim();
+  if (!text) return;
+
+  // ── GENERAL TAB ─────────────────────────────────────────────────────────
+  if (_deityChatTab === "general") {
+    const speakAs = document.getElementById("deity-general-as")?.value || "self";
+    let payload;
+    if (speakAs === "self") {
+      payload = {
+        uid:       _uid,
+        charName:  _deityChar?.name || "Deity",
+        avatarUrl: _deityChar?.avatarUrl || DEITY_ART[_deityChar?.charClass || ""] || "✨",
+        rank:      "Deity",
+        level:     0,
+        title:     DEITY_DATA[_deityChar?.charClass || ""]?.title || "",
+        location:  "General",
+        text,
+        timestamp: serverTimestamp(),
+      };
+    } else {
+      const npcId = speakAs.replace("npc_", "");
+      const npc   = _dchatGeneralNpcs.find(n => n.id === npcId) || {};
+      payload = {
+        uid:       `npc_${npcId}`,
+        charName:  npc.name  || "NPC",
+        avatarUrl: npc.avatar || "🧙",
+        rank:      npc.rank   || "NPC",
+        level:     npc.level  || 1,
+        charClass: npc.charClass || "",
+        title:     npc.description || "",
+        location:  "General",
+        text,
+        isNpc:     true,
+        npcId,
+        deityUid:  _uid,
+        timestamp: serverTimestamp(),
+      };
+    }
+    if (_deityReplyTo) payload.replyTo = _deityReplyTo;
+    try {
+      await addDoc(collection(db, "general-chat", "global", "messages"), payload);
+      if (input) input.value = "";
+      window._deityCancelReply?.();
+    } catch(e) {
+      console.error("[sendDeityChat general]", e);
+      window.showToast?.("Failed to send message.", "error");
+    }
+    return;
+  }
+
+  // ── LOCATION TAB ────────────────────────────────────────────────────────
+  if (!_deityChatLocation) {
+    window.showToast?.("Select a location first.", "error");
+    return;
+  }
+  const asSel   = document.getElementById("deity-chat-as");
   const speakAs = asSel?.value || "self";
-  if (!text || !_deityChatLocation) return;
 
   if (speakAs === "self") {
-    // Send as the deity character
     const location = KNOWN_LOCATIONS.find(l => l.toLowerCase().replace(/[^a-z0-9]/g,"-") === _deityChatLocation) || _deityChatLocation;
     const payload = {
       uid:       _uid,
@@ -3573,7 +3637,6 @@ async function sendDeityChat() {
     if (_deityReplyTo) payload.replyTo = _deityReplyTo;
     await addDoc(collection(db,"chats",_deityChatLocation,"messages"), payload);
   } else {
-    // Send as an NPC — use real rank/level/class from NPC data
     const npcId = speakAs.replace("npc_","");
     const npc   = _deityLocationNpcs.find(n => n.id === npcId) || {};
     const payload = {
@@ -3597,6 +3660,7 @@ async function sendDeityChat() {
   if (input) input.value = "";
   window._deityCancelReply?.();
 }
+window._sendDeityChat = sendDeityChat;
 
 // ── Deity chat tab state ─────────────────────────────────────
 let _deityChatTab = "location"; // "location" | "general"
@@ -3766,11 +3830,21 @@ function _startGeneralChatListener() {
           if (!isOpen) msgBody.classList.add("msg-hovered");
         }, { passive: true });
       } else if (isNpc) {
+        const npcSafeName = escapeHtml(msg.charName||'NPC');
+        const npcSafeText = escapeHtml(msg.text||'').replace(/'/g,"\\'");
         el.innerHTML = `
           <div class="chat-msg-avatar npc-avatar">${av}</div>
           <div class="chat-msg-body">
+            <div class="chat-msg-header">
+              <span class="chat-msg-name npc-name">🧙 ${npcSafeName}</span>
+              ${msg.title ? `<span class="chat-msg-title npc-role">${escapeHtml(msg.title)}</span>` : ""}
+              <span class="chat-msg-rank" style="color:var(--gold-dim);font-size:0.7rem">${msg.rank||"NPC"} · Lv.${msg.level||1}</span>
+              <span class="chat-msg-time">${time}</span>
+            </div>
+            <div class="chat-msg-location">📍 ${escapeHtml(msg.location||"General")}</div>
             ${replyQuoteHTML}
             <div class="chat-msg-text npc-bubble">${formatChatText(msg.text||"")}</div>
+            <button class="reply-btn" onclick="window._deityStartReply('${docId}','${npcSafeName}','${npcSafeText}')">↩ Reply</button>
           </div>`;
       } else {
         const safeName   = escapeHtml(msg.charName||'');
@@ -3779,10 +3853,13 @@ function _startGeneralChatListener() {
         el.innerHTML = `
           <div class="chat-msg-avatar" onclick="window._openDchatPlayerPopup('${gcSafeName}')" style="cursor:pointer">${av}</div>
           <div class="chat-msg-body">
-            <div class="chat-msg-meta">
+            <div class="chat-msg-header">
+              <span class="chat-msg-name" onclick="window._openDchatPlayerPopup('${gcSafeName}')" style="cursor:pointer">${safeName}</span>
+              ${msg.title ? `<span class="chat-msg-title">${escapeHtml(msg.title)}</span>` : ""}
+              <span class="chat-msg-rank">${msg.rank||"Wanderer"} · Lv.${msg.level||1}</span>
               <span class="chat-msg-time">${time}</span>
             </div>
-            ${msg.location ? `<div class="chat-msg-location">📍 ${escapeHtml(msg.location)}</div>` : ""}
+            <div class="chat-msg-location">📍 ${escapeHtml(msg.location||"")}</div>
             ${replyQuoteHTML}
             <div class="chat-msg-text">${formatChatText(msg.text || "")}</div>
             <button class="reply-btn" onclick="window._deityStartReply('${docId}','${safeName}','${safeText}')">↩ Reply</button>
@@ -3796,53 +3873,7 @@ function _startGeneralChatListener() {
   });
 }
 
-// Patch sendDeityChat to handle general tab (with replyTo + cancel)
-const _origSendDeityChat = sendDeityChat;
-async function sendDeityChatPatched() {
-  if (_deityChatTab === "general") {
-    const input   = document.getElementById("deity-chat-input");
-    const text    = input?.value.trim();
-    if (!text) return;
-    const speakAs = document.getElementById("deity-general-as")?.value || "self";
-    let payload;
-    if (speakAs === "self") {
-      payload = {
-        uid:       _uid,
-        charName:  _deityChar?.name || "Deity",
-        avatarUrl: _deityChar?.avatarUrl || DEITY_ART[_deityChar?.charClass || ""] || "✨",
-        rank:      "Deity",
-        level:     0,
-        title:     DEITY_DATA[_deityChar?.charClass || ""]?.title || "",
-        text,
-        timestamp: serverTimestamp(),
-      };
-    } else {
-      const npcId = speakAs.replace("npc_", "");
-      const npc   = _dchatGeneralNpcs.find(n => n.id === npcId) || {};
-      payload = {
-        uid:       `npc_${npcId}`,
-        charName:  npc.name  || "NPC",
-        avatarUrl: npc.avatar || "🧙",
-        rank:      npc.rank || "NPC",
-        level:     npc.level || 1,
-        charClass: npc.charClass || "",
-        title:     npc.description || "",
-        text,
-        isNpc:     true,
-        npcId,
-        deityUid:  _uid,
-        timestamp: serverTimestamp(),
-      };
-    }
-    if (_deityReplyTo) payload.replyTo = _deityReplyTo;
-    await addDoc(collection(db, "general-chat", "global", "messages"), payload);
-    if (input) input.value = "";
-    window._deityCancelReply?.();
-  } else {
-    await _origSendDeityChat();
-  }
-}
-window._sendDeityChat = sendDeityChatPatched;
+// sendDeityChat now handles both tabs directly (see unified function above)
 
 // ═══════════════════════════════════════════════════
 //  BOSS / RAID MANAGER (Deity)

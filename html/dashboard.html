@@ -137,7 +137,12 @@ button,
     <div class="confirm-modal-icon" id="buy-modal-icon">📦</div>
     <div class="confirm-modal-title" id="buy-modal-name">Item</div>
     <div class="confirm-modal-desc" id="buy-modal-desc">Purchase this item?</div>
-    <input type="number" id="buy-qty-input" min="1" max="1" value="1" class="confirm-modal-qty" style="display:none;" />
+    <div id="buy-qty-stepper" style="display:none;align-items:center;justify-content:center;gap:10px;margin:14px 0 4px;">
+      <button class="qty-stepper-btn" onclick="buyQtyStep(-1)">−</button>
+      <span id="buy-qty-display" style="min-width:36px;text-align:center;font-family:var(--font-mono);font-size:1.1rem;color:var(--gold)">1</span>
+      <button class="qty-stepper-btn" onclick="buyQtyStep(1)">+</button>
+    </div>
+    <div id="buy-total-display" style="display:none;font-size:0.8rem;color:var(--text-dim);margin-bottom:10px;">Total: <span id="buy-total-cost" style="color:var(--gold)">0</span> 🪙</div>
     <div class="confirm-modal-actions">
       <button class="btn-primary" id="btn-confirm-buy" onclick="confirmBuy()">BUY</button>
       <button class="btn-secondary" onclick="closeBuyModal()">CANCEL</button>
@@ -1987,36 +1992,56 @@ button,
   function saveAvatar() { window._saveAvatar?.(_selectedPreset, _uploadedFile); }
 
   let _buyTarget = null;
-  function openBuyModal(name, icon, price, type, maxQty = 1) {
-    _buyTarget = { name, icon, price, type, maxQty };
+  let _buyQty = 1;
+
+  function _updateBuyTotal() {
+    if (!_buyTarget) return;
+    document.getElementById('buy-qty-display').textContent = _buyQty;
+    document.getElementById('buy-total-cost').textContent = (_buyTarget.price * _buyQty).toLocaleString();
+    document.getElementById('buy-modal-desc').textContent =
+      _buyTarget.maxQty > 1
+        ? `Price: ${_buyTarget.price.toLocaleString()} 🪙 each`
+        : `Purchase for ${_buyTarget.price.toLocaleString()} gold coins?`;
+  }
+
+  function buyQtyStep(delta) {
+    if (!_buyTarget) return;
+    _buyQty = Math.max(1, Math.min(_buyTarget.maxQty, _buyQty + delta));
+    _updateBuyTotal();
+  }
+
+  function openBuyModal(name, icon, price, type, maxQty = 99) {
+    // Weapons/armour: single-purchase only; consumables/materials: allow stacking
+    const stackable = ['consumable','material','food'].includes(type);
+    const effectiveMax = stackable ? Math.max(maxQty, 99) : 1;
+    _buyTarget = { name, icon, price, type, maxQty: effectiveMax };
+    _buyQty = 1;
     document.getElementById('buy-modal-icon').textContent = icon;
     document.getElementById('buy-modal-name').textContent = name;
-    document.getElementById('buy-modal-desc').textContent = maxQty > 1 
-      ? `Available: ${maxQty} | Price: ${price} gold each | Enter quantity:`
-      : `Purchase for ${price} gold coins?`;
     document.getElementById('buy-error').textContent = '';
-    const qtyInput = document.getElementById('buy-qty-input');
-    if (maxQty > 1) {
-      qtyInput.style.display = 'block';
-      qtyInput.value = 1;
-      qtyInput.max = maxQty;
+    const stepper   = document.getElementById('buy-qty-stepper');
+    const totalRow  = document.getElementById('buy-total-display');
+    if (stackable) {
+      stepper.style.display  = 'flex';
+      totalRow.style.display = 'block';
     } else {
-      qtyInput.style.display = 'none';
+      stepper.style.display  = 'none';
+      totalRow.style.display = 'none';
     }
+    _updateBuyTotal();
     document.getElementById('buy-modal').style.display = 'flex';
   }
-  function closeBuyModal()  { document.getElementById('buy-modal').style.display = 'none'; _buyTarget = null; }
-  function confirmBuy() { 
-    if (_buyTarget) {
-      const qtyInput = document.getElementById('buy-qty-input');
-      const qty = qtyInput.style.display !== 'none' ? parseInt(qtyInput.value) || 1 : 1;
-      if (qty < 1 || qty > _buyTarget.maxQty) {
-        document.getElementById('buy-error').textContent = 'Invalid quantity.';
-        return;
-      }
-      _buyTarget.qty = qty;
-      window._buyItem?.(_buyTarget); 
+
+  function closeBuyModal() { document.getElementById('buy-modal').style.display = 'none'; _buyTarget = null; }
+
+  function confirmBuy() {
+    if (!_buyTarget) return;
+    if (_buyQty < 1 || _buyQty > _buyTarget.maxQty) {
+      document.getElementById('buy-error').textContent = 'Invalid quantity.';
+      return;
     }
+    _buyTarget.qty = _buyQty;
+    window._buyItem?.(_buyTarget);
   }
 
   function openSellModal() {
