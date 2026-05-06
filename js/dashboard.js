@@ -3738,26 +3738,29 @@ window.useItem = async function(itemName, kind) {
     return;
 
   } else {
+    // Unknown item type — just consume with no extra effect
+  }
 
-  // Consume 1 of the item
-  if (inv[idx].qty > 1) inv[idx].qty--;
-  else inv.splice(idx, 1);
-  updates.inventory = inv;
+  // Consume 1 of the item and save for all branches that set updates/toastMsg
+  if (toastMsg) {
+    if (inv[idx].qty > 1) inv[idx].qty--;
+    else inv.splice(idx, 1);
+    updates.inventory = inv;
 
-  await updateDoc(doc(db, 'characters', _uid), updates);
-  Object.assign(_charData, updates);
-  window._allInvItems = inv;
+    await updateDoc(doc(db, 'characters', _uid), updates);
+    Object.assign(_charData, updates);
+    window._allInvItems = inv;
 
-  // Sync every display immediately
-  _syncAllDisplays(_charData);
-  window._refreshInvDisplay(); // re-render keeping the active tab filter
+    // Sync every display immediately
+    _syncAllDisplays(_charData);
+    window._refreshInvDisplay(); // re-render keeping the active tab filter
 
-  window.showToast(toastMsg, 'success');
-  await _incrementQuest(kind, 1);
-  logActivity('🧪', `Used <b>${itemName}</b>.`, '#888');
-  // Re-render potion strip if battle is active
-  if (document.getElementById('battle-arena')?.style.display !== 'none') _renderBattlePotionStrip();
-  } // close else block
+    window.showToast(toastMsg, 'success');
+    await _incrementQuest(kind, 1);
+    logActivity('🧪', `Used <b>${itemName}</b>.`, '#888');
+    // Re-render potion strip if battle is active
+    if (document.getElementById('battle-arena')?.style.display !== 'none') _renderBattlePotionStrip();
+  }
 };
 
 // ═══════════════════════════════════════════════════
@@ -9085,7 +9088,7 @@ const GRADE_RANK_REQ = { E:0, D:1, C:2, B:3, A:5, S:7 };
 function updateZoneLocks() {
   if (!_charData) return;
   const rankIdx  = RANK_ORDER.indexOf(_charData.rank || "Wanderer");
-  const location = (_charData.kingdom || _charData.location || "").toLowerCase().trim();
+  const location = (_charData.location || "").toLowerCase().trim();
 
   // A card only unlocks when the player is physically present in that exact monster zone.
   // Towns, capitals, and any other non-combat locations never match.
@@ -9317,9 +9320,11 @@ function checkDeathState() {
   const banner   = document.getElementById('battle-dead-banner');
   const zoneArea = document.getElementById('battle-zone-select');
 
+  const arena = document.getElementById('battle-arena');
   if (_charData?.isDead) {
     if (banner)   banner.style.display   = 'flex';
     if (zoneArea) zoneArea.style.display = 'none';
+    if (arena && arena.style.display !== 'none') arena.style.display = 'none';
 
     // Show resurrection potion button only if player has one
     const resPotionWrap = document.getElementById('btn-use-res-potion-wrap');
@@ -10798,9 +10803,9 @@ window.CANONICAL_POTION_RECIPES = {
     { name:"Greater Mana Potion", icon:"🌀", type:"Mana", effect:"+70% Mana instantly", cost:250, requires:[{name:"Spirit Herb",qty:2},{name:"Ghost Root",qty:1}] },
   ],
   Luck: [
-    { name:"Minor Luck Potion", icon:"🍀", type:"Luck", effect:"+5% Luck (3h, 1/day)", cost:50, requires:[{name:"Basil Sprigs",qty:2},{name:"Mushroom",qty:1}] },
-    { name:"Standard Luck Potion", icon:"☘️", type:"Luck", effect:"+15% Luck (3h, 1/day)", cost:125, requires:[{name:"Nightshade",qty:2},{name:"Glowleaf",qty:1}] },
-    { name:"Greater Luck Potion", icon:"🌠", type:"Luck", effect:"+30% Luck (3h, 1/day)", cost:250, requires:[{name:"Spirit Herb",qty:2},{name:"Jade Vine",qty:1}] },
+    { name:"Minor Luck Potion", icon:"🍀", type:"Luck", effect:"+5% Luck (1h, 3/day)", cost:50, requires:[{name:"Basil Sprigs",qty:2},{name:"Mushroom",qty:1}] },
+    { name:"Standard Luck Potion", icon:"☘️", type:"Luck", effect:"+15% Luck (1h, 3/day)", cost:125, requires:[{name:"Nightshade",qty:2},{name:"Glowleaf",qty:1}] },
+    { name:"Greater Luck Potion", icon:"🌠", type:"Luck", effect:"+30% Luck (1h, 3/day)", cost:250, requires:[{name:"Spirit Herb",qty:2},{name:"Jade Vine",qty:1}] },
   ],
   Insight: [
     { name:"Minor EXP Potion", icon:"✨", type:"Insight", effect:"+5% EXP gain (40-60 Coins)", cost:50, requires:[{name:"Wild Herbs",qty:2},{name:"Lotus",qty:1}] },
