@@ -7827,6 +7827,7 @@ async function _clientBattleTurn(action, skillName) {
 
   // ── Flee ──
   if (action === 'flee') {
+    
     const fleeCost = 10;
     const newGold  = Math.max(0, (char.gold || 0) - fleeCost);
     await updateDoc(doc(db, "characters", uid), { gold: newGold });
@@ -8508,6 +8509,7 @@ window._startBattle = async function(grade, isAuto, zoneName) {
 
 // ── Direct entry from zone-select AUTO-BATTLE button ──
 window._startAutoBattle = async function(grade, zoneName) {
+  
   const zone = zoneName || window._selectedZoneName || null;
   const exhausted = await window._checkZonePool(zone, grade);
   if (exhausted) { window._showPoolExhausted(zone, grade); return; }
@@ -8726,6 +8728,7 @@ function _launchAutoBattleLoop(grade, zoneName) {
 }
 
 window._stopAutoBattle = function() {
+  
   if (!_autoBattleRunning) return;
   _autoBattleRunning = false;
   _autoBattleForceMelee = false;
@@ -8796,6 +8799,7 @@ window._confirmAutoBattle = async function() {
 };
  
 function showBattleArena(monster, playerHp, playerMana) {
+  
   document.getElementById('battle-zone-select').style.display = 'none';
   document.getElementById('battle-arena').style.display       = 'block';
   document.getElementById('battle-result').style.display      = 'none';
@@ -8927,6 +8931,7 @@ window._battleTurn = async function(action, skillName) {
 };
 
 function showBattleResult(d) {
+  
   document.getElementById('battle-arena').style.display  = 'none';
   document.getElementById('battle-result').style.display = 'block';
   document.getElementById('auto-battle-bar').style.display = 'none';
@@ -9000,13 +9005,27 @@ window._useBattlePotion = async function(itemName, kind) {
   if (_charData && window._autoBattleLiveMana !== undefined) _charData.mana = window._autoBattleLiveMana;
   await window.useItem(itemName, 'potion');
   _autoBattlePotionPending = true; // signal the auto-battle loop to pick up the healed values
-  _renderBattlePotionStrip();
-  // Also update the live battle bars with current HP/Mana from _charData
+
   const curHp   = _charData?.hp   ?? 0;
   const curMana = _charData?.mana ?? 0;
   const hpMax   = _charData?.hpMax   || 100;
   const manaMax = _charData?.manaMax || 50;
-  // Update player bars — monster bars unchanged (pass current values from DOM)
+
+  // CRITICAL: write healed values into the battles doc so _clientBattleTurn
+  // reads the correct HP/Mana on the next manual turn (it reads from Firestore, not _charData).
+  try {
+    const uid = auth.currentUser?.uid;
+    if (uid) {
+      await updateDoc(doc(db, 'battles', uid), { playerHp: curHp, playerMana: curMana });
+    }
+  } catch(_) {}
+
+  // Also keep the live variables in sync for auto-battle
+  window._autoBattleLiveHp   = curHp;
+  window._autoBattleLiveMana = curMana;
+
+  _renderBattlePotionStrip();
+  // Update the battle bars visually
   const monHpEl  = document.getElementById('monster-hp-text');
   const monHpStr = monHpEl?.textContent || '0 / 100';
   const [monCur, monMax] = monHpStr.split('/').map(s => parseInt(s.trim()) || 0);
@@ -9083,7 +9102,7 @@ window.adminRevivePlayer = async function(targetUid) {
 };
  
 // Minimum rank index required per grade
-const GRADE_RANK_REQ = { E:0, D:1, C:2, B:3, A:5, S:7 };
+const GRADE_RANK_REQ = { E:0, D:0, C:1, B:2, A:3, S:5 };
  
 function updateZoneLocks() {
   if (!_charData) return;
@@ -9814,6 +9833,7 @@ function _tickDoom(state) {
 }
 
 window.startBossRaid = function(party, bossTemplate) {
+  
   _battleMode = 'boss';
   _bossRaidBoss = bossTemplate || BOSS_LIST[0];
 
@@ -10040,8 +10060,8 @@ window.doRaidTurn = function(action, skillName) {
     attempts++;
   }
 
-  // If we've lapped back to index 0, it's the boss's turn (full round done)
-  if (next <= myIdx || attempts >= s.party.length) {
+  // If we've lapped back to index 0 (full round done) or all alive members exhausted, boss acts
+  if (next === 0 || attempts >= s.party.length) {
     // Boss turn
     const doomMsg = _tickDoom(s);
     if (doomMsg) s.log.push(doomMsg);

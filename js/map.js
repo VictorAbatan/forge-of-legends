@@ -5,12 +5,14 @@
 const MAP_IMAGES = {
   world:               "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fworld-map%2Fworld-map.jpeg?alt=media&token=0cb306f5-391f-42d3-b987-a2cbb88d9fc0",
   frostspire:          "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrostspire.jpeg?alt=media&token=02a9f440-6dc2-4d30-b6dd-3393c156e6ca",
+  frostspire_capital:  "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrostpire-capital.jpeg?alt=media&token=ac9bbbac-90b6-4f61-9935-7f50007926dd",
   whitecrest:          "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Fwhitecrest_village.jpeg?alt=media&token=8dd42296-a946-481d-b26f-f4cac2b7d66c",
   icerun:              "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ficerun_hamlet.jpeg?alt=media&token=dfd74d98-9363-4514-a2cf-d4e10d1aaeb7",
   paleglow:            "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Fpaleglow_town.jpeg?alt=media&token=083ffc0b-2bfa-4708-92f4-ea1cac3f2390",
   mistveil:            "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Fmistveil_town.jpeg?alt=media&token=3fd261ca-b5d2-4096-8b0c-9c0f53e2c228",
   frost_wildlands:     "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost_wildlands.jpeg?alt=media&token=6a811429-0b80-4be9-a10f-3a7b2f929420",
   solmere:             "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fsolmere.jpeg?alt=media&token=d651b87b-c394-4aa7-8177-c533daa67da2",
+  solmere_capital:     "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fsolmere-capital.jpeg?alt=media&token=2d5cd553-bb6e-48cb-a8ea-3a584581d049",
   sunpetal:            "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fsunpetal_village.jpeg?alt=media&token=da53581d-271c-4879-a40f-460c19a8879e",
   basil:               "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fbasil_village.jpeg?alt=media&token=aaa9091c-6f79-4ddf-8136-2300dd7db9e8",
   riverend:            "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Friverend_town.jpeg?alt=media&token=27721626-45d4-4b92-b089-24ae514b57f3",
@@ -26,8 +28,8 @@ const RANK_ORDER_MAP = ["Wanderer","Follower","Disciple","Master","Exalted","Cro
 
 // ── World pins (calibrated) ──
 const WORLD_PINS = [
-  { id:"frostveil", label:"Frostspire",  x:51.2, y:19.1, type:"capital",  travelCost:100, travelTime:300  },
-  { id:"verdantis", label:"Solmere",     x:28.6, y:54.7, type:"capital",  travelCost:100, travelTime:300  },
+  { id:"frostveil", label:"Frostveil",   x:51.2, y:19.1, type:"capital",  travelCost:100, travelTime:300  },
+  { id:"verdantis", label:"Verdantis",   x:28.6, y:54.7, type:"capital",  travelCost:100, travelTime:300  },
   { id:"vorthak",   label:"Vorthak",     x:75.5, y:51.3, type:"danger",   travelCost:250, travelTime:600  },
   { id:"nyx_abyss", label:"Nyx Abyss",  x:57.4, y:78.2, type:"endgame",  travelCost:500, travelTime:1200 },
 ];
@@ -42,8 +44,10 @@ const WORLD_PLAYER_PINS = [
 
 const CONTINENTS = {
   frostveil: {
-    name:"Frostveil", label:"Northern Continent · Frostveil",
+    name:"Frostveil", label:"Northern Continent · Capital: Frostspire",
     capital:"Frostspire — Gladys Kingdom", capitalId:"frostspire",
+    capitalImage:"frostspire_capital",
+    capitalPin: { x:53.5, y:57.2 },  // pin on continent map pointing to Ice Castle / Frostspire city
     image:"frostspire", wildlandsId:"frost_wildlands",
     travelCost:100, travelTime:300,
     // Frostspire pins: settlements=1-4, wildlands=5, player=6
@@ -78,8 +82,10 @@ const CONTINENTS = {
   },
 
   verdantis: {
-    name:"Verdantis", label:"Western Continent · Verdantis",
+    name:"Verdantis", label:"Western Continent · Capital: Solmere",
     capital:"Solmere — Elaria Kingdom", capitalId:"solmere",
+    capitalImage:"solmere_capital",
+    capitalPin: { x:52.0, y:46.5 },  // pin on continent map pointing to Grand Castle / Solmere city
     image:"solmere", wildlandsId:"verdantis_wildlands",
     travelCost:100, travelTime:300,
     // Solmere pins: player=1, settlements=2-5, wildlands=6
@@ -390,6 +396,9 @@ function _openTT(el, e) {
         const cid = btn.dataset.cid || btn.dataset.continent;
         const sid = btn.dataset.id;
         if (cid && sid) { _mapBreadcrumbs.push({id:cid, label:CONTINENTS[cid]?.name||cid}); renderSettlement(sid, cid); }
+      } else if (action === "view-capital") {
+        const cid = btn.dataset.cid;
+        if (cid) { _mapBreadcrumbs.push({id:cid, label:CONTINENTS[cid]?.name||cid}); renderCapital(cid); }
       } else if (action === "wildlands") {
         const cid = btn.dataset.cid || btn.dataset.id;
         _mapBreadcrumbs.push({id:cid, label:CONTINENTS[cid]?.name||cid});
@@ -619,6 +628,8 @@ function renderContinent(cid) {
   const pinsEl=document.getElementById("lmap-loc-pins");
 
   _placeCoverPins(imgEl, pinsEl, [
+    // Capital city pin (opens capital map view)
+    ...(cont.capitalPin&&cont.capitalImage?[{...cont.capitalPin, id:"capital_"+cid, label:cont.capital||cont.name, _type:"capital"}]:[]),
     // Settlement pins
     ...cont.settlements.map(s=>({...s, _type:"settlement"})),
     // Wildlands entry pin
@@ -628,7 +639,21 @@ function renderContinent(cid) {
     const el=document.createElement("div");
     el.className="lmap-loc-pin"; el.style.cssText=`position:absolute;left:${px}px;top:${py}px;transform:translate(-50%,-50%);pointer-events:all;overflow:visible;`;
 
-    if(p._type==="wildlands") {
+    if(p._type==="capital") {
+      const atC=_isAtCapital(cid);
+      const capDot=atC?'background:#4fc870;box-shadow:0 0 0 4px rgba(79,200,112,0.3),0 0 16px rgba(79,200,112,0.8);animation:lmap-pulse-player 1.8s infinite':'background:#c9a84c;box-shadow:0 0 0 3px rgba(201,168,76,0.3),0 0 14px rgba(201,168,76,0.7)';
+      el.innerHTML=`<div class="lmap-loc-pin-dot" style="${capDot}"></div>
+        <div class="lmap-loc-pin-label" style="color:${atC?'#4fc870':'#c9a84c'}">${cont.capital||cont.name}</div>
+        <div class="lmap-wpin-tooltip">
+          <div class="lmap-wpin-tt-name">🏰 ${cont.capital||cont.name}</div>
+          <div style="font-size:10px;color:#aaa;margin:4px 0;">Capital city · Safe Zone</div>
+          ${atC?`<div class="lmap-wpin-tt-here">✓ You are here</div>
+            <button class="lmap-wpin-travel-btn" data-action="view-capital" data-cid="${cid}">VIEW CAPITAL →</button>`
+            :`<button class="lmap-wpin-travel-btn" data-action="view-capital" data-cid="${cid}">VIEW CAPITAL →</button>`}
+        </div>`;
+      el.querySelector(".lmap-loc-pin-dot").addEventListener("click",e=>{ e.stopPropagation(); _openTT(el, e); });
+      el.querySelector('[data-action="view-capital"]')?.addEventListener("click",e=>{ e.stopPropagation(); _closeTT(); _mapBreadcrumbs.push({id:cid,label:cont.name}); renderCapital(cid); });
+    } else if(p._type==="wildlands") {
       el.innerHTML=`<div class="lmap-explore-dot" style="background:#4fc870;border-color:#4fc87099;animation:lmap-pulse 2s infinite;"></div>
         <div class="lmap-loc-pin-label" style="color:#70c090">🌿 Explore</div>
         <div class="lmap-wpin-tooltip">
@@ -792,6 +817,66 @@ function renderWildlands(cid) {
 // ═══════════════════════════════
 //  LAYER 3 — SETTLEMENT VIEW
 // ═══════════════════════════════
+// ═══════════════════════════════
+//  LAYER 2c — CAPITAL VIEW
+// ═══════════════════════════════
+function renderCapital(cid) {
+  const cont=CONTINENTS[cid]; if(!cont||!cont.capitalImage) return;
+  _mapLayer="capital_"+cid;
+  const c=_c(); if(!c) return;
+  const here=_isAtCapital(cid);
+  const imgUrl=MAP_IMAGES[cont.capitalImage];
+
+  c.innerHTML=`
+    <div class="lmap-location-wrap">
+      <div class="lmap-img-side" id="lmap-img-side">
+        <div style="position:relative;width:100%;height:100%;overflow:visible;" id="lmap-zoom-wrap">
+          <img src="${imgUrl}" class="lmap-location-img" id="lmap-loc-img" draggable="false"/><div class="lmap-img-overlay"></div>
+          ${here?`<div class="lmap-here-badge">✓ You are here</div>`:""}
+          ${_bcBar(cont.capital||cont.name)}
+        </div>
+      </div>
+      <div class="lmap-sidebar">
+        <div class="lmap-sidebar-header">
+          <div class="lmap-sidebar-region">${cont.label}</div>
+          <div class="lmap-sidebar-name">${cont.capital||cont.name}</div>
+          <span class="lmap-tag" style="${_tagStyle("safe")}">SAFE ZONE · Capital</span>
+        </div>
+        <div class="lmap-sidebar-lists">
+          <div class="lmap-section-title">IN THIS LOCATION</div>
+          <div class="lmap-info-item"><span class="lmap-info-dot" style="background:#5dbe85;"></span><span class="lmap-info-name">💬 RP Chat (capital chat available here)</span></div>
+          <div class="lmap-info-item"><span class="lmap-info-dot" style="background:#5b9fe0;"></span><span class="lmap-info-name">🧑 NPCs — vendors, quest givers, guild masters</span></div>
+          <div class="lmap-info-item"><span class="lmap-info-dot" style="background:#c9a84c;"></span><span class="lmap-info-name">🏪 Market — buy and sell with other players</span></div>
+          <div class="lmap-info-item"><span class="lmap-info-dot" style="background:#c44dff;"></span><span class="lmap-info-name">✦ Shrine — worship your deity here</span></div>
+        </div>
+        <div class="lmap-sidebar-footer">
+          ${!here
+            ?`<button class="lmap-travel-btn" id="lmap-capital-travel">TRAVEL HERE — ${cont.travelCost}🪙 · ${_ft(cont.travelTime)}</button>`
+            :`<div class="lmap-here-text">✓ YOU ARE HERE</div>`}
+        </div>
+      </div>
+    </div>`;
+
+  _setupBC(c);
+  _initZoomPan(document.getElementById("lmap-img-side"), document.getElementById("lmap-zoom-wrap"));
+  c.querySelector("#lmap-capital-travel")?.addEventListener("click",()=>window.openTravelModal?.(cont.capital||cont.name,cont.label.split("·")[0].trim(),cont.travelCost,cont.travelTime));
+
+  // Player pin if here
+  if(here && cont.capitalPlayerPin) {
+    const imgEl=document.getElementById("lmap-loc-img");
+    const placePin=()=>{
+      const pinsEl=document.createElement("div");
+      pinsEl.style.cssText="position:absolute;inset:0;pointer-events:none;z-index:10;";
+      document.getElementById("lmap-zoom-wrap").appendChild(pinsEl);
+      const dot=document.createElement("div");
+      dot.className="lmap-player-dot";
+      dot.style.cssText=`position:absolute;left:${cont.capitalPlayerPin.x}%;top:${cont.capitalPlayerPin.y}%;transform:translate(-50%,-50%);`;
+      pinsEl.appendChild(dot);
+    };
+    imgEl.complete ? placePin() : imgEl.addEventListener("load", placePin);
+  }
+}
+
 function renderSettlement(sid, cid) {
   const cont=CONTINENTS[cid];
   const loc=cont?.settlements.find(s=>s.id===sid);
@@ -894,11 +979,13 @@ window._onTravelArrival = function(destName) {
 window._initLayeredMap  = initLayeredMap;
 window._renderWorldMap  = renderWorldMap;
 window._renderContinent = renderContinent;
+window._renderCapital   = renderCapital;
 window._renderWildlands = renderWildlands;
 window._renderSettlement= renderSettlement;
 window._refreshMapPin   = function() {
   if(_mapLayer==="world") renderWorldMap();
   else if(CONTINENTS[_mapLayer]) renderContinent(_mapLayer);
+  else if(_mapLayer.startsWith("capital_")) renderCapital(_mapLayer.replace("capital_",""));
   else if(_mapLayer.startsWith("wildlands_")) renderWildlands(_mapLayer.replace("wildlands_",""));
   else renderWorldMap();
 };
