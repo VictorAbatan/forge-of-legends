@@ -3467,13 +3467,16 @@ window.renderInventory = function(items) {
     const type = getItemType(item.name);
     const isConsumable = type === "consumable";
     const isFood = ["Soup","Skewer","Carp","Sardine","Meat","Food","Herb Fish","Grilled","Roasted","Fried"].some(k => item.name.includes(k));
+    const isEquipment = type === 'equipment';
+    const enchantSuffix = (isEquipment && item.enchantLevel) ? ` <span style="color:var(--gold);font-size:0.7rem">+${item.enchantLevel}</span>` : '';
     return `
     <div class="inv-item" data-type="${type}">
       <div class="inv-item-icon">${getItemIcon(item.name)}</div>
-      <div class="inv-item-name">${item.name}</div>
+      <div class="inv-item-name">${item.name}${enchantSuffix}</div>
       <div class="inv-item-qty">x${item.qty ?? 1}</div>
       ${isConsumable ? `<button class="vendor-buy-btn" style="margin-top:6px;font-size:0.6rem;padding:3px 8px" onclick="useItem('${item.name}','${isFood?'food':'potion'}')">USE</button>` : ''}
-     ${type === 'material' ? `<button class="vendor-buy-btn" style="margin-top:6px;font-size:0.6rem;padding:3px 8px;background:rgba(201,168,76,0.1)" onclick="previewSellMaterial('${item.name}')">SELL</button>` : ''}
+      ${isEquipment ? `<button class="vendor-buy-btn" style="margin-top:6px;font-size:0.6rem;padding:3px 8px;background:rgba(91,159,224,0.12);color:#5b9fe0;border-color:#5b9fe044" onclick="window.openItemStatModal('${item.name.replace(/'/g,"\\'")}',${item.enchantLevel||0})">VIEW</button>` : ''}
+      ${type === 'material' ? `<button class="vendor-buy-btn" style="margin-top:6px;font-size:0.6rem;padding:3px 8px;background:rgba(201,168,76,0.1)" onclick="previewSellMaterial('${item.name}')">SELL</button>` : ''}
     </div>`;
   }).join('');
 };
@@ -5149,7 +5152,8 @@ async function buyItem({ name, icon, price, type, qty = 1 }) {
 }
 
 // ── Item stat preview modal ───────────────────────────────────────────────────
-window.openItemStatModal = function(name) {
+window.openItemStatModal = function(name, enchantLevel) {
+  enchantLevel = parseInt(enchantLevel) || 0;
   const weaponStats = EQUIP_WEAPON_STATS[name];
   const armorStats  = EQUIP_ARMOR_STATS[name];
   const isEquip = weaponStats || armorStats;
@@ -5184,17 +5188,29 @@ window.openItemStatModal = function(name) {
   let bodyHtml = '';
 
   if (isEquip && stats) {
+    // Enchant bonus: +1 to all stats per enchant level
+    const enchantBonus = enchantLevel > 0 ? enchantLevel : 0;
     const statLines = Object.entries(stats)
-      .map(([k, v]) => `<div class="istat-row"><span class="istat-label">${STAT_LABELS[k]||k.toUpperCase()}</span><span class="istat-val">+${v}</span></div>`)
-      .join('');
+      .map(([k, v]) => {
+        const total = v + enchantBonus;
+        const bonusHtml = enchantBonus > 0
+          ? ` <span style="color:var(--gold);font-size:0.75em">(${v} + <span style="color:#c9a84c">+${enchantBonus}</span> = ${total})</span>`
+          : '';
+        return `<div class="istat-row"><span class="istat-label">${STAT_LABELS[k]||k.toUpperCase()}</span><span class="istat-val">+${total}${bonusHtml}</span></div>`;
+      }).join('');
     const gradeLabel = grade
       ? `<span style="font-family:var(--font-mono);font-size:0.6rem;padding:2px 8px;border-radius:4px;background:rgba(255,255,255,0.05);color:${GRADE_COLOURS[grade]||'#aaa'};border:1px solid ${GRADE_COLOURS[grade]||'#aaa'}">GRADE ${grade}</span>`
       : '';
     const typeLabel = `<span style="font-family:var(--font-mono);font-size:0.6rem;color:var(--ash);text-transform:uppercase">${weaponStats?'Weapon':'Armor'}</span>`;
-    const enchantNote = `<div style="font-size:0.7rem;color:var(--ash);margin-top:10px;font-style:italic">✨ Can be enchanted up to +5 for additional stat bonuses.</div>`;
+    const enchantBadge = enchantLevel > 0
+      ? `<span style="font-family:var(--font-mono);font-size:0.6rem;padding:2px 8px;border-radius:4px;background:rgba(201,168,76,0.12);color:#c9a84c;border:1px solid rgba(201,168,76,0.3)">✨ +${enchantLevel} Enchanted</span>`
+      : `<span style="font-family:var(--font-mono);font-size:0.6rem;color:var(--ash)">Unenchanted</span>`;
+    const enchantNote = enchantLevel >= 5
+      ? `<div style="font-size:0.7rem;color:#c9a84c;margin-top:10px;font-style:italic">✨ Max enchantment reached (+5).</div>`
+      : `<div style="font-size:0.7rem;color:var(--ash);margin-top:10px;font-style:italic">✨ Can be enchanted up to +5 for additional stat bonuses.</div>`;
     bodyHtml = `
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
-        ${typeLabel} ${gradeLabel}
+        ${typeLabel} ${gradeLabel} ${enchantBadge}
       </div>
       <div class="istat-grid">${statLines}</div>
       ${enchantNote}`;
