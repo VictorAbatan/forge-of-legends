@@ -5512,3 +5512,13 @@
   #panel-chat.active .chat-tabs         { margin: 0 10px 6px; }
   #panel-chat.active .chat-players-bar  { margin: 0 10px 6px; min-height: 40px; }
 }
+/* ── Potion Picker Modal Cards ─────────────────────────────── */
+.ink-picker-card:hover {
+  border-color: var(--gold-dim) !important;
+  background: var(--ink4) !important;
+}
+.ink-picker-card.ink-picker-selected {
+  border-color: var(--gold) !important;
+  background: rgba(201,168,76,0.08) !important;
+  box-shadow: 0 0 0 1px var(--gold);
+}

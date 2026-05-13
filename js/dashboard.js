@@ -3694,9 +3694,8 @@ window.useItem = async function(itemName, kind) {
     Object.assign(_charData, { charClass: null, classRole: null, skills: [], stances: [], inventory: inv });
     window._allInvItems = inv;
     await refreshCharData(); _syncAllDisplays(_charData); window._refreshInvDisplay();
-    window.showToast('⚗️ Class Reset! Choose a new class from your profile.', 'success');
-    logActivity('⚗️', 'Used a <b>Class Reset Potion</b>. Class cleared — choose again.', '#c9a84c');
-    if (typeof switchPanel === 'function') switchPanel('character');
+    logActivity('⚗️', 'Used a <b>Class Reset Potion</b>. Class cleared — choosing again.', '#c9a84c');
+    openClassPickerModal();
     return;
 
   } else if (itemName === 'Stat Reset Potion') {
@@ -3715,29 +3714,27 @@ window.useItem = async function(itemName, kind) {
     return;
 
   } else if (itemName === 'Race Rebirth Potion') {
-    const confirmed = await inkConfirm('Use <b>Race Rebirth Potion</b>?<br><span style="font-size:0.85rem;color:var(--ash)">Your race and racial attribute will be cleared. Choose a new race from your profile.</span>');
+    const confirmed = await inkConfirm('Use <b>Race Rebirth Potion</b>?<br><span style="font-size:0.85rem;color:var(--ash)">Your race and racial attribute will be cleared. Choose a new race.</span>');
     if (!confirmed) return;
     if (inv[idx].qty > 1) inv[idx].qty--; else inv.splice(idx, 1);
     await updateDoc(doc(db, 'characters', _uid), { race: null, raceAttr: null, inventory: inv });
     Object.assign(_charData, { race: null, raceAttr: null, inventory: inv });
     window._allInvItems = inv;
     await refreshCharData(); _syncAllDisplays(_charData); window._refreshInvDisplay();
-    window.showToast('🌀 Race Rebirth! Choose your new race from your profile.', 'success');
-    logActivity('🌀', 'Used a <b>Race Rebirth Potion</b>. Race cleared — choose again.', '#c9a84c');
-    if (typeof switchPanel === 'function') switchPanel('character');
+    logActivity('🌀', 'Used a <b>Race Rebirth Potion</b>. Race cleared — choosing again.', '#c9a84c');
+    openRacePickerModal();
     return;
 
   } else if (itemName === 'Divine Shift Potion') {
-    const confirmed = await inkConfirm('Use <b>Divine Shift Potion</b>?<br><span style="font-size:0.85rem;color:var(--ash)">Your deity will be cleared and Faith Level reset to 0. Choose a new deity from your profile.</span>');
+    const confirmed = await inkConfirm('Use <b>Divine Shift Potion</b>?<br><span style="font-size:0.85rem;color:var(--ash)">Your deity will be cleared and Faith Level reset to 0. Choose a new deity.</span>');
     if (!confirmed) return;
     if (inv[idx].qty > 1) inv[idx].qty--; else inv.splice(idx, 1);
     await updateDoc(doc(db, 'characters', _uid), { deity: null, deityTitle: null, faithLevel: 0, blessing: null, blessingDesc: null, inventory: inv });
     Object.assign(_charData, { deity: null, deityTitle: null, faithLevel: 0, blessing: null, blessingDesc: null, inventory: inv });
     window._allInvItems = inv;
     await refreshCharData(); _syncAllDisplays(_charData); window._refreshInvDisplay();
-    window.showToast('🔮 Divine Shift! Faith Level reset. Choose a new deity from your profile.', 'success');
     logActivity('🔮', 'Used a <b>Divine Shift Potion</b>. Deity cleared, Faith reset to 0.', '#c9a84c');
-    if (typeof switchPanel === 'function') switchPanel('character');
+    openDeityPickerModal();
     return;
 
   } else {
@@ -5059,6 +5056,131 @@ function inkConfirm(message) {
   });
 }
 window.inkConfirm = inkConfirm;
+
+// ═══════════════════════════════════════════════════
+//  POTION PICKER MODALS
+//  Shown after Class Reset / Race Rebirth / Divine Shift
+// ═══════════════════════════════════════════════════
+
+function _inkPickerOverlay(title, bodyHtml) {
+  document.getElementById('ink-picker-modal')?.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'ink-picker-modal';
+  overlay.className = 'ink-confirm-overlay';
+  overlay.style.cssText = 'z-index:9999;overflow-y:auto;';
+  overlay.innerHTML = `
+    <div class="ink-confirm-box" style="max-width:560px;width:94%;max-height:88vh;overflow-y:auto;padding:28px 24px;">
+      <div style="font-family:var(--ff-display);font-size:1.1rem;letter-spacing:0.1em;color:var(--gold);margin-bottom:20px;text-align:center;text-transform:uppercase;">${title}</div>
+      ${bodyHtml}
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  return overlay;
+}
+
+async function openClassPickerModal() {
+  return new Promise(resolve => {
+    const overlay = _inkPickerOverlay('Choose Your Class', `
+      <div style="font-size:0.82rem;color:var(--ash);margin-bottom:16px;text-align:center;font-style:italic;">Your old class has been cleared. Select a new one to begin.</div>
+      <div id="ink-picker-cards">${_buildClassCards()}</div>
+      <div style="display:flex;gap:10px;margin-top:18px;justify-content:center;">
+        <button class="btn-ghost" style="font-size:0.7rem;" onclick="document.getElementById('ink-picker-modal').remove();">✕ CANCEL</button>
+        <button class="btn-primary" style="max-width:200px;" onclick="window._inkPickerConfirmClass()">CONFIRM CLASS</button>
+      </div>`);
+
+    window._inkPickerSel = null;
+    window._inkPickerConfirmClass = async function() {
+      const cls = window._inkPickerSel;
+      if (!cls) { window.showToast('Please select a class first.', 'error'); return; }
+      const roleMap = { Warrior:'Damage Dealer', Guardian:'Tank', Arcanist:'Damage Dealer', Hunter:'Damage Dealer', Assassin:'Damage Dealer', Cleric:'Support/Healer', Summoner:'Summoner' };
+      try {
+        await updateDoc(doc(db, 'characters', _uid), { charClass: cls, classRole: roleMap[cls] || cls });
+        Object.assign(_charData, { charClass: cls, classRole: roleMap[cls] || cls });
+        overlay.remove();
+        await refreshCharData(); _syncAllDisplays(_charData);
+        window.showToast(`⚔️ Class set to ${cls}!`, 'success');
+        logActivity('⚔️', `Chose <b>${cls}</b> as their new class.`, '#c9a84c');
+        resolve(cls);
+      } catch(err) {
+        window.showToast('Failed to save class. Try again.', 'error');
+      }
+    };
+  });
+}
+window.openClassPickerModal = openClassPickerModal;
+
+const RACE_LIST = [
+  { name:'Human',       icon:'👤', attr:'EXP Bonus',          desc:'+10% experience gained from all sources.' },
+  { name:'Orc',         icon:'💪', attr:'Strength Bonus',     desc:'+10% melee/STR-based damage in combat.' },
+  { name:'Undead',      icon:'💀', attr:'Defense Bonus',      desc:'+10% DEF — natural melee resistance.' },
+  { name:'Dragonborn',  icon:'🐉', attr:'Magic Resistance',   desc:'+10% resistance to magic damage.' },
+  { name:'Fairy',       icon:'🧚', attr:'Luck Bonus',         desc:'+10% luck — better drop rates from monsters.' },
+  { name:'Dwarf',       icon:'⛏️', attr:'Gear Bonus',         desc:'+10% bonus stats from equipped gear.' },
+  { name:'Lich',        icon:'🔮', attr:'Battle Revival',     desc:'Once per battle, survive a fatal blow at 50% HP.' },
+];
+
+async function openRacePickerModal() {
+  return new Promise(resolve => {
+    const overlay = _inkPickerOverlay('Choose Your Race', `
+      <div style="font-size:0.82rem;color:var(--ash);margin-bottom:16px;text-align:center;font-style:italic;">Your old race has been cleared. Select a new one to begin.</div>
+      <div id="ink-picker-cards">${_buildRaceCards()}</div>
+      <div style="display:flex;gap:10px;margin-top:18px;justify-content:center;">
+        <button class="btn-ghost" style="font-size:0.7rem;" onclick="document.getElementById('ink-picker-modal').remove();">✕ CANCEL</button>
+        <button class="btn-primary" style="max-width:200px;" onclick="window._inkPickerConfirmRace()">CONFIRM RACE</button>
+      </div>`);
+
+    window._inkPickerSel = null;
+    window._inkPickerConfirmRace = async function() {
+      const raceName = window._inkPickerSel;
+      if (!raceName) { window.showToast('Please select a race first.', 'error'); return; }
+      const raceData = RACE_LIST.find(r => r.name === raceName);
+      const raceAttr = raceData?.attr || '';
+      try {
+        await updateDoc(doc(db, 'characters', _uid), { race: raceName, raceAttr });
+        Object.assign(_charData, { race: raceName, raceAttr });
+        overlay.remove();
+        await refreshCharData(); _syncAllDisplays(_charData);
+        window.showToast(`🌀 Race set to ${raceName}!`, 'success');
+        logActivity('🌀', `Chose <b>${raceName}</b> as their new race.`, '#c9a84c');
+        resolve(raceName);
+      } catch(err) {
+        window.showToast('Failed to save race. Try again.', 'error');
+      }
+    };
+  });
+}
+window.openRacePickerModal = openRacePickerModal;
+
+async function openDeityPickerModal() {
+  return new Promise(resolve => {
+    const overlay = _inkPickerOverlay('Choose Your Deity', `
+      <div style="font-size:0.82rem;color:var(--ash);margin-bottom:16px;text-align:center;font-style:italic;">Your old deity has been cleared. Pledge your faith to a new one.</div>
+      <div id="ink-picker-cards">${_buildDeityCards()}</div>
+      <div style="display:flex;gap:10px;margin-top:18px;justify-content:center;">
+        <button class="btn-ghost" style="font-size:0.7rem;" onclick="document.getElementById('ink-picker-modal').remove();">✕ CANCEL</button>
+        <button class="btn-primary" style="max-width:200px;" onclick="window._inkPickerConfirmDeity()">CONFIRM DEITY</button>
+      </div>`);
+
+    window._inkPickerSel = null;
+    window._inkPickerConfirmDeity = async function() {
+      const deityName = window._inkPickerSel;
+      if (!deityName) { window.showToast('Please select a deity first.', 'error'); return; }
+      const deityTitle = DEITY_LORE[deityName]?.title || '';
+      try {
+        await updateDoc(doc(db, 'characters', _uid), { deity: deityName, deityTitle });
+        Object.assign(_charData, { deity: deityName, deityTitle });
+        overlay.remove();
+        await refreshCharData(); _syncAllDisplays(_charData);
+        window.showToast(`🔮 Deity set to ${deityName}!`, 'success');
+        logActivity('🔮', `Pledged faith to <b>${deityName}</b> as their new deity.`, '#c9a84c');
+        resolve(deityName);
+      } catch(err) {
+        window.showToast('Failed to save deity. Try again.', 'error');
+      }
+    };
+  });
+}
+window.openDeityPickerModal = openDeityPickerModal;
 
 function startEditMsg(docId, colPath, btn) {
   const body      = btn.closest(".chat-msg-body");
@@ -9352,14 +9474,22 @@ window._autoSelectZoneByName = function(zoneName) {
 };
 
 function checkDeathState() {
-  const banner   = document.getElementById('battle-dead-banner');
-  const zoneArea = document.getElementById('battle-zone-select');
+  const banner     = document.getElementById('battle-dead-banner');
+  const zoneArea   = document.getElementById('battle-zone-select');
+  const arena      = document.getElementById('battle-arena');
+  const result     = document.getElementById('battle-result');
+  const bossRaidUI = document.getElementById('boss-raid-ui');
+  const bossArena  = document.getElementById('boss-raid-arena');
+  const autoBatBar = document.getElementById('auto-battle-bar');
 
-  const arena = document.getElementById('battle-arena');
   if (_charData?.isDead) {
-    if (banner)   banner.style.display   = 'flex';
-    if (zoneArea) zoneArea.style.display = 'none';
-    if (arena && arena.style.display !== 'none') arena.style.display = 'none';
+    if (banner)     banner.style.display     = 'flex';
+    if (zoneArea)   zoneArea.style.display   = 'none';
+    if (arena)      arena.style.display      = 'none';
+    if (result)     result.style.display     = 'none';
+    if (bossRaidUI) bossRaidUI.style.display = 'none';
+    if (bossArena)  bossArena.style.display  = 'none';
+    if (autoBatBar) autoBatBar.style.display = 'none';
 
     // Show resurrection potion button only if player has one
     const resPotionWrap = document.getElementById('btn-use-res-potion-wrap');
@@ -11434,7 +11564,10 @@ window._onPanelSwitch = function(name) {
   if (name === 'crafting')  initCrafting();
   if (name === 'guild')     initGuild();
   if (name === 'shrine')    _renderShrinePanel();
-  if (name === 'character') _renderRegenInCrafting(); // renders regen into vitals card
+  if (name === 'character') {
+    _renderRegenInCrafting(); // renders regen into vitals card
+    _checkPotionResetPending();
+  }
   if (name === 'market')    _syncAllDisplays(_charData);
   if (name === 'map')      { window._initLayeredMap?.(); }
   if (name === 'activity') renderActivityFeed();
@@ -11447,6 +11580,161 @@ window._onPanelSwitch = function(name) {
     window._onLeaveChatPanel?.();
   }
 };
+
+// ── Potion Reset Pending Check ───────────────────────────────────────────────
+// If a player used a Class/Race/Divine Shift potion before the picker UI existed,
+// their slot is null in Firestore. Detect this on character panel open and show
+// the picker immediately — no need to buy/use another potion.
+function _checkPotionResetPending() {
+  if (!_charData) return;
+
+  // Only show one picker at a time; priority: class → race → deity
+  if (!_charData.charClass) {
+    setTimeout(() => {
+      document.getElementById('ink-picker-modal')?.remove();
+      // Show a brief notice banner above the picker
+      const overlay = _inkPickerOverlay(
+        'Choose Your Class',
+        `<div style="background:rgba(201,168,76,0.10);border:1px solid var(--gold-dim);border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:0.82rem;color:var(--gold-dim);text-align:center;">
+          ⚗️ Your class was previously reset. Pick a new one below — no potion needed.
+        </div>
+        <div id="ink-picker-cards">${_buildClassCards()}</div>
+        <div style="display:flex;gap:10px;margin-top:18px;justify-content:center;">
+          <button class="btn-primary" style="max-width:200px;" onclick="window._inkPickerConfirmClass()">CONFIRM CLASS</button>
+        </div>`
+      );
+      window._inkPickerSel = null;
+      window._inkPickerConfirmClass = async function() {
+        const cls = window._inkPickerSel;
+        if (!cls) { window.showToast('Please select a class first.', 'error'); return; }
+        const roleMap = { Warrior:'Damage Dealer', Guardian:'Tank', Arcanist:'Damage Dealer', Hunter:'Damage Dealer', Assassin:'Damage Dealer', Cleric:'Support/Healer', Summoner:'Summoner' };
+        try {
+          await updateDoc(doc(db, 'characters', _uid), { charClass: cls, classRole: roleMap[cls] || cls });
+          Object.assign(_charData, { charClass: cls, classRole: roleMap[cls] || cls });
+          overlay.remove();
+          await refreshCharData(); _syncAllDisplays(_charData);
+          window.showToast(`⚔️ Class set to ${cls}!`, 'success');
+          logActivity('⚔️', `Chose <b>${cls}</b> as their new class.`, '#c9a84c');
+        } catch(err) { window.showToast('Failed to save class. Try again.', 'error'); }
+      };
+    }, 300);
+    return; // don't stack multiple pickers
+  }
+
+  if (!_charData.race) {
+    setTimeout(() => {
+      document.getElementById('ink-picker-modal')?.remove();
+      const overlay = _inkPickerOverlay(
+        'Choose Your Race',
+        `<div style="background:rgba(201,168,76,0.10);border:1px solid var(--gold-dim);border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:0.82rem;color:var(--gold-dim);text-align:center;">
+          🌀 Your race was previously reset. Pick a new one below — no potion needed.
+        </div>
+        <div id="ink-picker-cards">${_buildRaceCards()}</div>
+        <div style="display:flex;gap:10px;margin-top:18px;justify-content:center;">
+          <button class="btn-primary" style="max-width:200px;" onclick="window._inkPickerConfirmRace()">CONFIRM RACE</button>
+        </div>`
+      );
+      window._inkPickerSel = null;
+      window._inkPickerConfirmRace = async function() {
+        const raceName = window._inkPickerSel;
+        if (!raceName) { window.showToast('Please select a race first.', 'error'); return; }
+        const raceData = RACE_LIST.find(r => r.name === raceName);
+        const raceAttr = raceData?.attr || '';
+        try {
+          await updateDoc(doc(db, 'characters', _uid), { race: raceName, raceAttr });
+          Object.assign(_charData, { race: raceName, raceAttr });
+          overlay.remove();
+          await refreshCharData(); _syncAllDisplays(_charData);
+          window.showToast(`🌀 Race set to ${raceName}!`, 'success');
+          logActivity('🌀', `Chose <b>${raceName}</b> as their new race.`, '#c9a84c');
+        } catch(err) { window.showToast('Failed to save race. Try again.', 'error'); }
+      };
+    }, 300);
+    return;
+  }
+
+  if (!_charData.deity) {
+    setTimeout(() => {
+      document.getElementById('ink-picker-modal')?.remove();
+      const overlay = _inkPickerOverlay(
+        'Choose Your Deity',
+        `<div style="background:rgba(201,168,76,0.10);border:1px solid var(--gold-dim);border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:0.82rem;color:var(--gold-dim);text-align:center;">
+          🔮 Your deity was previously reset. Pledge your faith below — no potion needed.
+        </div>
+        <div id="ink-picker-cards">${_buildDeityCards()}</div>
+        <div style="display:flex;gap:10px;margin-top:18px;justify-content:center;">
+          <button class="btn-primary" style="max-width:200px;" onclick="window._inkPickerConfirmDeity()">CONFIRM DEITY</button>
+        </div>`
+      );
+      window._inkPickerSel = null;
+      window._inkPickerConfirmDeity = async function() {
+        const deityName = window._inkPickerSel;
+        if (!deityName) { window.showToast('Please select a deity first.', 'error'); return; }
+        const deityTitle = DEITY_LORE[deityName]?.title || '';
+        try {
+          await updateDoc(doc(db, 'characters', _uid), { deity: deityName, deityTitle });
+          Object.assign(_charData, { deity: deityName, deityTitle });
+          overlay.remove();
+          await refreshCharData(); _syncAllDisplays(_charData);
+          window.showToast(`🔮 Deity set to ${deityName}!`, 'success');
+          logActivity('🔮', `Pledged faith to <b>${deityName}</b> as their new deity.`, '#c9a84c');
+        } catch(err) { window.showToast('Failed to save deity. Try again.', 'error'); }
+      };
+    }, 300);
+  }
+}
+
+// Card HTML builders shared by both potion-use and pending-check flows
+function _buildClassCards() {
+  const classes = [
+    { name:'Warrior',  icon:'⚔️', role:'Damage Dealer', desc:'Melee powerhouse. Relies on STR and high raw damage output.' },
+    { name:'Guardian', icon:'🛡️', role:'Tank',           desc:'Defensive anchor. Excels at absorbing damage with high DEF.' },
+    { name:'Arcanist', icon:'🔮', role:'Damage Dealer',  desc:'Pure magic attacker. Scales off INT for devastating spells.' },
+    { name:'Hunter',   icon:'🏹', role:'Damage Dealer',  desc:'Ranged precision fighter. DEX-based with poison and debuffs.' },
+    { name:'Assassin', icon:'🗡️', role:'Damage Dealer',  desc:'Burst damage specialist. First strikes hit hardest.' },
+    { name:'Cleric',   icon:'✨', role:'Support/Healer', desc:'Team healer and buffer. Keeps allies alive and empowered.' },
+    { name:'Summoner', icon:'🌀', role:'Summoner',       desc:'Commands summoned creatures. INT-based with debuff utility.' },
+  ];
+  return classes.map(c => `
+    <div class="ink-picker-card" data-class="${c.name}" onclick="document.querySelectorAll('.ink-picker-card').forEach(el=>el.classList.remove('ink-picker-selected'));this.classList.add('ink-picker-selected');window._inkPickerSel='${c.name}';"
+      style="cursor:pointer;border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px;display:flex;align-items:flex-start;gap:12px;transition:border-color .2s,background .2s;background:var(--ink3);">
+      <div style="font-size:1.6rem;line-height:1;min-width:32px;text-align:center;">${c.icon}</div>
+      <div>
+        <div style="font-family:var(--ff-display);font-size:0.95rem;color:var(--gold);letter-spacing:0.06em;">${c.name}</div>
+        <div style="font-size:0.72rem;color:var(--ash);margin-bottom:3px;font-family:var(--font-mono);letter-spacing:0.04em;">${c.role}</div>
+        <div style="font-size:0.82rem;color:var(--text-dim);font-style:italic;">${c.desc}</div>
+      </div>
+    </div>`).join('');
+}
+
+function _buildRaceCards() {
+  return RACE_LIST.map(r => `
+    <div class="ink-picker-card" data-race="${r.name}" onclick="document.querySelectorAll('.ink-picker-card').forEach(el=>el.classList.remove('ink-picker-selected'));this.classList.add('ink-picker-selected');window._inkPickerSel='${r.name}';"
+      style="cursor:pointer;border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px;display:flex;align-items:flex-start;gap:12px;transition:border-color .2s,background .2s;background:var(--ink3);">
+      <div style="font-size:1.6rem;line-height:1;min-width:32px;text-align:center;">${r.icon}</div>
+      <div>
+        <div style="font-family:var(--ff-display);font-size:0.95rem;color:var(--gold);letter-spacing:0.06em;">${r.name}</div>
+        <div style="font-size:0.72rem;color:var(--ash);margin-bottom:3px;font-family:var(--font-mono);letter-spacing:0.04em;">${r.attr}</div>
+        <div style="font-size:0.82rem;color:var(--text-dim);font-style:italic;">${r.desc}</div>
+      </div>
+    </div>`).join('');
+}
+
+function _buildDeityCards() {
+  return Object.entries(DEITY_LORE).map(([name, lore]) => {
+    const icon = DEITY_ICONS[name] || '⛩️';
+    return `
+    <div class="ink-picker-card" data-deity="${name}" onclick="document.querySelectorAll('.ink-picker-card').forEach(el=>el.classList.remove('ink-picker-selected'));this.classList.add('ink-picker-selected');window._inkPickerSel='${name}';"
+      style="cursor:pointer;border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px;display:flex;align-items:flex-start;gap:12px;transition:border-color .2s,background .2s;background:var(--ink3);">
+      <div style="font-size:1.6rem;line-height:1;min-width:32px;text-align:center;">${icon}</div>
+      <div>
+        <div style="font-family:var(--ff-display);font-size:0.95rem;color:var(--gold);letter-spacing:0.06em;">${name}</div>
+        <div style="font-size:0.72rem;color:var(--ash);margin-bottom:3px;font-family:var(--font-mono);letter-spacing:0.04em;">${lore.title} · ${lore.authorities}</div>
+        <div style="font-size:0.82rem;color:var(--text-dim);font-style:italic;">${lore.desc}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
 
 // Render World Development panel (latest 5 events, auto-delete oldest if >5)
 function renderWorldDevPanel() {
