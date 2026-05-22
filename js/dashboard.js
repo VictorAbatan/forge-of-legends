@@ -3473,20 +3473,36 @@ window.renderInventory = function(items) {
     return;
   }
 
-  grid.innerHTML = items.map((item, idx) => {
+  // Expand equipment items into individual cards (one per unit so each can be enchanted separately)
+  const expandedItems = [];
+  items.forEach(item => {
+    const type = getItemType(item.name);
+    if (type === 'equipment') {
+      const qty = item.qty ?? 1;
+      for (let i = 0; i < qty; i++) expandedItems.push({...item, qty: 1});
+    } else {
+      expandedItems.push(item);
+    }
+  });
+
+  grid.innerHTML = expandedItems.map((item, idx) => {
     const type = getItemType(item.name);
     const isConsumable = type === "consumable";
     const isFood = ["Soup","Skewer","Carp","Sardine","Meat","Food","Herb Fish","Grilled","Roasted","Fried"].some(k => item.name.includes(k));
     const isEquipment = type === 'equipment';
-    const enchantSuffix = (isEquipment && item.enchantLevel) ? ` <span style="color:var(--gold);font-size:0.7rem">+${item.enchantLevel}</span>` : '';
+    // Strip any +N suffix baked into the name by the Cloud Function, then show a single enchant badge
+    const baseName = item.name.replace(/\s*\+\d+$/, '');
+    const enchantLevel = item.enchantLevel || 0;
+    const enchantSuffix = (isEquipment && enchantLevel) ? ` <span style="color:var(--gold);font-size:0.7rem">+${enchantLevel}</span>` : '';
+    const safeBase = baseName.replace(/'/g, "\\'");
     return `
     <div class="inv-item" data-type="${type}">
-      <div class="inv-item-icon">${getItemIcon(item.name)}</div>
-      <div class="inv-item-name">${item.name}${enchantSuffix}</div>
-      <div class="inv-item-qty">x${item.qty ?? 1}</div>
-      ${isConsumable ? `<button class="vendor-buy-btn" style="margin-top:6px;font-size:0.6rem;padding:3px 8px" onclick="useItem('${item.name}','${isFood?'food':'potion'}')">USE</button>` : ''}
-      ${isEquipment ? `<button class="vendor-buy-btn" style="margin-top:6px;font-size:0.6rem;padding:3px 8px;background:rgba(91,159,224,0.12);color:#5b9fe0;border-color:#5b9fe044" onclick="window.openItemStatModal('${item.name.replace(/'/g,"\\'")}',${item.enchantLevel||0})">VIEW</button>` : ''}
-      ${type === 'material' ? `<button class="vendor-buy-btn" style="margin-top:6px;font-size:0.6rem;padding:3px 8px;background:rgba(201,168,76,0.1)" onclick="previewSellMaterial('${item.name}')">SELL</button>` : ''}
+      <div class="inv-item-icon">${getItemIcon(baseName)}</div>
+      <div class="inv-item-name">${baseName}${enchantSuffix}</div>
+      ${!isEquipment ? `<div class="inv-item-qty">x${item.qty ?? 1}</div>` : ''}
+      ${isConsumable ? `<button class="vendor-buy-btn" style="margin-top:6px;font-size:0.6rem;padding:3px 8px" onclick="useItem('${safeBase}','${isFood?'food':'potion'}')">USE</button>` : ''}
+      ${isEquipment ? `<button class="vendor-buy-btn" style="margin-top:6px;font-size:0.6rem;padding:3px 8px;background:rgba(91,159,224,0.12);color:#5b9fe0;border-color:#5b9fe044" onclick="window.openItemStatModal('${safeBase}',${enchantLevel})">VIEW</button>` : ''}
+      ${type === 'material' ? `<button class="vendor-buy-btn" style="margin-top:6px;font-size:0.6rem;padding:3px 8px;background:rgba(201,168,76,0.1)" onclick="previewSellMaterial('${safeBase}')">SELL</button>` : ''}
     </div>`;
   }).join('');
 };
@@ -5288,33 +5304,35 @@ async function buyItem({ name, icon, price, type, qty = 1 }) {
 // ── Item stat preview modal ───────────────────────────────────────────────────
 window.openItemStatModal = function(name, enchantLevel) {
   enchantLevel = parseInt(enchantLevel) || 0;
-  const weaponStats = EQUIP_WEAPON_STATS[name];
-  const armorStats  = EQUIP_ARMOR_STATS[name];
+  // Strip any +N suffix baked into the name by the Cloud Function before stat lookup
+  const baseName = name.replace(/\s*\+\d+$/, '');
+  const weaponStats = EQUIP_WEAPON_STATS[baseName];
+  const armorStats  = EQUIP_ARMOR_STATS[baseName];
   const isEquip = weaponStats || armorStats;
   const stats   = weaponStats || armorStats;
 
   // Try to find the item in crafting recipes for full data (grade, requires)
   let grade = '', recipeData = null;
   for (const [g, items] of Object.entries(window.CANONICAL_EQUIP_RECIPES || {})) {
-    const found = items.find(i => i.name === name);
+    const found = items.find(i => i.name === baseName);
     if (found) { grade = g; recipeData = found; break; }
   }
 
   // Try potion data
   let potionData = null;
   for (const items of Object.values(window.CANONICAL_POTION_RECIPES || {})) {
-    const found = items.find(i => i.name === name);
+    const found = items.find(i => i.name === baseName);
     if (found) { potionData = found; break; }
   }
 
   // Try food data
   let foodData = null;
   for (const items of Object.values(window.CANONICAL_FOOD_RECIPES || {})) {
-    const found = items.find(i => i.name === name);
+    const found = items.find(i => i.name === baseName);
     if (found) { foodData = found; break; }
   }
 
-  const icon = recipeData?.icon || potionData?.icon || foodData?.icon || getItemIcon(name);
+  const icon = recipeData?.icon || potionData?.icon || foodData?.icon || getItemIcon(baseName);
 
   // Build stat lines for equipment
   const STAT_LABELS = { str:'Strength', int:'Intelligence', def:'Defense', dex:'Dexterity', hp:'HP Bonus' };
@@ -5349,7 +5367,7 @@ window.openItemStatModal = function(name, enchantLevel) {
       <div class="istat-grid">${statLines}</div>
       ${enchantNote}`;
   } else if (potionData) {
-    const usageRule = name.includes('Luck') || name.includes('EXP') || name.includes('Insight')
+    const usageRule = baseName.includes('Luck') || baseName.includes('EXP') || baseName.includes('Insight')
       ? `<div style="font-size:0.7rem;color:#c9a84c;margin-top:8px;padding:6px 10px;background:rgba(201,168,76,0.08);border-radius:6px;border:1px solid rgba(201,168,76,0.2)">⚠️ Max 3 uses/day · Non-stackable · Each use lasts 1 hour</div>`
       : '';
     bodyHtml = `
@@ -5365,7 +5383,7 @@ window.openItemStatModal = function(name, enchantLevel) {
 
   const modal = document.getElementById('item-stat-modal');
   document.getElementById('istat-icon').textContent  = icon;
-  document.getElementById('istat-name').textContent  = name;
+  document.getElementById('istat-name').textContent  = baseName;
   document.getElementById('istat-body').innerHTML    = bodyHtml;
   modal.style.display = 'flex';
 };
@@ -11242,11 +11260,17 @@ window._loadEnchanter = function() {
   const sel = document.getElementById('enchant-item-select');
   if (!sel) return;
   sel.innerHTML = '<option value="">Choose from inventory...</option>';
-  const equipItems = (window._allInvItems||[]).filter(i => i.type==='weapon'||i.type==='armor');
+  // Expand stacked equipment into individual entries so each can be enchanted separately
+  const equipItems = [];
+  (window._allInvItems||[]).filter(i => i.type==='weapon'||i.type==='armor').forEach(item => {
+    const qty = item.qty ?? 1;
+    for (let q = 0; q < qty; q++) equipItems.push({...item, qty: 1});
+  });
   equipItems.forEach((item, i) => {
     const opt = document.createElement('option');
     opt.value = i;
-    opt.textContent = `${item.name} (${item.enchantLevel ? '+'+item.enchantLevel : 'unenchanted'})`;
+    const baseName = item.name.replace(/\s*\+\d+$/, '');
+    opt.textContent = `${baseName} (${item.enchantLevel ? '+'+item.enchantLevel : 'unenchanted'})`;
     sel.appendChild(opt);
   });
 
@@ -11275,7 +11299,7 @@ window._loadEnchanter = function() {
     set('enchant-gold-cost',      `${req?.c||'?'} coins`);
     infoEl.style.display = 'block';
     btn.disabled = false;
-    btn.dataset.itemName  = item.name;
+    btn.dataset.itemName  = item.name.replace(/\s*\+\d+$/, '');
     btn.dataset.itemGrade = grade;
     btn.dataset.enchantLvl = lvl;
   };
