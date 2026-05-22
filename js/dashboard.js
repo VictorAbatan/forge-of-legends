@@ -2037,6 +2037,16 @@ function _getFaithBlessingPct(charData) {
 //  instead of a floating modal.
 // ═══════════════════════════════════════════════════
 
+const DEITY_BLESSING_NAMES = {
+  "Sah'run":   "Flame of Forge",
+  "Alistor":   "Veil-step",
+  "Elionidas": "Fortune's Drift",
+  "Mah'run":   "Astral Sight",
+  "Freyja":    "Heart's Favour",
+  "Arion":     "Balanced Scales",
+  "Veil":      "Seeker's Mind",
+};
+
 const DEITY_LORE = {
   "Sah'run":   { title:"God of Flames",     desc:"Sah'run is the lord of flames and embodiment of scorch, also known as The Demon of Fire.", authorities:"Flames, Luminance, Hellfire" },
   "Alistor":   { title:"God of Darkness",   desc:"Alistor is the God of darkness, shadows and rest, also known as the Final Slumber.",       authorities:"Darkness, Slumber, Secrets" },
@@ -5167,8 +5177,10 @@ async function openDeityPickerModal() {
       if (!deityName) { window.showToast('Please select a deity first.', 'error'); return; }
       const deityTitle = DEITY_LORE[deityName]?.title || '';
       try {
-        await updateDoc(doc(db, 'characters', _uid), { deity: deityName, deityTitle });
-        Object.assign(_charData, { deity: deityName, deityTitle });
+        const newBlessing     = DEITY_BLESSING_NAMES[deityName] || deityName;
+        const newBlessingDesc = _getBlessingDesc(deityName, _charData.faithLevel || 0);
+        await updateDoc(doc(db, 'characters', _uid), { deity: deityName, deityTitle, blessing: newBlessing, blessingDesc: newBlessingDesc });
+        Object.assign(_charData, { deity: deityName, deityTitle, blessing: newBlessing, blessingDesc: newBlessingDesc });
         overlay.remove();
         await refreshCharData(); _syncAllDisplays(_charData);
         window.showToast(`🔮 Deity set to ${deityName}!`, 'success');

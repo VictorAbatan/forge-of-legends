@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>InkCraft — Blessing Patch</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d0b08; color: #c9b97a; font-family: monospace; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
+  .box { background: #1a1710; border: 1px solid #3a2f1a; border-radius: 12px; padding: 32px 36px; max-width: 480px; width: 100%; }
+  h2 { font-size: 1rem; letter-spacing: 0.15em; color: #c9a84c; margin-bottom: 4px; }
+  .sub { font-size: 0.75rem; color: #666; margin-bottom: 24px; }
+  button.run { width: 100%; background: linear-gradient(135deg,#b8860b,#8b6914); color: #fff8e1; border: none; border-radius: 6px; padding: 12px; font-family: monospace; font-size: 0.85rem; letter-spacing: 0.1em; cursor: pointer; }
+  button.run:hover { background: linear-gradient(135deg,#d4a017,#a07820); }
+  button.run:disabled { opacity: 0.4; cursor: not-allowed; }
+  #log { margin-top: 16px; font-size: 0.73rem; color: #70c090; white-space: pre-wrap; background: rgba(0,0,0,0.35); border-radius: 6px; padding: 12px 14px; display: none; max-height: 240px; overflow-y: auto; }
+  #log.visible { display: block; }
+  .err  { color: #e07070; }
+  .warn { color: #c9a84c; }
+  .dim  { color: #555; }
+</style>
+</head>
+<body>
+<div class="box">
+  <h2>🔮 BLESSING PATCH</h2>
+  <p class="sub">Fixes blank blessing fields for the logged-in account. Run while signed into the affected character.</p>
+  <button class="run" onclick="runPatch()" id="run-btn">⚗ FIX MY BLESSING</button>
+  <div id="log"></div>
+</div>
+
+<script type="module">
+import { auth, db } from "./firebase/firebase.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { doc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const DEITY_DATA = {
+  "Sah'run":   { blessing: "Flame of Forge",    blessingDesc: "3% chance enemies drop forge materials on defeat" },
+  "Alistor":   { blessing: "Veil-step",          blessingDesc: "3% reduced chance of getting robbed/attacked while exploring" },
+  "Elionidas": { blessing: "Fortune's Drift",    blessingDesc: "3% chance of finding precious loot while exploring" },
+  "Mah'run":   { blessing: "Astral Sight",       blessingDesc: "+3% chance of encountering rare events and special locations" },
+  "Freyja":    { blessing: "Heart's Favour",     blessingDesc: "+3% chance of receiving gifts from NPCs" },
+  "Arion":     { blessing: "Balanced Scales",    blessingDesc: "Balances the ratio of good and bad encounters during exploration" },
+  "Veil":      { blessing: "Seeker's Mind",      blessingDesc: "+3% EXP gained from all activities" },
+};
+
+const logEl = document.getElementById('log');
+function log(msg, cls) {
+  logEl.classList.add('visible');
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = msg;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+window.runPatch = async function() {
+  logEl.innerHTML = '';
+  logEl.classList.remove('visible');
+  const btn = document.getElementById('run-btn');
+  btn.disabled = true;
+
+  log('⏳ Waiting for auth...');
+  const user = await new Promise(resolve => {
+    const unsub = onAuthStateChanged(auth, u => { unsub(); resolve(u); });
+  });
+
+  if (!user) { log('❌ Not logged in.', 'err'); btn.disabled = false; return; }
+  log(`✓ Logged in as: ${user.email}`);
+
+  const ref  = doc(db, 'characters', user.uid);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) { log('❌ Character not found.', 'err'); btn.disabled = false; return; }
+
+  const data = snap.data();
+  log(`✓ Character: ${data.name}`);
+  log(`  Deity: ${data.deity || '(none)'}`);
+  log(`  Blessing now: ${data.blessing || '(blank)'}`);
+
+  if (!data.deity) {
+    log('⚠ No deity set — nothing to fix.', 'warn');
+    btn.disabled = false;
+    return;
+  }
+
+  const deityInfo = DEITY_DATA[data.deity];
+  if (!deityInfo) {
+    log(`⚠ Unknown deity "${data.deity}" — no fix available.`, 'warn');
+    btn.disabled = false;
+    return;
+  }
+
+  if (data.blessing && data.blessingDesc) {
+    log(`✓ Blessing already set: "${data.blessing}" — no fix needed.`, 'dim');
+    btn.disabled = false;
+    return;
+  }
+
+  await updateDoc(ref, {
+    blessing:     deityInfo.blessing,
+    blessingDesc: deityInfo.blessingDesc,
+  });
+
+  log(`\n✅ Fixed!`);
+  log(`  Blessing: ${deityInfo.blessing}`);
+  log(`  Desc: ${deityInfo.blessingDesc}`);
+  log(`\nRefresh the game to see changes.`);
+  btn.disabled = false;
+};
+</script>
+</body>
+</html>
