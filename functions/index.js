@@ -79,6 +79,7 @@ const CORS_ORIGINS = [
   "http://localhost:5500",
   "https://inkcraftrp.web.app",
   "https://inkcraftrp.firebaseapp.com",
+  "https://victorabatan.github.io",
 ];
 
 const CALL_OPTS = { cors: CORS_ORIGINS, region: "europe-west1", invoker: "public" };

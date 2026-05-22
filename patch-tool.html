@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>InkCraft — Dev Patch Tool</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d0b08; color: #c9b97a; font-family: monospace; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
+  .box { background: #1a1710; border: 1px solid #3a2f1a; border-radius: 12px; padding: 32px 36px; max-width: 500px; width: 100%; }
+  h2 { font-size: 1rem; letter-spacing: 0.15em; color: #c9a84c; margin-bottom: 4px; }
+  .sub { font-size: 0.75rem; color: #666; margin-bottom: 24px; }
+  label { font-size: 0.75rem; color: #888; display: block; margin-bottom: 6px; letter-spacing: 0.08em; }
+  select, input[type=number] { width: 100%; background: #111; border: 1px solid #3a2f1a; border-radius: 6px; color: #c9b97a; font-family: monospace; font-size: 0.82rem; padding: 9px 12px; margin-bottom: 16px; appearance: none; }
+  .row { display: flex; gap: 12px; }
+  .row > div { flex: 1; }
+  .items-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 20px; max-height: 260px; overflow-y: auto; padding-right: 4px; }
+  .item-toggle { background: #111; border: 1px solid #2a2010; border-radius: 6px; padding: 8px 10px; cursor: pointer; font-size: 0.72rem; color: #888; transition: all 0.15s; user-select: none; }
+  .item-toggle.active { border-color: #c9a84c; color: #c9a84c; background: rgba(201,168,76,0.08); }
+  .item-toggle .item-name { font-weight: bold; display: block; margin-bottom: 2px; }
+  .item-toggle .item-type { font-size: 0.65rem; opacity: 0.6; }
+  button.run { width: 100%; background: linear-gradient(135deg,#b8860b,#8b6914); color: #fff8e1; border: none; border-radius: 6px; padding: 12px; font-family: monospace; font-size: 0.85rem; letter-spacing: 0.1em; cursor: pointer; margin-top: 4px; }
+  button.run:hover { background: linear-gradient(135deg,#d4a017,#a07820); }
+  button.run:disabled { opacity: 0.4; cursor: not-allowed; }
+  #log { margin-top: 16px; font-size: 0.73rem; color: #70c090; white-space: pre-wrap; background: rgba(0,0,0,0.35); border-radius: 6px; padding: 12px 14px; display: none; max-height: 180px; overflow-y: auto; }
+  #log.visible { display: block; }
+  .err { color: #e07070; }
+  .warn { color: #c9a84c; }
+  .section-title { font-size: 0.68rem; letter-spacing: 0.12em; color: #555; margin-bottom: 10px; text-transform: uppercase; }
+  .select-all { font-size: 0.68rem; color: #c9a84c; cursor: pointer; float: right; margin-bottom: 10px; }
+  .select-all:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="box">
+  <h2>⚗️ INKCRAFT DEV PATCH TOOL</h2>
+  <p class="sub">Must be opened via Live Server while logged into the game.</p>
+
+  <div class="row">
+    <div>
+      <label>QUANTITY PER ITEM</label>
+      <input type="number" id="qty" value="20" min="1" max="9999">
+    </div>
+    <div>
+      <label>ACTION</label>
+      <select id="action">
+        <option value="add">Add to existing</option>
+        <option value="set">Set exact amount</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="section-title">SELECT ITEMS <span class="select-all" onclick="toggleAll()">toggle all</span></div>
+  <div class="items-grid" id="items-grid"></div>
+
+  <button class="run" onclick="runPatch()" id="run-btn">⚗ APPLY PATCH</button>
+  <div id="log"></div>
+</div>
+
+<script type="module">
+// Import directly from your project's own firebase.js — same auth session as the game
+import { auth, db } from "./firebase/firebase.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { doc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const ITEMS = [
+  { name: "E-grade Runestone",     type: "Runestone" },
+  { name: "D-grade Runestone",     type: "Runestone" },
+  { name: "C-grade Runestone",     type: "Runestone" },
+  { name: "B-grade Runestone",     type: "Runestone" },
+  { name: "A-grade Runestone",     type: "Runestone" },
+  { name: "S-grade Runestone",     type: "Runestone" },
+  { name: "Minor HP Potion",       type: "Potion" },
+  { name: "Standard HP Potion",    type: "Potion" },
+  { name: "Greater HP Potion",     type: "Potion" },
+  { name: "Minor Mana Potion",     type: "Potion" },
+  { name: "Standard Mana Potion",  type: "Potion" },
+  { name: "Greater Mana Potion",   type: "Potion" },
+  { name: "Minor Luck Potion",     type: "Potion" },
+  { name: "Standard Luck Potion",  type: "Potion" },
+  { name: "Greater Luck Potion",   type: "Potion" },
+  { name: "Minor EXP Potion",      type: "Potion" },
+  { name: "Standard EXP Potion",   type: "Potion" },
+  { name: "Greater EXP Potion",    type: "Potion" },
+  { name: "Resurrection Potion",   type: "Potion" },
+  { name: "Iron Ore",              type: "Material" },
+  { name: "Steel Ingot",           type: "Material" },
+  { name: "Leather",               type: "Material" },
+  { name: "Silk Thread",           type: "Material" },
+  { name: "Dragon Scale",          type: "Material" },
+  { name: "Mana Crystal",          type: "Material" },
+  { name: "Mushroom",              type: "Material" },
+  { name: "Basil Sprigs",          type: "Material" },
+  { name: "Nightshade",            type: "Material" },
+  { name: "Glowleaf",              type: "Material" },
+  { name: "Spirit Herb",           type: "Material" },
+  { name: "Jade Vine",             type: "Material" },
+];
+
+// Build grid
+const grid = document.getElementById('items-grid');
+ITEMS.forEach((item, i) => {
+  const el = document.createElement('div');
+  el.className = 'item-toggle active';
+  el.dataset.idx = i;
+  el.innerHTML = `<span class="item-name">${item.name}</span><span class="item-type">${item.type}</span>`;
+  el.onclick = () => el.classList.toggle('active');
+  grid.appendChild(el);
+});
+
+window.toggleAll = function() {
+  const cards = grid.querySelectorAll('.item-toggle');
+  const anyOff = [...cards].some(c => !c.classList.contains('active'));
+  cards.forEach(c => anyOff ? c.classList.add('active') : c.classList.remove('active'));
+};
+
+const logEl = document.getElementById('log');
+function log(msg, cls) {
+  logEl.classList.add('visible');
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = msg;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+window.runPatch = async function() {
+  logEl.innerHTML = '';
+  logEl.classList.remove('visible');
+  const btn = document.getElementById('run-btn');
+  btn.disabled = true;
+
+  log('⏳ Waiting for auth...');
+
+  const user = await new Promise(resolve => {
+    const unsub = onAuthStateChanged(auth, u => { unsub(); resolve(u); });
+  });
+
+  if (!user) {
+    log('❌ Not logged in. Make sure you are signed into the game first.', 'err');
+    btn.disabled = false;
+    return;
+  }
+
+  log(`✓ Logged in as: ${user.email}`);
+
+  const qty    = parseInt(document.getElementById('qty').value) || 20;
+  const action = document.getElementById('action').value;
+  const selected = [...grid.querySelectorAll('.item-toggle.active')].map(el => ITEMS[el.dataset.idx]);
+
+  if (!selected.length) { log('⚠ No items selected.', 'warn'); btn.disabled = false; return; }
+
+  const ref  = doc(db, 'characters', user.uid);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) { log('❌ Character not found.', 'err'); btn.disabled = false; return; }
+
+  const data = snap.data();
+  log(`✓ Character: ${data.name}`);
+
+  const inv = [...(data.inventory || [])];
+
+  for (const item of selected) {
+    const ex = inv.find(i => i.name === item.name);
+    if (ex) {
+      const before = ex.qty || 0;
+      ex.qty = action === 'set' ? qty : before + qty;
+      log(`  + ${item.name}: ${before} → ${ex.qty}`);
+    } else {
+      inv.push({ name: item.name, qty });
+      log(`  + ${item.name}: 0 → ${qty} (new)`);
+    }
+  }
+
+  await updateDoc(ref, { inventory: inv });
+  log('\n✅ Done! Refresh the game to see changes.');
+  btn.disabled = false;
+};
+</script>
+</body>
+</html>
