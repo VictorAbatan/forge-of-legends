@@ -725,8 +725,9 @@ exports.enchantItem = onCall(CALL_OPTS, async (request) => {
   if ((char.gold||0) < reqs.coins)
     throw new HttpsError("failed-precondition", `Need ${reqs.coins} gold. Have ${char.gold||0}.`);
 
-  const targetItem = inv.find(i => i.name === itemName);
-  if (!targetItem) throw new HttpsError("not-found", `${itemName} not in inventory.`);
+  // Find the stack entry whose base name matches (strip any existing +N suffix)
+  const stackItem = inv.find(i => i.name.replace(/\s*\+\d+$/, "") === itemName.replace(/\s*\+\d+$/, "") && (i.enchantLevel || 0) === currentEnchantLevel);
+  if (!stackItem) throw new HttpsError("not-found", `${itemName} not in inventory.`);
 
   runeItem.qty -= reqs.stones;
   if (runeItem.qty <= 0) inv.splice(inv.indexOf(runeItem), 1);
@@ -734,21 +735,38 @@ exports.enchantItem = onCall(CALL_OPTS, async (request) => {
 
   const success = Math.random() < successRate;
   let message, newEnchantLevel = currentEnchantLevel;
+  let resultItem = stackItem;
 
   if (success) {
     newEnchantLevel = currentEnchantLevel + 1;
-    targetItem.enchantLevel = newEnchantLevel;
-    targetItem.name = itemName.replace(/\s*\+\d+$/, "") + ` +${newEnchantLevel}`;
-    if (["A","S"].includes(itemGrade) && (newEnchantLevel === 3 || newEnchantLevel === 5)) {
-      targetItem.bonusEffect = newEnchantLevel === 3 ? "Minor Effect Unlocked" : "Major Effect Unlocked";
+    const baseName = itemName.replace(/\s*\+\d+$/, "");
+    const upgradedName = `${baseName} +${newEnchantLevel}`;
+
+    if ((stackItem.qty || 1) > 1) {
+      // Peel one copy off the stack and insert it as its own upgraded entry
+      stackItem.qty -= 1;
+      const upgradedItem = { ...stackItem, qty: 1, name: upgradedName, enchantLevel: newEnchantLevel };
+      if (["A","S"].includes(itemGrade) && (newEnchantLevel === 3 || newEnchantLevel === 5)) {
+        upgradedItem.bonusEffect = newEnchantLevel === 3 ? "Minor Effect Unlocked" : "Major Effect Unlocked";
+      }
+      inv.push(upgradedItem);
+      resultItem = upgradedItem;
+    } else {
+      // Only one copy — upgrade it in place
+      stackItem.enchantLevel = newEnchantLevel;
+      stackItem.name = upgradedName;
+      if (["A","S"].includes(itemGrade) && (newEnchantLevel === 3 || newEnchantLevel === 5)) {
+        stackItem.bonusEffect = newEnchantLevel === 3 ? "Minor Effect Unlocked" : "Major Effect Unlocked";
+      }
+      resultItem = stackItem;
     }
-    message = `✨ Enchantment succeeded! ${targetItem.name}`;
+    message = `✨ Enchantment succeeded! ${upgradedName}`;
   } else {
     message = `💔 Enchantment failed. ${reqs.stones}x ${runestoneName} and ${reqs.coins} gold were consumed.`;
   }
 
   await db.collection("characters").doc(uid).update({ inventory: inv, gold: newGold });
-  return { success, message, newEnchantLevel, successRate: Math.round(successRate * 100), item: targetItem };
+  return { success, message, newEnchantLevel, successRate: Math.round(successRate * 100), item: resultItem };
 });
 
 // ═══════════════════════════════════════════════════════════════
