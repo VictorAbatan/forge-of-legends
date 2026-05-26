@@ -3473,24 +3473,13 @@ window.renderInventory = function(items) {
     return;
   }
 
-  // Expand equipment items into individual cards (one per unit so each can be enchanted separately).
-  // enchantLevel is only meaningful on a singleton stack (qty===1) — a stack with qty>1 is unenchanted
-  // copies that happen to share a Firestore entry; strip enchantLevel/name-suffix from the clones.
+  // Expand equipment items into individual cards (one per unit so each can be enchanted separately)
   const expandedItems = [];
   items.forEach(item => {
     const type = getItemType(item.name);
     if (type === 'equipment') {
       const qty = item.qty ?? 1;
-      const isTrulyEnchanted = (item.enchantLevel || 0) > 0 && qty === 1;
-      const cleanName = item.name.replace(/\s*\+\d+$/, '');
-      for (let i = 0; i < qty; i++) {
-        if (isTrulyEnchanted) {
-          expandedItems.push({...item, qty: 1});
-        } else {
-          // Strip any stale enchantLevel that got written to a bulk stack by the old bug
-          expandedItems.push({...item, qty: 1, name: cleanName, enchantLevel: 0});
-        }
-      }
+      for (let i = 0; i < qty; i++) expandedItems.push({...item, qty: 1});
     } else {
       expandedItems.push(item);
     }
@@ -11273,7 +11262,7 @@ window._loadEnchanter = function() {
   sel.innerHTML = '<option value="">Choose from inventory...</option>';
   // Expand stacked equipment into individual entries so each can be enchanted separately
   const equipItems = [];
-  (window._allInvItems||[]).filter(i => i.type==='weapon'||i.type==='armor').forEach(item => {
+  (window._allInvItems||[]).filter(i => getItemType(i.name)==='equipment').forEach(item => {
     const qty = item.qty ?? 1;
     for (let q = 0; q < qty; q++) equipItems.push({...item, qty: 1});
   });
