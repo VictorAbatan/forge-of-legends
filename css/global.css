@@ -8,11 +8,11 @@ a{color:var(--gold);text-decoration:none}a:hover{color:var(--gold-light)}
 .bg-texture{position:fixed;inset:0;z-index:0;pointer-events:none;background:radial-gradient(ellipse 80% 60% at 20% 20%,rgba(201,168,76,.04) 0%,transparent 60%),radial-gradient(ellipse 60% 80% at 80% 80%,rgba(74,42,107,.06) 0%,transparent 60%),repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(255,255,255,.005) 2px,rgba(255,255,255,.005) 4px)}
 .bg-glow{position:fixed;inset:0;z-index:0;pointer-events:none;background:radial-gradient(ellipse 100% 80% at 50% 0%,rgba(201,168,76,.08) 0%,transparent 60%),radial-gradient(ellipse 80% 60% at 10% 90%,rgba(74,42,107,.12) 0%,transparent 50%),radial-gradient(ellipse 60% 40% at 90% 70%,rgba(26,107,90,.08) 0%,transparent 50%)}
 .bg-stars{position:fixed;inset:0;z-index:0;pointer-events:none;background-image:radial-gradient(1px 1px at 10% 15%,rgba(255,255,255,.4) 0%,transparent 100%),radial-gradient(1px 1px at 25% 40%,rgba(255,255,255,.3) 0%,transparent 100%),radial-gradient(1.5px 1.5px at 40% 8%,rgba(201,168,76,.5) 0%,transparent 100%),radial-gradient(1px 1px at 55% 25%,rgba(255,255,255,.35) 0%,transparent 100%),radial-gradient(1px 1px at 70% 55%,rgba(255,255,255,.25) 0%,transparent 100%),radial-gradient(1.5px 1.5px at 85% 18%,rgba(201,168,76,.4) 0%,transparent 100%),radial-gradient(1px 1px at 92% 72%,rgba(255,255,255,.3) 0%,transparent 100%),radial-gradient(1px 1px at 15% 80%,rgba(255,255,255,.2) 0%,transparent 100%),radial-gradient(1px 1px at 60% 90%,rgba(255,255,255,.25) 0%,transparent 100%)}
-.btn-primary{background:linear-gradient(135deg,var(--gold-dim) 0%,var(--gold) 100%);border:none;border-radius:var(--radius);padding:12px 24px;width:100%;color:var(--ink);font-family:var(--ff-display);font-size:.75rem;letter-spacing:.2em;font-weight:600;cursor:pointer;transition:opacity .2s,transform .1s}
+.btn-primary{background:linear-gradient(135deg,var(--gold-dim) 0%,var(--gold) 100%);border:none;border-radius:var(--radius);padding:12px 24px;width:100%;color:var(--ink);font-family:var(--ff-display);font-size:.75rem;letter-spacing:.2em;font-weight:600;cursor:pointer;transition:opacity .2s,transform .1s;touch-action:manipulation;-webkit-tap-highlight-color:transparent;min-height:44px;user-select:none}
 .btn-primary:hover{opacity:.9}.btn-primary:active{transform:scale(.98)}.btn-primary:disabled{opacity:.5;cursor:not-allowed}
-.btn-secondary{background:transparent;border:1px solid var(--border);border-radius:var(--radius);padding:10px 20px;color:var(--text-dim);font-family:var(--ff-display);font-size:.7rem;letter-spacing:.15em;cursor:pointer;transition:all .2s}
+.btn-secondary{background:transparent;border:1px solid var(--border);border-radius:var(--radius);padding:10px 20px;color:var(--text-dim);font-family:var(--ff-display);font-size:.7rem;letter-spacing:.15em;cursor:pointer;transition:all .2s;touch-action:manipulation;-webkit-tap-highlight-color:transparent;min-height:44px;user-select:none}
 .btn-secondary:hover{border-color:var(--border-bright);color:var(--text)}
-.btn-ghost{background:transparent;border:none;color:var(--text-dim);font-family:var(--ff-mono);font-size:.65rem;letter-spacing:.1em;cursor:pointer;transition:color .2s;padding:4px 0;text-decoration:none;display:inline-block}
+.btn-ghost{background:transparent;border:none;color:var(--text-dim);font-family:var(--ff-mono);font-size:.65rem;letter-spacing:.1em;cursor:pointer;transition:color .2s;padding:10px 4px;text-decoration:none;display:inline-block;touch-action:manipulation;-webkit-tap-highlight-color:transparent;min-height:44px;user-select:none}
 .btn-ghost:hover{color:var(--gold)}
 .field-group{display:flex;flex-direction:column;gap:6px}
 .field-label{font-family:var(--ff-mono);font-size:.65rem;letter-spacing:.2em;color:var(--text-dim);text-transform:uppercase}
@@ -48,3 +48,156 @@ a{color:var(--gold);text-decoration:none}a:hover{color:var(--gold-light)}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 .anim-fadedown{animation:fadeDown .7s ease both}.anim-fadeup{animation:fadeUp .7s ease both}
 .anim-delay-1{animation-delay:.1s}.anim-delay-2{animation-delay:.2s}.anim-delay-3{animation-delay:.3s}
+
+/* ═══════════════════════════════════════════════════════════════
+   BUTTON HIT-AREA & RESPONSIVENESS FIX
+   Buttons were unresponsive in center / only worked on edges
+   because overlapping elements or insufficient tap targets.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Universal button base — ensure nothing can overlap a button */
+button,
+.btn-primary,
+.btn-secondary,
+.btn-ghost,
+.vendor-buy-btn,
+.popup-action-btn,
+.battle-action-btn,
+.zone-card,
+.party-copy-btn,
+.party-start-raid-btn,
+.market-tab,
+.inv-tab,
+.chat-tab,
+.sidebar-tab-btn,
+.stat-btn {
+  position: relative;
+  z-index: 1;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+/* Minimum tap target (44px per Apple/Google HIG) */
+.btn-primary,
+.btn-secondary {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* btn-primary full width by default; modal actions also full width */
+.btn-primary { width: 100%; }
+.confirm-modal-actions .btn-primary,
+.confirm-modal-actions .btn-secondary,
+.equip-modal-actions .btn-primary,
+.equip-modal-actions .btn-secondary {
+  width: 100%;
+  display: block;
+}
+
+/* Ghost button tap area */
+.btn-ghost {
+  min-height: 44px;
+  padding: 10px 8px;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   MODAL Z-INDEX & POINTER-EVENTS FIX
+   Modals were being covered by panel content or sibling overlays
+   ═══════════════════════════════════════════════════════════════ */
+
+.confirm-modal,
+.sell-modal,
+.avatar-modal,
+.travel-modal,
+.crafting-modal,
+.map-fullscreen-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 800;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 8, 12, 0.82);
+  pointer-events: auto;
+}
+
+/* Modal box must not block its own children */
+.confirm-modal-box,
+.sell-modal-box,
+.avatar-modal-box,
+.travel-modal-box,
+.crafting-modal-content {
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
+}
+
+/* Buttons inside modals always on top */
+.confirm-modal button,
+.sell-modal button,
+.avatar-modal button,
+.travel-modal button,
+.crafting-modal button,
+.equip-modal button {
+  position: relative;
+  z-index: 2;
+  pointer-events: auto;
+}
+
+/* Equip modal — lives inside a panel so needs its own stacking */
+.equip-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 800;
+  background: rgba(8, 8, 12, 0.82);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+}
+.equip-modal-box {
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
+}
+
+/* Raid result: bump above panel content */
+#raid-result { z-index: 600 !important; pointer-events: auto; }
+#raid-result button { position: relative; z-index: 1; pointer-events: auto; }
+
+/* Stance editor overlay */
+.stance-editor-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 700;
+  pointer-events: auto;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   MOBILE BUTTON IMPROVEMENTS
+   ═══════════════════════════════════════════════════════════════ */
+@media (max-width: 768px) {
+  .btn-primary   { min-height: 48px; font-size: .8rem; }
+  .btn-secondary { min-height: 48px; font-size: .75rem; }
+
+  .confirm-modal-box,
+  .sell-modal-box,
+  .equip-modal-box,
+  .crafting-modal-content {
+    width: calc(100vw - 32px) !important;
+    max-width: 100% !important;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+
+  .confirm-modal-actions,
+  .equip-modal-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+}

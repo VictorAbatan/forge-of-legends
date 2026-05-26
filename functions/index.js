@@ -151,12 +151,26 @@ function rollDrops(grade) {
   return rewards;
 }
 
+function makeIid() {
+  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+}
+function isEquipmentType(type) {
+  return type === "weapon" || type === "armor";
+}
 function mergeInventory(inventory, newItems) {
   const inv = [...inventory];
   newItems.forEach(newItem => {
-    const existing = inv.find(i => i.name === newItem.name);
-    if (existing) existing.qty += newItem.qty;
-    else inv.push({ ...newItem });
+    if (isEquipmentType(newItem.type)) {
+      // Each equipment piece is unique — never stack, always push with a fresh iid
+      const qty = newItem.qty || 1;
+      for (let i = 0; i < qty; i++) {
+        inv.push({ ...newItem, qty: 1, iid: makeIid() });
+      }
+    } else {
+      const existing = inv.find(i => i.name === newItem.name);
+      if (existing) existing.qty += newItem.qty;
+      else inv.push({ ...newItem });
+    }
   });
   return inv;
 }
@@ -688,6 +702,7 @@ exports.craftItem = onCall(CALL_OPTS, async (request) => {
 
   const typeIcons = { weapon:"⚔️", armor:"🛡️", consumable:"🧪" };
   const crafted = { name: recipe.name, icon: recipe.icon || typeIcons[recipe.type] || "📦", type: recipe.type, qty: 1 };
+  if (isEquipmentType(recipe.type)) crafted.iid = makeIid();
   const merged  = mergeInventory(inv, [crafted]);
 
   await db.collection("characters").doc(uid).update({
@@ -706,7 +721,7 @@ exports.enchantItem = onCall(CALL_OPTS, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Must be logged in.");
 
-  const { itemName, itemGrade, currentEnchantLevel } = request.data;
+  const { iid, itemName, itemGrade, currentEnchantLevel } = request.data;
   if (currentEnchantLevel >= 5) throw new HttpsError("failed-precondition", "Item is already at maximum enchant level (+5).");
 
   const reqs  = ENCHANT_REQS[itemGrade]?.[currentEnchantLevel];
@@ -725,9 +740,9 @@ exports.enchantItem = onCall(CALL_OPTS, async (request) => {
   if ((char.gold||0) < reqs.coins)
     throw new HttpsError("failed-precondition", `Need ${reqs.coins} gold. Have ${char.gold||0}.`);
 
-  // Find the stack entry whose base name matches (strip any existing +N suffix)
-  const stackItem = inv.find(i => i.name.replace(/\s*\+\d+$/, "") === itemName.replace(/\s*\+\d+$/, "") && (i.enchantLevel || 0) === currentEnchantLevel);
-  if (!stackItem) throw new HttpsError("not-found", `${itemName} not in inventory.`);
+  // Match by iid (unique instance id) — unambiguous regardless of duplicates
+  const targetItem = inv.find(i => i.iid === iid);
+  if (!targetItem) throw new HttpsError("not-found", `Item not found in inventory.`);
 
   runeItem.qty -= reqs.stones;
   if (runeItem.qty <= 0) inv.splice(inv.indexOf(runeItem), 1);
@@ -735,38 +750,22 @@ exports.enchantItem = onCall(CALL_OPTS, async (request) => {
 
   const success = Math.random() < successRate;
   let message, newEnchantLevel = currentEnchantLevel;
-  let resultItem = stackItem;
 
   if (success) {
     newEnchantLevel = currentEnchantLevel + 1;
     const baseName = itemName.replace(/\s*\+\d+$/, "");
-    const upgradedName = `${baseName} +${newEnchantLevel}`;
-
-    if ((stackItem.qty || 1) > 1) {
-      // Peel one copy off the stack and insert it as its own upgraded entry
-      stackItem.qty -= 1;
-      const upgradedItem = { ...stackItem, qty: 1, name: upgradedName, enchantLevel: newEnchantLevel };
-      if (["A","S"].includes(itemGrade) && (newEnchantLevel === 3 || newEnchantLevel === 5)) {
-        upgradedItem.bonusEffect = newEnchantLevel === 3 ? "Minor Effect Unlocked" : "Major Effect Unlocked";
-      }
-      inv.push(upgradedItem);
-      resultItem = upgradedItem;
-    } else {
-      // Only one copy — upgrade it in place
-      stackItem.enchantLevel = newEnchantLevel;
-      stackItem.name = upgradedName;
-      if (["A","S"].includes(itemGrade) && (newEnchantLevel === 3 || newEnchantLevel === 5)) {
-        stackItem.bonusEffect = newEnchantLevel === 3 ? "Minor Effect Unlocked" : "Major Effect Unlocked";
-      }
-      resultItem = stackItem;
+    targetItem.enchantLevel = newEnchantLevel;
+    targetItem.name = `${baseName} +${newEnchantLevel}`;
+    if (["A","S"].includes(itemGrade) && (newEnchantLevel === 3 || newEnchantLevel === 5)) {
+      targetItem.bonusEffect = newEnchantLevel === 3 ? "Minor Effect Unlocked" : "Major Effect Unlocked";
     }
-    message = `✨ Enchantment succeeded! ${upgradedName}`;
+    message = `✨ Enchantment succeeded! ${targetItem.name}`;
   } else {
     message = `💔 Enchantment failed. ${reqs.stones}x ${runestoneName} and ${reqs.coins} gold were consumed.`;
   }
 
   await db.collection("characters").doc(uid).update({ inventory: inv, gold: newGold });
-  return { success, message, newEnchantLevel, successRate: Math.round(successRate * 100), item: resultItem };
+  return { success, message, newEnchantLevel, successRate: Math.round(successRate * 100), item: targetItem };
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -1126,11 +1125,19 @@ exports.buyListing = onCall(CALL_OPTS, async (request) => {
     const sellerRef = db.collection("characters").doc(listing.sellerUid);
 
     const buyerInv = [...(buyer.inventory||[])];
-    const existing = buyerInv.find(i => i.name === listing.itemName);
-    if (existing) {
-      existing.qty += qty;
+    const listingType = listing.itemType || "material";
+    if (isEquipmentType(listingType)) {
+      // Each equipment piece is unique — push qty individual entries each with their own iid
+      for (let i = 0; i < qty; i++) {
+        buyerInv.push({ name:listing.itemName, icon:listing.itemIcon||"📦", type:listingType, qty:1, iid:makeIid() });
+      }
     } else {
-      buyerInv.push({ name:listing.itemName, icon:listing.itemIcon||"📦", type:listing.itemType||"material", qty });
+      const existing = buyerInv.find(i => i.name === listing.itemName);
+      if (existing) {
+        existing.qty += qty;
+      } else {
+        buyerInv.push({ name:listing.itemName, icon:listing.itemIcon||"📦", type:listingType, qty });
+      }
     }
 
     tx.update(buyerRef,   { gold: FieldValue.increment(-totalPrice), inventory: buyerInv });

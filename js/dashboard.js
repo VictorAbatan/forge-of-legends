@@ -487,27 +487,83 @@ function subscribeParty(partyId) {
         _suppressRaidAutoLaunch = false; // consume the flag
         return;
       }
-      // Only auto-launch if this member is already on the Boss Raid panel.
-      // If they're elsewhere, just notify them — they'll enter when they navigate there.
+
       const onBossPanel = (typeof _battleMode !== 'undefined' && _battleMode === 'boss');
 
-      if (!onBossPanel) {
-        // Show a notification badge / toast so they know a raid is in progress
-        window.showToast('⚔️ A raid has started! Switch to Boss Raid to join.', 'info');
-        return;
-      }
-
-      // If raid.state exists, use it for all clients (mid-raid sync)
+      // ── Mid-raid sync: state already exists ──────────────────────────────────
+      // Never re-init (would wipe live state). Just sync and show the arena.
       if (_party.raid.state) {
+        const alreadyOnBattlePanel = !!document.getElementById('panel-battle')?.classList.contains('active');
+        if (!onBossPanel && !alreadyOnBattlePanel) {
+          // Auto-switch to boss panel so late/elsewhere member sees the live battle
+          window.showToast('⚔️ A raid is in progress — pulling you in!', 'info');
+          if (typeof switchPanel === 'function') switchPanel('battle');
+          setTimeout(() => {
+            _battleMode = 'boss';
+            if (typeof window.updateBattleModeUI === 'function') window.updateBattleModeUI('boss');
+          }, 200);
+          return;
+        }
+        if (!onBossPanel && alreadyOnBattlePanel) {
+          // On battle panel but mode not flagged yet — just set mode, don't redirect
+          _battleMode = 'boss';
+          if (typeof window.updateBattleModeUI === 'function') window.updateBattleModeUI('boss');
+          return;
+        }
+        // Already on boss panel — sync and show arena (do NOT call switchPanel here;
+        // calling it while already in the battle panel resets the UI and ejects everyone).
         _bossRaidState = _party.raid.state;
-        // Always set myIdx for this client
         if (_bossRaidState && Array.isArray(_bossRaidState.party) && typeof _uid !== 'undefined') {
           _bossRaidState.myIdx = _bossRaidState.party.findIndex(p => p.uid === _uid);
+        }
+        // If the arena isn't visible yet (member was on party screen), show it now
+        const _arenaEl = document.getElementById('boss-raid-arena');
+        const _raidUiEl = document.getElementById('boss-raid-ui');
+        if (_arenaEl && _arenaEl.style.display === 'none') {
+          if (_raidUiEl) _raidUiEl.style.display = 'none';
+          _arenaEl.style.display = 'block';
+          // Populate boss display fields from synced state
+          const _bs = _bossRaidState.boss;
+          const _bnEl = document.getElementById('raid-boss-arena-name');
+          if (_bnEl) _bnEl.textContent = _bs.name || '—';
+          const _baEl = document.getElementById('raid-boss-abilities-hint');
+          if (_baEl) _baEl.textContent = 'Abilities: ' + (_bs.abilities || []).map(a => typeof a === 'object' ? (a.name || '—') : String(a)).join(' · ');
+          const _bavEl = document.getElementById('raid-boss-emoji-avatar');
+          if (_bavEl) {
+            _bavEl.innerHTML = _bs.imageUrl
+              ? `<img src="${_bs.imageUrl}" alt="${_bs.name}" style="width:72px;height:72px;border-radius:12px;object-fit:cover;border:2px solid var(--gold);box-shadow:0 0 12px rgba(212,175,55,0.35)"/>`
+              : `<span style="font-size:3.2rem">${_bs.icon || '👹'}</span>`;
+          }
+          // Clear previous log and seed with synced entries
+          const _rlogEl = document.getElementById('raid-log');
+          if (_rlogEl) {
+            _rlogEl.innerHTML = (_bossRaidState.log || []).slice(-20).map(l => `<div class="battle-log-entry">${l}</div>`).join('');
+            _rlogEl.scrollTop = _rlogEl.scrollHeight;
+          }
         }
         _refreshRaidUI();
         return;
       }
-      // First-time launch (no state yet): start the raid locally
+
+      // ── Fresh raid start: no state written yet ───────────────────────────────
+      // Auto-switch members who are elsewhere so they also get the stance modal.
+      if (!onBossPanel) {
+        window.showToast('⚔️ Raid starting — your party needs you!', 'info');
+        // Reset guard so the next snapshot (which may carry state) is not blocked.
+        _raidLaunchInProgress = false;
+        if (typeof switchPanel === 'function') switchPanel('battle');
+        setTimeout(() => {
+          _battleMode = 'boss';
+          if (typeof window.updateBattleModeUI === 'function') window.updateBattleModeUI('boss');
+        }, 200);
+        return;
+      }
+
+      // Already on boss panel, no state yet — launch stance → startBossRaid.
+      // Guard against Firestore firing multiple snapshots before state is written.
+      if (_raidLaunchInProgress) return;
+      _raidLaunchInProgress = true;
+
       const boss = BOSS_LIST.find(b => b.id === _party.raid.bossId);
       if (boss && Array.isArray(_party.members) && _party.members.length > 0) {
         const memberUids = _party.members.map(m => m.uid);
@@ -523,7 +579,14 @@ function subscribeParty(partyId) {
             console.debug('[RAID DEBUG] Full member data fetched:', fullMembers);
             const validMembers = fullMembers.filter(Boolean);
             window.startBossRaid(validMembers, boss);
+          })
+          .catch(err => {
+            console.error('[RAID DEBUG] Member fetch failed, resetting guard:', err);
+            _raidLaunchInProgress = false;
           });
+      } else {
+        // Nothing to launch — release guard so a retry snapshot can proceed
+        _raidLaunchInProgress = false;
       }
     }
   });
@@ -1680,7 +1743,7 @@ function renderProfessionQuota() {
   let msg = progress.completed ? "✅ Quota met for this week!" : "Submit required materials before the week ends.";
   document.getElementById("quota-progress-msg").textContent = msg;
   document.getElementById("quota-penalty-msg").style.display = progress.penalty ? "block" : "none";
-  document.getElementById("quota-penalty-msg").textContent = progress.penalty ? "Penalty applied: -1 profession level, -20% EXP progress." : "";
+  document.getElementById("quota-penalty-msg").textContent = progress.penalty ? "Penalty applied: -20% profession EXP progress lost." : "";
   document.getElementById("quota-bonus-msg").style.display = progress.bonus ? "block" : "none";
   document.getElementById("quota-bonus-msg").textContent = progress.bonus ? "Bonus: +10% luck for professions this week!" : "";
 }
@@ -1786,7 +1849,7 @@ function updateQuotaProgress(submit=false) {
     toList.forEach(item => {
       html += `<div style="display:flex;align-items:center;justify-content:space-between;background:var(--ink3);border-radius:6px;padding:7px 12px">
         <span style="color:var(--text);font-size:0.87rem">${getItemIcon(item.name)} ${item.name} <span style="color:var(--text-dim);font-size:0.75rem">(\xd7${item.qty})</span></span>
-        <span style="color:var(--gold);font-size:0.78rem;font-family:var(--font-mono)">${item.price}\U0001faa9 ea</span>
+        <span style="color:var(--gold);font-size:0.78rem;font-family:var(--font-mono)">${item.price}🪙 ea</span>
       </div>`;
     });
     html += `</div><p style="font-size:0.75rem;color:var(--text-dim);margin-top:10px;font-style:italic">Prices are set automatically based on rarity.</p>`;
@@ -1875,19 +1938,16 @@ function checkAndResetWeeklyQuota() {
   if (progress.week !== currentWeek) {
     // If not completed, apply penalty
     if (!progress.completed) {
-      // Penalty: -1 profession level, -20% EXP
-      let newLevel = Math.max(0, (_charData.professionLevel||0)-1);
+      // Penalty: -20% EXP progress (doc rule — no level loss)
       let newExp = Math.floor((_charData.professionExp||0)*0.8);
       updateDoc(doc(db, "characters", _uid), {
-        professionLevel: newLevel,
         professionExp: newExp,
         "quotaProgress": { week: currentWeek, submitted: {common:0,uncommon:0,rare:0,legendary:0,mythic:0}, completed: false, penalty: true, bonus: false }
       }).then(()=>{
-        _charData.professionLevel = newLevel;
         _charData.professionExp = newExp;
         _charData.quotaProgress = { week: currentWeek, submitted: {common:0,uncommon:0,rare:0,legendary:0,mythic:0}, completed: false, penalty: true, bonus: false };
         renderProfessionQuota();
-        window.showToast("Missed quota last week: -1 profession level, -20% EXP.","error");
+        window.showToast("Missed quota last week: -20% profession EXP.","error");
       });
     } else {
       // Reset for new week
@@ -9591,18 +9651,51 @@ window.updateBattleModeUI = function(mode) {
       // If a raid is already active in Firestore, pull this member in now
       if (_party && _party.raid && _party.raid.active && _party.raid.bossId) {
         if (_party.raid.state) {
-          // Mid-raid: sync state directly (no stance modal needed)
+          // Mid-raid: sync state directly — never re-init startBossRaid here
           _bossRaidState = _party.raid.state;
           if (_bossRaidState && Array.isArray(_bossRaidState.party) && typeof _uid !== 'undefined') {
             _bossRaidState.myIdx = _bossRaidState.party.findIndex(p => p.uid === _uid);
           }
+          // Show arena, hide the boss-raid-ui (party/boss-select screens live inside it)
+          const arenaEl = document.getElementById('boss-raid-arena');
+          if (arenaEl) arenaEl.style.display = 'block';
+          const bossRaidUiEl = document.getElementById('boss-raid-ui');
+          if (bossRaidUiEl) bossRaidUiEl.style.display = 'none';
+          // Populate boss display fields
+          const _bs2 = _bossRaidState.boss;
+          const _bnEl2 = document.getElementById('raid-boss-arena-name');
+          if (_bnEl2) _bnEl2.textContent = _bs2.name || '—';
+          const _baEl2 = document.getElementById('raid-boss-abilities-hint');
+          if (_baEl2) _baEl2.textContent = 'Abilities: ' + (_bs2.abilities || []).map(a => typeof a === 'object' ? (a.name || '—') : String(a)).join(' · ');
+          const _bavEl2 = document.getElementById('raid-boss-emoji-avatar');
+          if (_bavEl2) {
+            _bavEl2.innerHTML = _bs2.imageUrl
+              ? `<img src="${_bs2.imageUrl}" alt="${_bs2.name}" style="width:72px;height:72px;border-radius:12px;object-fit:cover;border:2px solid var(--gold);box-shadow:0 0 12px rgba(212,175,55,0.35)"/>`
+              : `<span style="font-size:3.2rem">${_bs2.icon || '👹'}</span>`;
+          }
+          // Seed log with synced entries
+          const _rlogEl2 = document.getElementById('raid-log');
+          if (_rlogEl2) {
+            _rlogEl2.innerHTML = (_bossRaidState.log || []).slice(-20).map(l => `<div class="battle-log-entry">${l}</div>`).join('');
+            _rlogEl2.scrollTop = _rlogEl2.scrollHeight;
+          }
           _refreshRaidUI();
         } else {
-          // Raid just started, no state yet: trigger full join flow (stance → startBossRaid)
-          const boss = BOSS_LIST.find(b => b.id === _party.raid.bossId);
-          if (boss && Array.isArray(_party.members) && _party.members.length > 0) {
-            Promise.all(_party.members.map(m => getDoc(doc(db, 'characters', m.uid)).then(s => s.exists() ? { uid: m.uid, ...s.data() } : null)))
-              .then(members => window.startBossRaid(members.filter(Boolean), boss));
+          // Raid just started, no state yet: trigger full join flow (stance → startBossRaid).
+          // Guard against double-fire from panel switch + Firestore snapshot both running.
+          if (!_raidLaunchInProgress) {
+            _raidLaunchInProgress = true;
+            const boss = BOSS_LIST.find(b => b.id === _party.raid.bossId);
+            if (boss && Array.isArray(_party.members) && _party.members.length > 0) {
+              Promise.all(_party.members.map(m => getDoc(doc(db, 'characters', m.uid)).then(s => s.exists() ? { uid: m.uid, ...s.data() } : null)))
+                .then(members => window.startBossRaid(members.filter(Boolean), boss))
+                .catch(err => {
+                  console.error('[RAID DEBUG] updateBattleModeUI member fetch failed:', err);
+                  _raidLaunchInProgress = false;
+                });
+            } else {
+              _raidLaunchInProgress = false;
+            }
           }
         }
       }
@@ -9638,6 +9731,7 @@ let _bossRaidLeaderIdx = 0;
 let _bossRaidBoss = null;
 let _bossRaidState = null;
 let _suppressRaidAutoLaunch = false; // member-side guard: ignore snapshot re-trigger after leaving raid
+let _raidLaunchInProgress = false;  // dedup guard: prevent double-init when Firestore fires multiple snapshots
 
 // PVP State
 let _pvpPlayers = [];
@@ -10118,6 +10212,26 @@ function _refreshRaidUI() {
   document.getElementById('raid-turn-actions').style.display = (isMyTurn && iAmAlive) ? 'flex' : 'none';
   document.getElementById('raid-waiting-msg').style.display  = (!isMyTurn && iAmAlive && s.status === 'active') ? 'block' : 'none';
 
+  // Force-end button — leader only, always visible during active raid
+  let forceEndBtn = document.getElementById('raid-force-end-btn');
+  if (!forceEndBtn) {
+    forceEndBtn = document.createElement('button');
+    forceEndBtn.id = 'raid-force-end-btn';
+    forceEndBtn.className = 'btn-secondary';
+    forceEndBtn.style.cssText = 'margin-top:12px;font-size:0.78rem;opacity:0.7;width:auto;padding:6px 14px;color:var(--ash-light)';
+    forceEndBtn.textContent = '⛔ Force End Raid';
+    forceEndBtn.onclick = function() {
+      if (confirm('Force-end this raid for all party members?')) window.forceEndRaid();
+    };
+    const waitingEl = document.getElementById('raid-waiting-msg');
+    if (waitingEl && waitingEl.parentNode) waitingEl.parentNode.insertBefore(forceEndBtn, waitingEl.nextSibling);
+  }
+  if (_party && _party.leader === _uid) {
+    forceEndBtn.style.display = 'inline-block';
+  } else {
+    forceEndBtn.style.display = 'none';
+  }
+
   // Result
   if (s.status !== 'active') {
     _showRaidResult();
@@ -10353,6 +10467,7 @@ function _showRaidResult() {
 
 window.resetBossRaid = function() {
   _bossRaidState = null;
+  _raidLaunchInProgress = false; // allow a new raid to launch cleanly
   // Robustly hide all raid-related UI
   const arena = document.getElementById('boss-raid-arena');
   if (arena) arena.style.display = 'none';
@@ -10382,6 +10497,40 @@ window.resetBossRaid = function() {
     }
   }
 
+  window.showBossSelect();
+};
+
+// ── Force-end a stuck raid (any member can call; leader clears Firestore for all) ──
+window.forceEndRaid = async function() {
+  if (!_partyId) {
+    window.showToast('No active party found.', 'error');
+    return;
+  }
+  const isLeader = _party && _party.leader === _uid;
+  // Reset local state for everyone
+  _bossRaidState = null;
+  _raidLaunchInProgress = false;
+  _suppressRaidAutoLaunch = false;
+  const arena = document.getElementById('boss-raid-arena');
+  if (arena) arena.style.display = 'none';
+  const raidResult = document.getElementById('raid-result');
+  if (raidResult) raidResult.style.display = 'none';
+  const raidLog = document.getElementById('raid-log');
+  if (raidLog) raidLog.innerHTML = '<div class="battle-log-entry">🔥 Raid begins...</div>';
+  window._raidState = 'init';
+
+  if (isLeader) {
+    try {
+      await updateDoc(doc(db, 'parties', _partyId), { raid: null });
+      window.showToast('Raid ended and cleared for all members.', 'success');
+    } catch (e) {
+      window.showToast('Failed to clear raid from server: ' + e.message, 'error');
+    }
+  } else {
+    // Non-leader: suppress re-trigger and return to party screen
+    _suppressRaidAutoLaunch = true;
+    window.showToast('Exited raid. Ask the leader to end it for everyone.', 'info');
+  }
   window.showBossSelect();
 };
 
@@ -11260,12 +11409,21 @@ window._loadEnchanter = function() {
   const sel = document.getElementById('enchant-item-select');
   if (!sel) return;
   sel.innerHTML = '<option value="">Choose from inventory...</option>';
-  // Expand stacked equipment into individual entries so each can be enchanted separately
+
+  // Expand equipment items so stacked legacy entries (qty>1, no iid) each get their
+  // own dropdown slot — same logic as the inventory display grid.
+  const rawEquip = (window._allInvItems||[]).filter(i => getItemType(i.name)==="equipment");
   const equipItems = [];
-  (window._allInvItems||[]).filter(i => getItemType(i.name)==='equipment').forEach(item => {
+  rawEquip.forEach(item => {
     const qty = item.qty ?? 1;
-    for (let q = 0; q < qty; q++) equipItems.push({...item, qty: 1});
+    if (qty > 1) {
+      // Legacy stacked entry — split into individual slots
+      for (let i = 0; i < qty; i++) equipItems.push({ ...item, qty: 1, _slotIndex: i });
+    } else {
+      equipItems.push(item);
+    }
   });
+
   equipItems.forEach((item, i) => {
     const opt = document.createElement('option');
     opt.value = i;
@@ -11275,10 +11433,20 @@ window._loadEnchanter = function() {
   });
 
   sel.onchange = function() {
-    const item = equipItems[parseInt(sel.value)];
+    const item  = equipItems[parseInt(sel.value)];
     const infoEl = document.getElementById('enchant-info');
     const btn    = document.getElementById('btn-enchant');
+    const errEl  = document.getElementById('enchant-error');
     if (!item) { infoEl.style.display='none'; btn.disabled=true; return; }
+
+    // Legacy item has no iid — cannot enchant until migration stamps one onto it
+    if (!item.iid) {
+      infoEl.style.display = 'none';
+      btn.disabled = true;
+      errEl.textContent = 'This item is legacy (no unique ID). Please run the stamp-equipment-iids migration first.';
+      return;
+    }
+    errEl.textContent = '';
 
     const grade = item.grade || 'E';
     const lvl   = item.enchantLevel || 0;
@@ -11299,8 +11467,9 @@ window._loadEnchanter = function() {
     set('enchant-gold-cost',      `${req?.c||'?'} coins`);
     infoEl.style.display = 'block';
     btn.disabled = false;
-    btn.dataset.itemName  = item.name.replace(/\s*\+\d+$/, '');
-    btn.dataset.itemGrade = grade;
+    btn.dataset.iid        = item.iid;
+    btn.dataset.itemName   = item.name.replace(/\s*\+\d+$/, '');
+    btn.dataset.itemGrade  = grade;
     btn.dataset.enchantLvl = lvl;
   };
 };
@@ -11313,6 +11482,7 @@ window._doEnchant = async function() {
 
   try {
     const result = await fnEnchantItem({
+      iid:                btn.dataset.iid,
       itemName:           btn.dataset.itemName,
       itemGrade:          btn.dataset.itemGrade,
       currentEnchantLevel: parseInt(btn.dataset.enchantLvl),

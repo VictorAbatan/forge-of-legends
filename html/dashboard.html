@@ -64,6 +64,60 @@ button,
   border-radius: var(--radius); transition: all 0.2s; text-decoration: none;
 }
 .deity-switch-btn:hover { border-color: var(--border-bright); color: var(--gold); }
+
+/* ── Universal button pointer-events fix ─────────────────────────────────────
+   Prevents invisible overlapping elements from swallowing clicks/taps.
+   Buttons "only working on edges" = something transparent is covering center. */
+button,
+.btn-primary, .btn-secondary, .btn-ghost,
+.vendor-buy-btn, .party-copy-btn, .party-start-raid-btn,
+.popup-action-btn, .battle-action-btn, .zone-card,
+.stat-btn, .recipe-craft-btn, .market-tab, .inv-tab,
+.chat-tab, .sidebar-tab-btn, .subtab {
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+/* ── Modal z-index stack ─────────────────────────────────────────────────────
+   Must sit above panel content but below encounter popup (9999) / stance (10000). */
+.confirm-modal, .sell-modal, .avatar-modal,
+.travel-modal, .crafting-modal, .equip-modal {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 800 !important;
+  pointer-events: auto !important;
+}
+.confirm-modal-box, .sell-modal-box, .avatar-modal-box,
+.travel-modal-box, .crafting-modal-content, .equip-modal-box {
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
+}
+/* Buttons inside any modal always on top */
+.confirm-modal button, .sell-modal button, .avatar-modal button,
+.travel-modal button, .crafting-modal button, .equip-modal button,
+#raid-result button, #encounter-popup button, #stance-select-modal button {
+  position: relative;
+  z-index: 2;
+  pointer-events: auto;
+}
+#raid-result, #encounter-popup, #stance-select-modal { pointer-events: auto; }
+
+/* ── Mobile: larger tap targets ─────────────────────────────────────────── */
+@media (max-width: 768px) {
+  button, .btn-primary, .btn-secondary { min-height: 48px; }
+  .vendor-buy-btn { min-height: 36px; padding: 6px 12px !important; }
+  .confirm-modal-box, .sell-modal-box, .equip-modal-box, .crafting-modal-content {
+    width: calc(100vw - 32px) !important;
+    max-width: 100% !important;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+}
 </style>
 </head>
 <body>
@@ -1100,7 +1154,7 @@ button,
           <div class="skill-menu-list" id="raid-skill-list"></div>
         </div>
         <!-- Raid Result — fixed centered modal over the arena -->
-        <div id="raid-result" style="display:none;position:fixed;inset:0;z-index:500;background:rgba(8,8,12,0.88);backdrop-filter:blur(6px);align-items:center;justify-content:center;flex-direction:column;text-align:center;padding:40px 24px">
+        <div id="raid-result" style="display:none;position:fixed;inset:0;z-index:900;pointer-events:auto;background:rgba(8,8,12,0.88);backdrop-filter:blur(6px);align-items:center;justify-content:center;flex-direction:column;text-align:center;padding:40px 24px">
           <div id="raid-result-icon" style="font-size:3.5rem;margin-bottom:14px">🏆</div>
           <div id="raid-result-title" style="font-family:var(--font-display);font-size:1.4rem;color:var(--gold);letter-spacing:0.15em;margin-bottom:18px">—</div>
           <div id="raid-result-log" style="display:flex;flex-direction:column;gap:8px;margin-bottom:28px;font-size:1rem"></div>
