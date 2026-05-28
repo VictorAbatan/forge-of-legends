@@ -5331,9 +5331,16 @@ async function buyItem({ name, icon, price, type, qty = 1 }) {
 
   try {
     const inv = [...((_charData?.inventory)||[])];
+    const isEquip = getItemType(name) === 'equipment';
     const existing = inv.find(i => i.name === name);
-    if (existing) existing.qty += qty;
-    else inv.push({ name, icon, type, qty });
+    if (existing && !isEquip) existing.qty += qty;
+    else {
+      // Equipment always gets a unique iid so enchantment works immediately
+      const newItem = { name, icon, type, qty: 1 };
+      if (isEquip) newItem.iid = Math.random().toString(36).slice(2,10) + Date.now().toString(36);
+      if (!isEquip && qty > 1) newItem.qty = qty;
+      inv.push(newItem);
+    }
 
     await updateDoc(doc(db, "characters", _uid), {
       gold:      gold - totalPrice,
@@ -6132,7 +6139,12 @@ window.logFactionQuestCompletion = async function(questId) {
 async function _applyReward(xp, gold, item) {
   if (!_charData) return;
   const inv = [...(_charData.inventory||[])];
-  if (item) { const ex = inv.find(i=>i.name===item.name); if(ex) ex.qty+=item.qty; else inv.push({name:item.name,qty:item.qty}); }
+  if (item) {
+    const ex = inv.find(i=>i.name===item.name);
+    const _isEquip = getItemType(item.name)==='equipment';
+    if (ex && !_isEquip) { ex.qty += item.qty; }
+    else { const _ni={...item}; if(_isEquip) _ni.iid=Math.random().toString(36).slice(2,10)+Date.now().toString(36); inv.push(_ni); }
+  }
   const { newXp, newLevel, newRank, newXpMax, leveledUp } = _processExp(_charData.xp||0,_charData.xpMax||100,_charData.level||1,_charData.rank||"Wanderer",xp,_charData.charClass);
   const updates = { gold:(_charData.gold||0)+gold, inventory:inv, xp:newXp, xpMax:newXpMax, level:newLevel, rank:newRank };
   if (leveledUp) { updates.statPoints=(_charData.statPoints||0)+3; updates.hpMax=(_charData.hpMax||100)+10; updates.manaMax=(_charData.manaMax||50)+5; }
@@ -6366,7 +6378,9 @@ window._doGather = async function() {
       // Add to inventory
       const inv = [...(_charData.inventory||[])];
       const ex = inv.find(i=>i.name===found);
-      if (ex) ex.qty += count; else inv.push({name:found, qty:count});
+      const _fIsEquip = getItemType(found)==='equipment';
+      if (ex && !_fIsEquip) { ex.qty += count; }
+      else { const _ni={name:found,qty:count}; if(_fIsEquip) _ni.iid=Math.random().toString(36).slice(2,10)+Date.now().toString(36); inv.push(_ni); }
       _charData.inventory = inv;
       window._allInvItems = inv;
       window._refreshInvDisplay();
@@ -6455,7 +6469,9 @@ window._doGather = async function() {
     if (isDeityLoc && found) {
       const inv = [...(_charData.inventory||[])];
       const ex = inv.find(i=>i.name===found);
-      if (ex) ex.qty += 1; else inv.push({name:found, qty:1});
+      const _dIsEquip = getItemType(found)==='equipment';
+      if (ex && !_dIsEquip) { ex.qty += 1; }
+      else { const _ni={name:found,qty:1}; if(_dIsEquip) _ni.iid=Math.random().toString(36).slice(2,10)+Date.now().toString(36); inv.push(_ni); }
       await updateDoc(doc(db,"characters",_uid), {inventory:inv});
       _charData.inventory = inv;
       window._allInvItems = inv;
@@ -8166,7 +8182,9 @@ async function _clientBattleTurn(action, skillName) {
     const inv = [...(char.inventory||[])];
     drops.items.forEach(item => {
       const ex = inv.find(i => i.name === item.name);
-      ex ? ex.qty += item.qty : inv.push({...item});
+      const _isEquip = getItemType(item.name) === 'equipment';
+      if (ex && !_isEquip) { ex.qty += item.qty; }
+      else { const _ni = {...item}; if (_isEquip) _ni.iid = Math.random().toString(36).slice(2,10)+Date.now().toString(36); inv.push(_ni); }
     });
     const { newXp, newLevel, newRank, newXpMax, leveledUp } = _processExp(
       char.xp||0, char.xpMax||100, char.level||1, char.rank||"Wanderer", expGain, char.charClass
@@ -8327,7 +8345,9 @@ async function _clientAutoBattle(grade, maxTurns=15, zoneName=null) {
     const inv = [...(char.inventory||[])];
     drops.items.forEach(item => {
       const ex = inv.find(i => i.name === item.name);
-      ex ? ex.qty += item.qty : inv.push({...item});
+      const _isEquip = getItemType(item.name) === 'equipment';
+      if (ex && !_isEquip) { ex.qty += item.qty; }
+      else { const _ni = {...item}; if (_isEquip) _ni.iid = Math.random().toString(36).slice(2,10)+Date.now().toString(36); inv.push(_ni); }
     });
     const { newXp, newLevel, newRank, newXpMax, leveledUp } = _processExp(
       char.xp||0, char.xpMax||100, char.level||1, char.rank||"Wanderer", expGain, char.charClass
@@ -8911,7 +8931,9 @@ function _launchAutoBattleLoop(grade, zoneName) {
     const inv = [...(char.inventory||[])];
     drops.items.forEach(item => {
       const ex = inv.find(i => i.name === item.name);
-      ex ? ex.qty += item.qty : inv.push({...item});
+      const _isEquip = getItemType(item.name) === 'equipment';
+      if (ex && !_isEquip) { ex.qty += item.qty; }
+      else { const _ni = {...item}; if (_isEquip) _ni.iid = Math.random().toString(36).slice(2,10)+Date.now().toString(36); inv.push(_ni); }
     });
     char.gold      = (char.gold||0) + drops.gold;
     char.inventory = inv;
@@ -11311,7 +11333,9 @@ window.doCraft = async function(npc, recipeName) {
       const newGold = gold - cost;
       const inv = [...(window._charData?.inventory || [])];
       const existing = inv.find(i => i.name === recipeName);
-      if (existing) { existing.qty += 1; } else { inv.push({ name: recipeName, qty: 1, type: 'consumable' }); }
+      const _cIsEquip = getItemType(recipeName)==='equipment';
+      if (existing && !_cIsEquip) { existing.qty += 1; }
+      else { const _ni={name:recipeName,qty:1,type:_cIsEquip?'equipment':'consumable'}; if(_cIsEquip) _ni.iid=Math.random().toString(36).slice(2,10)+Date.now().toString(36); inv.push(_ni); }
       await updateDoc(doc(db, 'characters', auth.currentUser.uid), { gold: newGold, inventory: inv });
       window._charData.gold = newGold;
       window._charData.inventory = inv;
@@ -11333,6 +11357,8 @@ window.doCraft = async function(npc, recipeName) {
     showCraftingResult(`${recipeName} crafted successfully, warped to inventory`);
     logActivity('🔨', `<b>Crafted:</b> ${recipeName} at ${npc}.`, '#a09080');
     await refreshCharData();
+    // Stamp iid on crafted equipment (Cloud Function writes to Firestore directly)
+    if (getItemType(recipeName)==='equipment') await _stampMissingIids(window._allInvItems||[]);
     setTimeout(hideCraftingModal, 1700);
   } catch(err) {
     const raw = err.message || '';
@@ -11405,19 +11431,69 @@ window.hideCraftingModal = function() {
   modal.style.display = 'none';
 };
 
-window._loadEnchanter = function() {
+// ── Client-side iid stamper ───────────────────────────────────────────────────
+// Stamps missing iids directly onto Firestore inventory items for any account
+// that missed the one-time migration script. Safe to run multiple times.
+async function _stampMissingIids(inventory) {
+  function _makeIid() {
+    return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+  }
+  if (!_uid) return inventory;
+  let dirty = false;
+  const expanded = [];
+  inventory.forEach(item => {
+    const isEquip = getItemType(item.name) === 'equipment';
+    if (!isEquip) { expanded.push(item); return; }
+    const qty = item.qty ?? 1;
+    if (qty > 1) {
+      // Legacy stacked equipment — split into individual iid'd entries
+      for (let i = 0; i < qty; i++) {
+        expanded.push({ ...item, qty: 1, iid: _makeIid() });
+      }
+      dirty = true;
+    } else if (!item.iid) {
+      expanded.push({ ...item, qty: 1, iid: _makeIid() });
+      dirty = true;
+    } else {
+      expanded.push(item);
+    }
+  });
+  if (dirty) {
+    try {
+      await updateDoc(doc(db, 'characters', _uid), { inventory: expanded });
+      // Sync local cache so the inventory grid also reflects the iid'd items
+      if (window._charData) window._charData.inventory = expanded;
+      if (window._allInvItems) window._allInvItems = expanded;
+      console.log('[IID] Stamped missing equipment iids for', _uid);
+    } catch(e) {
+      console.warn('[IID] Could not stamp iids:', e);
+    }
+  }
+  return expanded;
+}
+
+window._loadEnchanter = async function() {
   const sel = document.getElementById('enchant-item-select');
   if (!sel) return;
-  sel.innerHTML = '<option value="">Choose from inventory...</option>';
+  sel.innerHTML = '<option value="">Loading...</option>';
+  sel.disabled = true;
 
-  // Expand equipment items so stacked legacy entries (qty>1, no iid) each get their
-  // own dropdown slot — same logic as the inventory display grid.
-  const rawEquip = (window._allInvItems||[]).filter(i => getItemType(i.name)==="equipment");
+  // Auto-stamp any legacy equipment missing iids before building the dropdown
+  const rawInv = (window._allInvItems || []);
+  const stamped = await _stampMissingIids(rawInv);
+  // Reflect stamped inventory back into global cache
+  if (window._allInvItems) window._allInvItems = stamped;
+
+  sel.innerHTML = '<option value="">Choose from inventory...</option>';
+  sel.disabled = false;
+
+  // Expand equipment items so each piece gets its own dropdown slot
+  const rawEquip = stamped.filter(i => getItemType(i.name) === 'equipment');
   const equipItems = [];
   rawEquip.forEach(item => {
     const qty = item.qty ?? 1;
     if (qty > 1) {
-      // Legacy stacked entry — split into individual slots
+      // Shouldn't happen after stamping, but handle gracefully
       for (let i = 0; i < qty; i++) equipItems.push({ ...item, qty: 1, _slotIndex: i });
     } else {
       equipItems.push(item);
@@ -11439,11 +11515,12 @@ window._loadEnchanter = function() {
     const errEl  = document.getElementById('enchant-error');
     if (!item) { infoEl.style.display='none'; btn.disabled=true; return; }
 
-    // Legacy item has no iid — cannot enchant until migration stamps one onto it
+    // All items are guaranteed iid'd after _stampMissingIids above.
+    // Guard just in case something slipped through.
     if (!item.iid) {
       infoEl.style.display = 'none';
       btn.disabled = true;
-      errEl.textContent = 'This item is legacy (no unique ID). Please run the stamp-equipment-iids migration first.';
+      errEl.textContent = 'Could not assign an ID to this item. Please refresh and try again.';
       return;
     }
     errEl.textContent = '';

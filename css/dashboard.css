@@ -377,26 +377,54 @@
 /* Style for inventory <select> in enchantment and market */
 .field-input-select {
   width: 100%;
-  padding: 9px 36px 9px 12px;
+  padding: 11px 40px 11px 14px;
   border-radius: var(--radius);
   border: 1px solid var(--border);
-  background: var(--ink3) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23c9a84c' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 12px center;
+  background-color: var(--ink3);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23C9A84C' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
   color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 1rem;
-  margin-bottom: 8px;
-  transition: border-color 0.18s, background-color 0.18s;
+  font-family: var(--font-display);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  line-height: 1.4;
+  margin-bottom: 14px;
+  transition: border-color 0.18s, background-color 0.18s, box-shadow 0.18s;
+  /* Remove all browser default styling */
   appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
   cursor: pointer;
+  /* Min height for tap targets */
+  min-height: 44px;
+  /* Prevent iOS zoom on focus */
+  font-size: max(16px, 0.75rem);
+}
+.field-input-select:hover {
+  border-color: var(--border-bright);
+  background-color: var(--ink2);
 }
 .field-input-select:focus {
-  border-color: var(--border-bright);
+  border-color: var(--gold);
   outline: none;
-  background: var(--ink2);
+  background-color: var(--ink2);
+  box-shadow: 0 0 0 2px rgba(201, 168, 76, 0.15);
+}
+.field-input-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .field-input-select option {
   background: var(--ink2);
   color: var(--text);
+  font-family: var(--font-display);
+  padding: 8px 12px;
+}
+.field-input-select option:checked,
+.field-input-select option:hover {
+  background: var(--ink3);
+  color: var(--gold);
 }
 .faction-leave-btn:hover, .faction-join-btn:hover {
   background: #c9a84c;
