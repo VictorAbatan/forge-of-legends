@@ -3086,7 +3086,7 @@ function openDeityNpcForm(npcId) {
     <div style="display:flex;gap:10px;margin-bottom:10px">
       <div class="field-group" style="flex:1;margin-bottom:0">
         <label class="field-label">Rank</label>
-        <select class="field-input npc-select" id="dnpc-rank">
+        <select class="field-input npc-select" id="dnpc-rank" onchange="window._onDnpcClassOrRankChange()">
           <option value="">— None —</option>
           ${NPC_RANKS.map(r => `<option value="${r.value}" ${(existing.rank||"")===r.value?"selected":""}>${r.value} (${r.levels})</option>`).join("")}
         </select>
@@ -3187,8 +3187,7 @@ function openDeityNpcForm(npcId) {
     }).join("");
   };
 
-  // Hook rank dropdown to refresh skills
-  document.getElementById("dnpc-rank")?.addEventListener("change", window._onDnpcClassOrRankChange);
+  // Rank dropdown refresh is handled via onchange attribute on the <select> element.
 
   // Initialise picker if editing an existing NPC that has a class
   if (existing.charClass) {
