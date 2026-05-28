@@ -1475,8 +1475,39 @@ button,
   window.showToast = function(msg, type='') {
     const t = document.getElementById('toast');
     t.textContent = msg; t.className = 'toast show ' + type;
-    clearTimeout(_tt); _tt = setTimeout(() => t.classList.remove('show'), 3200);
+    clearTimeout(_tt); _tt = setTimeout(() => { t.classList.remove('show'); }, 3200);
   };
+
+  // ── Stuck-overlay safety net ───────────────────────────────────────────────
+  // Any ink-confirm-overlay or full-screen dynamic modal that gets orphaned
+  // (e.g. JS error mid-async, network timeout) will block all button clicks.
+  // This watchdog runs every 30s and removes overlays that have been alive > 60s.
+  (function _installOverlayWatchdog() {
+    const TIMEOUT_MS = 60_000;
+    const TRACKED = new WeakMap();
+    function _scanOverlays() {
+      // All known overlay selectors
+      const sel = [
+        '.ink-confirm-overlay',
+        '#ink-confirm-modal',
+        '#npc-speak-modal',
+        '#npc-manager-modal',
+        '#_pick-leader-modal',
+        '#party-join-modal',
+        '#fq-submit-modal',
+        '#faction-leave-confirm-modal',
+      ].join(',');
+      document.querySelectorAll(sel).forEach(el => {
+        if (!TRACKED.has(el)) TRACKED.set(el, Date.now());
+        else if (Date.now() - TRACKED.get(el) > TIMEOUT_MS) {
+          console.warn('[Watchdog] Removing stuck overlay:', el.id || el.className);
+          el.remove();
+        }
+      });
+    }
+    setInterval(_scanOverlays, 30_000);
+  })();
+
 
   window.renderInventory = function(items) {
     const grid = document.getElementById('inventory-grid');
@@ -2117,9 +2148,11 @@ button,
 
   function sendChatMessage() { window._sendChat?.(); }
 
-  let _activeChatTab = 'rp';
-  function switchChatTab(tab) {
-    _activeChatTab = tab;
+    function switchChatTab(tab) {
+    // NOTE: _switchChatTab (in dashboard.js) owns the canonical _chatTab variable
+    // and the window._getActiveChatTab getter. Do NOT redefine _getActiveChatTab
+    // here — doing so creates two out-of-sync variables and sends messages to the
+    // wrong Firestore collection.
     document.getElementById('tab-rp').classList.toggle('active', tab === 'rp');
     document.getElementById('tab-general').classList.toggle('active', tab === 'general');
     const placeholder = tab === 'rp'
@@ -2128,7 +2161,7 @@ button,
     document.getElementById('chat-input').placeholder = placeholder;
     window._switchChatTab?.(tab);
   }
-  window._getActiveChatTab = () => _activeChatTab;
+  // _getActiveChatTab is defined in dashboard.js to keep it in sync with _chatTab.
 
   let _playerActionTarget = null;
   function openPlayerPopup(uid, name, el) {

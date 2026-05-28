@@ -24,8 +24,8 @@ a{color:var(--gold);text-decoration:none}a:hover{color:var(--gold-light)}
 .inkcraft-sigil{width:70px;height:70px;margin:0 auto 20px}.inkcraft-sigil svg{width:100%;height:100%}
 .inkcraft-logo{font-family:var(--ff-display);font-size:clamp(2.4rem,7vw,4rem);font-weight:700;letter-spacing:.12em;color:var(--gold);text-shadow:0 0 40px rgba(201,168,76,.3),0 2px 4px rgba(0,0,0,.8)}
 .inkcraft-tagline{font-family:var(--ff-body);font-size:1rem;font-style:italic;color:var(--parchment-dim);letter-spacing:.15em}
-.toast{position:fixed;bottom:40%;left:50%;transform:translate(-50%,80px);background:var(--ink2);border:1px solid var(--border-bright);border-radius:var(--radius);padding:14px 20px;font-size:.85rem;color:var(--text);z-index:999;opacity:0;transition:all .3s ease;max-width:300px;font-family:var(--ff-body);right:auto}
-.toast.show{transform:translate(-50%,0);opacity:1}.toast.error{border-color:rgba(192,57,43,.5)}.toast.success{border-color:rgba(39,174,96,.5)}.toast.warning{border-color:rgba(230,180,50,.5);color:var(--gold)}
+.toast{position:fixed;bottom:40%;left:50%;transform:translate(-50%,80px);background:var(--ink2);border:1px solid var(--border-bright);border-radius:var(--radius);padding:14px 20px;font-size:.85rem;color:var(--text);z-index:999;opacity:0;pointer-events:none;transition:all .3s ease;max-width:300px;font-family:var(--ff-body);right:auto}
+.toast.show{transform:translate(-50%,0);opacity:1;pointer-events:none}.toast.error{border-color:rgba(192,57,43,.5)}.toast.success{border-color:rgba(39,174,96,.5)}.toast.warning{border-color:rgba(230,180,50,.5);color:var(--gold)}
 
 @media (max-width: 900px) {
   .toast { bottom: 45%; left: 50%; width: calc(100vw - 40px); max-width: 320px; }

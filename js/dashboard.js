@@ -4,7 +4,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   doc, getDoc, setDoc, updateDoc, addDoc, deleteDoc,
-  collection, query, where, orderBy, limit,
+  collection, query, where, orderBy, limit, limitToLast,
   onSnapshot, serverTimestamp, getDocs, increment,
   arrayUnion, arrayRemove
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -4333,11 +4333,9 @@ function startChatListener(locationId, tab) {
   const msgsRef = tab === "general"
     ? collection(db, "general-chat", "global", "messages")   // one global room
     : collection(db, "chats", locationId, "messages");        // location-specific
-  // General chat uses limit-only query (no orderBy) to avoid composite index requirement.
-  // Messages are then sorted client-side on first load.
-  const q = tab === "general"
-    ? query(msgsRef, limit(150))
-    : query(msgsRef, orderBy("timestamp", "asc"), limit(150));
+  // Both tabs use server-side orderBy — Firestore auto-indexes single fields,
+  // no composite index needed.
+  const q = query(msgsRef, orderBy("timestamp", "asc"), limitToLast(150));
 
   // ── Helper: build a single message element ──────────────────────
   function _buildMsgEl(d) {
@@ -4505,10 +4503,10 @@ function startChatListener(locationId, tab) {
           </div>
         </div>` : '';
       el.innerHTML = `
-        <div class="chat-msg-avatar npc-avatar" title="${msg.charName}">${avatarContent}</div>
+        <div class="chat-msg-avatar npc-avatar" onclick="openPlayerPopup('npc_${msg.npcId||'npc'}','${(msg.charName||"NPC").replace(/'/g,"\\'")}',this)" style="cursor:pointer" title="${msg.charName}">${avatarContent}</div>
         <div class="chat-msg-body">
           <div class="chat-msg-header">
-            <span class="chat-msg-name npc-name">🧙 ${msg.charName||"NPC"}</span>
+            <span class="chat-msg-name npc-name" onclick="openPlayerPopup('npc_${msg.npcId||'npc'}','${(msg.charName||"NPC").replace(/'/g,"\\'")}',this)" style="cursor:pointer">🧙 ${msg.charName||"NPC"}</span>
             ${msg.title ? `<span class="chat-msg-title npc-role">${msg.title}</span>` : ""}
             <span class="chat-msg-rank" style="color:var(--gold-dim);font-size:0.7rem">${msg.rank||"NPC"} · Lv.${msg.level||1}</span>
             ${msg.isAutoReply ? `<span style="font-size:0.65rem;color:var(--ash);font-style:italic">auto</span>` : ""}
@@ -4563,16 +4561,8 @@ function startChatListener(locationId, tab) {
         return;
       }
       container.innerHTML = "";
-      // For general chat (no server-side orderBy), sort client-side by timestamp
       const docs = [];
       snap.forEach(d => docs.push(d));
-      if (tab === "general") {
-        docs.sort((a, b) => {
-          const ta = a.data().timestamp?.toMillis?.() ?? 0;
-          const tb = b.data().timestamp?.toMillis?.() ?? 0;
-          return ta - tb;
-        });
-      }
       docs.forEach(d => {
         const el = _buildMsgEl(d);
         if (el) container.appendChild(el);
@@ -4632,10 +4622,17 @@ function startChatListener(locationId, tab) {
   });
 }
 
+let _isSending = false; // debounce guard — prevent double-send on fast taps
 async function sendChat() {
+  if (_isSending) return;
   const input = document.getElementById("chat-input");
   const text  = input?.value.trim();
-  if (!text || !_charData) return;
+  if (!text) return;
+  if (!_charData) {
+    window.showToast?.("Still loading your character — please try again.", "error");
+    return;
+  }
+  _isSending = true;
 
   const location   = _charData.kingdom || _charData.location || "unknown";
   const locationId = location.split('\u2014')[0].trim().toLowerCase().replace(/[^a-z0-9]/g, "-");
@@ -4666,15 +4663,20 @@ async function sendChat() {
     payload.replyTo = window._replyTo;
   }
 
+  // Clear input immediately so it feels instant (restore only on failure)
+  const savedText = text;
+  if (input) input.value = "";
+  window._cancelReply?.();
   try {
     await addDoc(msgsRef, payload);
   } catch(e) {
     console.error("[sendChat] Failed to send message:", e);
     window.showToast?.("Failed to send message. Please try again.", "error");
+    if (input) input.value = savedText; // restore on failure
+    _isSending = false;
     return;
   }
-  if (input) input.value = "";
-  window._cancelReply?.();
+  _isSending = false;
 
   // Mention detection and notification (for player mentions only)
   if (text.includes("@")) {
@@ -4814,15 +4816,19 @@ function renderNpcList() {
       ? `<img src="${npc.avatar}" style="width:100%;height:100%;object-fit:cover;border-radius:50%"/>`
       : `<span style="font-size:1rem">${npc.avatar || "🧙"}</span>`;
 
+    // Deity gets an extra "speak as NPC" button that stops propagation
     const deityBtn = isDeity
-      ? `<button class="npc-speak-btn" title="Speak as this NPC"
-           onclick="window.openNpcSpeakModal('${npc.id}','${(npc.name||"").replace(/'/g,"\\'")}')">🗣️</button>`
+      ? `<button class="npc-speak-btn" title="Speak as ${npc.name}"
+           onclick="event.stopPropagation();window.openNpcSpeakModal('${npc.id}','${(npc.name||"").replace(/'/g,"\\'")}')">🗣️</button>`
       : "";
 
-    return `<div class="chat-player-chip npc-chip" title="${npc.description || npc.name}">
+    // Whole chip opens the same Speak/Trade/Duel popup as players.
+    // uid "npc_<id>" is passed so playerAction('speak') tags @NpcName.
+    return `<div class="chat-player-chip npc-chip"
+        title="${npc.description || npc.name}"
+        onclick="openPlayerPopup('npc_${npc.id}','${(npc.name||"").replace(/'/g,"\\'")}',this)">
       <div class="chat-player-avatar">${av}</div>
       <span class="chat-player-name">${npc.name}</span>
-      <span class="npc-tag-hint" onclick="window.tagNpcInChat('${(npc.name||"").replace(/'/g,"\\'")}')">@</span>
       ${deityBtn}
     </div>`;
   }).join("");
@@ -4884,21 +4890,27 @@ window.sendNpcMessage = async function(npcId, npcName) {
     }, { merge: true });
   } catch(e) { console.error("NPC presence write:", e); }
 
-  const msgsRef = collection(db, "chats", locationId, "messages");
-  await addDoc(msgsRef, {
-    uid:        `npc_${npcId}`,
-    charName:   npcName,
-    avatarUrl:  npc.avatar || "🧙",
-    rank:       "NPC",
-    level:      0,
-    title:      npc.description || "",
-    location:   location,
-    text:       text,
-    isNpc:      true,
-    npcId:      npcId,
-    timestamp:  serverTimestamp(),
-  });
-  document.getElementById("npc-speak-modal")?.remove();
+  try {
+    const msgsRef = collection(db, "chats", locationId, "messages");
+    await addDoc(msgsRef, {
+      uid:        `npc_${npcId}`,
+      charName:   npcName,
+      avatarUrl:  npc.avatar || "🧙",
+      rank:       "NPC",
+      level:      0,
+      title:      npc.description || "",
+      location:   location,
+      text:       text,
+      isNpc:      true,
+      npcId:      npcId,
+      timestamp:  serverTimestamp(),
+    });
+  } catch(e) {
+    console.error("sendNpcMessage:", e);
+    window.showToast("Failed to send message.", "error");
+  } finally {
+    document.getElementById("npc-speak-modal")?.remove();
+  }
 };
 
 // ── Auto-response: check if message @tags an NPC ───
@@ -5082,6 +5094,7 @@ window.saveNpc = async function(npcId, locationId) {
   } catch(e) {
     console.error("saveNpc:", e);
     window.showToast("Failed to save NPC.", "error");
+    document.getElementById("npc-manager-modal")?.remove();
   }
 };
 
