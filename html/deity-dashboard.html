@@ -7,6 +7,8 @@
 <title>Deity Console — Forge of Legends</title>
 <link rel="stylesheet" href="../css/global.css"/>
 <link rel="stylesheet" href="../css/deity-dashboard.css"/>
+<link rel="stylesheet" href="../css/duel.css"/>
+<link rel="stylesheet" href="../css/trade.css"/>
 <style>
 /* ── Override global pulse on loading title ── */
 .loading-title { animation: none !important; }
@@ -896,6 +898,13 @@
 <script type="module">
   import { initDeityDashboard } from '../js/deity-dashboard.js';
   import { initAllCustomSelects, refreshCustomSelect } from '../js/custom-select.js';
+  import { updateDuelContext, getDuelContext, initiateChatDuel } from '../js/duel.js';
+  import { updateTradeContext, initiateTrade } from '../js/trade.js';
+  window.getDuelContext    = getDuelContext;
+  window.updateDuelContext = updateDuelContext;
+  window.initiateChatDuel  = initiateChatDuel;
+  window.updateTradeContext = updateTradeContext;
+  window.initiateTrade     = initiateTrade;
 
   await initDeityDashboard();
 
@@ -1030,7 +1039,11 @@
   <div class="dchat-player-popup" id="dchat-player-popup" style="display:none" onclick="window._closeDchatPlayerPopup()">
     <div class="dchat-player-popup-inner" onclick="event.stopPropagation()">
       <div class="dchat-player-popup-name" id="dchat-popup-player-name">—</div>
-      <button class="dchat-popup-speak-btn" onclick="window._dchatSpeakToPlayer()">💬 SPEAK</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:4px">
+        <button class="dchat-popup-speak-btn" onclick="window._dchatSpeakToPlayer()">💬 SPEAK</button>
+        <button class="dchat-popup-speak-btn" onclick="window._dchatTradePlayer()">🔄 TRADE</button>
+        <button class="dchat-popup-speak-btn" onclick="window._dchatDuelPlayer()">⚔️ DUEL</button>
+      </div>
     </div>
   </div>
 </html>

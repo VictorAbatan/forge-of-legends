@@ -988,6 +988,53 @@ const DEITY_DATA = {
 
 let _uid = null, _deityChar = null, _worshippers = [], _visionsSent = 0;
 
+// ── Renders a duel or trade system card for deity chat ─────────────────────
+// Delegates to duel.js / trade.js renderers so CSS classes always match.
+window._renderDuelOrTradeCard = function(msg) {
+  if (msg.isDuelEvent) {
+    // Plain event bubble — use duel.css class
+    return `<div class="duel-event-bubble">
+      <span class="duel-event-icon">${msg.duelEventIcon || '⚔️'}</span>
+      <span class="duel-event-text">${msg.richText || (msg.text || '').replace(/</g,'&lt;')}</span>
+    </div>`;
+  }
+  if (msg.isDuelCard) {
+    // Wrap with a data-duel-id container; mountDuelCard (from duel.js) will
+    // attach a live Firestore listener and render with the correct CSS classes.
+    const duelId = msg.duelId || msg.duelSnapshot?.duelId || '';
+    if (!duelId) return `<div class="duel-event-bubble">⚔️ ${(msg.text||'').replace(/</g,'&lt;')}</div>`;
+    const snap = msg.duelSnapshot || null;
+    // Render immediately with snapshot, then upgrade to live if mountDuelCard available
+    const wrapperId = `duel-wrap-${duelId}-${Date.now()}`;
+    // Schedule mount after DOM insertion
+    setTimeout(() => {
+      const el = document.getElementById(wrapperId);
+      if (!el) return;
+      if (window.mountDuelCard) {
+        window.mountDuelCard(duelId, el, snap);
+      } else if (window.renderDuelCard && snap) {
+        window.renderDuelCard(snap, duelId, el);
+      }
+    }, 0);
+    // Return placeholder that duel.js will populate
+    return `<div id="${wrapperId}" data-duel-id="${duelId}"></div>`;
+  }
+  if (msg.isTradeCard) {
+    const tradeId = msg.tradeId || '';
+    return `<div class="trade-card-wrapper">
+      <div class="trade-card${msg.status === 'complete' ? ' complete' : msg.status === 'cancelled' ? ' cancelled' : ''}">
+        <div class="trade-card-header">
+          <span class="trade-card-title">⚖️ TRADE</span>
+          <span class="trade-card-status">${(msg.status||'').toUpperCase()}</span>
+        </div>
+        <div class="trade-card-body" style="padding:8px 14px;font-size:0.82rem;color:#c8bea8">${(msg.text||'').replace(/</g,'&lt;')}</div>
+        ${tradeId ? `<div class="trade-card-footer"><button class="trade-card-open-btn" onclick="window.openTradeModal?.('${tradeId}')">Open Trade</button></div>` : ''}
+      </div>
+    </div>`;
+  }
+  return null;
+};
+
 // ═══════════════════════════════════════════════════
 //  INIT
 // ═══════════════════════════════════════════════════
@@ -1005,6 +1052,13 @@ export async function initDeityDashboard() {
     if (charSnap.exists()) {
       _deityChar = charSnap.data();
       populateDeityInfo(_deityChar);
+      // Seed duel/trade systems with deity identity.
+      // window._uid MUST always be the real Firebase auth UID — never an NPC uid,
+      // because Firestore rules validate request.auth.uid against participants[].
+      window._uid      = user.uid;
+      window._charData = { ..._deityChar, isDeity: true };
+      window.initDuelSystem?.(user.uid, window._charData);
+      window.initTradeSystem?.(user.uid, window._charData);
     }
 
     await loadWorshippers();
@@ -3086,7 +3140,7 @@ function openDeityNpcForm(npcId) {
     <div style="display:flex;gap:10px;margin-bottom:10px">
       <div class="field-group" style="flex:1;margin-bottom:0">
         <label class="field-label">Rank</label>
-        <select class="field-input npc-select" id="dnpc-rank" onchange="window._onDnpcClassOrRankChange()">
+        <select class="field-input npc-select" id="dnpc-rank">
           <option value="">— None —</option>
           ${NPC_RANKS.map(r => `<option value="${r.value}" ${(existing.rank||"")===r.value?"selected":""}>${r.value} (${r.levels})</option>`).join("")}
         </select>
@@ -3187,7 +3241,8 @@ function openDeityNpcForm(npcId) {
     }).join("");
   };
 
-  // Rank dropdown refresh is handled via onchange attribute on the <select> element.
+  // Hook rank dropdown to refresh skills
+  document.getElementById("dnpc-rank")?.addEventListener("change", window._onDnpcClassOrRankChange);
 
   // Initialise picker if editing an existing NPC that has a class
   if (existing.charClass) {
@@ -3373,6 +3428,10 @@ function _applyDchatBg(locationId) {
 }
 
 async function switchDeityChat(locationId) {
+  // Keep duel/trade context in sync with current chat location
+  const tab = _deityChatTab === "general" ? "general" : "rp";
+  if (window.updateDuelContext)  window.updateDuelContext(tab, locationId);
+  if (window.updateTradeContext) window.updateTradeContext(tab, locationId);
   if (!locationId) return;
   _deityChatLocation = locationId;
 
@@ -3424,7 +3483,7 @@ async function switchDeityChat(locationId) {
             ? `<img src="${p.avatarUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
             : `<span style="font-size:0.9rem">${p.avatarUrl||"⚔️"}</span>`;
           const chipName = (p.name||'?').replace(/'/g,"\'");
-          return `<div class="dchat-player-chip" onclick="window._openDchatPlayerPopup('${chipName}')" title="${p.name||"?"} · ${p.rank||"Wanderer"} Lv.${p.level||1}" style="cursor:pointer">
+          return `<div class="dchat-player-chip" onclick="window._openDchatPlayerPopup('${chipName}','${p.uid||''}')" title="${p.name||"?"} · ${p.rank||"Wanderer"} Lv.${p.level||1}" style="cursor:pointer">
             <div class="dchat-player-av">${av}</div>
             <span class="dchat-player-name">${p.name||"?"}</span>
           </div>`;
@@ -3478,6 +3537,49 @@ async function switchDeityChat(locationId) {
       el.dataset.msgId = docId;
 
       const locColPath = `chats/${locationId}/messages`;
+
+      // ── DUEL / TRADE system cards ─────────────────────────────────
+      if (msg.uid === 'system' && (msg.isDuelCard || msg.isDuelEvent || msg.isTradeCard)) {
+        el.className = 'chat-msg system-duel-msg';
+
+        if (msg.isDuelCard && msg.duelId) {
+          // Use mountDuelCard for live repopulation on every turn (same as player dashboard)
+          const wrapper = document.createElement('div');
+          wrapper.className = 'duel-card-wrapper';
+          wrapper.dataset.duelId = msg.duelId;
+          wrapper.dataset.msgId  = docId;
+          el.appendChild(wrapper);
+          container.appendChild(el);
+          requestAnimationFrame(() => {
+            const snap = msg.duelSnapshot || null;
+            if (msg.isLiveDuelCard) {
+              window.mountDuelCard?.(msg.duelId, wrapper, snap);
+            } else if (snap) {
+              window.renderDuelCard?.(snap, msg.duelId, wrapper);
+            } else {
+              window.mountDuelCard?.(msg.duelId, wrapper, null);
+            }
+          });
+        } else if (msg.isDuelEvent) {
+          const rendered = window._renderDuelOrTradeCard?.(msg);
+          el.innerHTML = rendered || `<div class="duel-event-bubble"><span class="duel-event-icon">⚔️</span><span class="duel-event-text">${escapeHtml(msg.text||'')}</span></div>`;
+          container.appendChild(el);
+        } else if (msg.isTradeCard && msg.tradeId) {
+          const wrapper = document.createElement('div');
+          wrapper.className = 'trade-card-wrapper';
+          wrapper.dataset.tradeId = msg.tradeId;
+          wrapper.dataset.msgId   = docId;
+          el.appendChild(wrapper);
+          container.appendChild(el);
+          requestAnimationFrame(() => {
+            window.mountTradeCard?.(msg.tradeId, wrapper, msg.tradeSnapshot || null);
+          });
+        } else {
+          el.innerHTML = `<div class="duel-event-bubble"><span class="duel-event-icon">⚔️</span><span class="duel-event-text">${escapeHtml(msg.text||'')}</span></div>`;
+          container.appendChild(el);
+        }
+        return;
+      }
 
       // ── WORLD EVENT bubble ────────────────────────────────────────
       if (msg.isWorldEvent && msg.uid === 'system') {
@@ -3539,10 +3641,10 @@ async function switchDeityChat(locationId) {
         const safeText    = escapeHtml(msg.text||'').replace(/'/g,"\\'");
         const locSafeName = (msg.charName||'').replace(/'/g,"\'");
         el.innerHTML = `
-          <div class="chat-msg-avatar" onclick="window._openDchatPlayerPopup('${locSafeName}')" style="cursor:pointer">${av}</div>
+          <div class="chat-msg-avatar" onclick="window._openDchatPlayerPopup('${locSafeName}','${msg.uid||''}')" style="cursor:pointer">${av}</div>
           <div class="chat-msg-body">
             <div class="chat-msg-header">
-              <span class="chat-msg-name" onclick="window._openDchatPlayerPopup('${locSafeName}')" style="cursor:pointer">${safeName}</span>
+              <span class="chat-msg-name" onclick="window._openDchatPlayerPopup('${locSafeName}','${msg.uid||''}')" style="cursor:pointer">${safeName}</span>
               ${msg.title ? `<span class="chat-msg-title">${escapeHtml(msg.title)}</span>` : ""}
               <span class="chat-msg-rank">${msg.rank||"Wanderer"} · Lv.${msg.level||1}</span>
               <span class="chat-msg-time">${time}</span>
@@ -3667,6 +3769,11 @@ let _deityChatGeneralUnsub = null;
 
 window._switchDeityChatTab = function(tab) {
   _deityChatTab = tab;
+  // Keep duel/trade context in sync with current tab
+  const locId = _deityChatLocation || "";
+  const ctxTab = tab === "general" ? "general" : "rp";
+  if (window.updateDuelContext)  window.updateDuelContext(ctxTab, locId);
+  if (window.updateTradeContext) window.updateTradeContext(ctxTab, locId);
   // Clear any pending reply when switching tabs
   window._deityCancelReply?.();
   document.getElementById("dchat-tab-location")?.classList.toggle("active", tab === "location");
@@ -3787,6 +3894,48 @@ function _startGeneralChatListener() {
       el.className = `chat-msg${isMe ? " own" : ""}${isNpc ? " npc-msg" : ""}`;
       el.dataset.msgId = docId;
 
+      // ── DUEL / TRADE system cards ─────────────────────────────────
+      if (msg.uid === 'system' && (msg.isDuelCard || msg.isDuelEvent || msg.isTradeCard)) {
+        el.className = 'chat-msg system-duel-msg';
+
+        if (msg.isDuelCard && msg.duelId) {
+          const wrapper = document.createElement('div');
+          wrapper.className = 'duel-card-wrapper';
+          wrapper.dataset.duelId = msg.duelId;
+          wrapper.dataset.msgId  = docId;
+          el.appendChild(wrapper);
+          container.appendChild(el);
+          requestAnimationFrame(() => {
+            const snap = msg.duelSnapshot || null;
+            if (msg.isLiveDuelCard) {
+              window.mountDuelCard?.(msg.duelId, wrapper, snap);
+            } else if (snap) {
+              window.renderDuelCard?.(snap, msg.duelId, wrapper);
+            } else {
+              window.mountDuelCard?.(msg.duelId, wrapper, null);
+            }
+          });
+        } else if (msg.isDuelEvent) {
+          const rendered = window._renderDuelOrTradeCard?.(msg);
+          el.innerHTML = rendered || `<div class="duel-event-bubble"><span class="duel-event-icon">⚔️</span><span class="duel-event-text">${escapeHtml(msg.text||'')}</span></div>`;
+          container.appendChild(el);
+        } else if (msg.isTradeCard && msg.tradeId) {
+          const wrapper = document.createElement('div');
+          wrapper.className = 'trade-card-wrapper';
+          wrapper.dataset.tradeId = msg.tradeId;
+          wrapper.dataset.msgId   = docId;
+          el.appendChild(wrapper);
+          container.appendChild(el);
+          requestAnimationFrame(() => {
+            window.mountTradeCard?.(msg.tradeId, wrapper, msg.tradeSnapshot || null);
+          });
+        } else {
+          el.innerHTML = `<div class="duel-event-bubble"><span class="duel-event-icon">⚔️</span><span class="duel-event-text">${escapeHtml(msg.text||'')}</span></div>`;
+          container.appendChild(el);
+        }
+        return;
+      }
+
       // ── WORLD EVENT bubble ────────────────────────────────────────
       if (msg.isWorldEvent && msg.uid === 'system') {
         const isUnexpected = msg.eventType === 'unexpected';
@@ -3801,7 +3950,7 @@ function _startGeneralChatListener() {
             <div class="world-event-text">${formatChatText(msg.text || '')}</div>
           </div>`;
         container.appendChild(el);
-      return;
+        return;
       }
 
       const gcColPath = `general-chat/global/messages`;
@@ -3850,10 +3999,10 @@ function _startGeneralChatListener() {
         const safeText   = escapeHtml(msg.text||'').replace(/'/g,"\\'");
         const gcSafeName = (msg.charName||'').replace(/'/g,"\'");
         el.innerHTML = `
-          <div class="chat-msg-avatar" onclick="window._openDchatPlayerPopup('${gcSafeName}')" style="cursor:pointer">${av}</div>
+          <div class="chat-msg-avatar" onclick="window._openDchatPlayerPopup('${gcSafeName}','${msg.uid||''}')" style="cursor:pointer">${av}</div>
           <div class="chat-msg-body">
             <div class="chat-msg-header">
-              <span class="chat-msg-name" onclick="window._openDchatPlayerPopup('${gcSafeName}')" style="cursor:pointer">${safeName}</span>
+              <span class="chat-msg-name" onclick="window._openDchatPlayerPopup('${gcSafeName}','${msg.uid||''}')" style="cursor:pointer">${safeName}</span>
               ${msg.title ? `<span class="chat-msg-title">${escapeHtml(msg.title)}</span>` : ""}
               <span class="chat-msg-rank">${msg.rank||"Wanderer"} · Lv.${msg.level||1}</span>
               <span class="chat-msg-time">${time}</span>
@@ -4347,8 +4496,10 @@ function _attachDchatMsgHover(el) {
 // ── Player popup: open / close / speak action ─────────────────────────────
 let _dchatPopupTargetName = null;
 
-window._openDchatPlayerPopup = function(name) {
+let _dchatPopupTargetUid = null;
+window._openDchatPlayerPopup = function(name, uid) {
   _dchatPopupTargetName = name;
+  _dchatPopupTargetUid  = uid || null;
   const popup = document.getElementById('dchat-player-popup');
   const label = document.getElementById('dchat-popup-player-name');
   if (label) label.textContent = name;
@@ -4357,6 +4508,7 @@ window._openDchatPlayerPopup = function(name) {
 
 window._closeDchatPlayerPopup = function() {
   _dchatPopupTargetName = null;
+  _dchatPopupTargetUid  = null;
   const popup = document.getElementById('dchat-player-popup');
   if (popup) popup.style.display = 'none';
 };
@@ -4375,6 +4527,69 @@ window._dchatSpeakToPlayer = function() {
     input.selectionStart = input.selectionEnd = input.value.length;
   }
   window._closeDchatPlayerPopup();
+};
+
+// ── Trade / Duel from deity chat popup ───────────────────────────────────────
+
+// Resolves the active "speak as" NPC for display purposes ONLY.
+// IMPORTANT: window._uid is always kept as the real Firebase auth UID so that
+// Firestore security rules (which check request.auth.uid in participants[]) pass.
+// Only the display fields (name, avatarUrl, rank, level, etc.) are overridden
+// via window._charData so the duel/trade card shows the NPC's identity.
+function _resolveDeityChatIdentity() {
+  const tabIsGeneral = _deityChatTab === "general";
+  let displayData = null;
+  if (tabIsGeneral) {
+    const speakAs = document.getElementById("deity-general-as")?.value || "self";
+    if (speakAs !== "self") {
+      const npcId = speakAs.replace("npc_", "");
+      const npc   = _dchatGeneralNpcs.find(n => n.id === npcId);
+      if (npc) displayData = { ...npc };
+    }
+  } else {
+    const speakAs = document.getElementById("deity-chat-as")?.value || "self";
+    if (speakAs !== "self") {
+      const npcId = speakAs.replace("npc_", "");
+      const npc   = _deityLocationNpcs.find(n => n.id === npcId);
+      if (npc) displayData = { ...npc };
+    }
+  }
+  // Build the charData: real auth UID always, display fields from NPC or deity
+  const base = displayData || _deityChar || {};
+  window._charData = { ...base, isDeity: true };
+  // window._uid MUST stay as the real Firebase auth UID — never set it to an NPC id
+  window._uid = _uid;
+  // Re-seed duel/trade systems with real UID + display charData
+  window.initDuelSystem?.(window._uid, window._charData);
+  window.initTradeSystem?.(window._uid, window._charData);
+}
+
+window._dchatTradePlayer = function() {
+  const name = _dchatPopupTargetName;
+  const uid  = _dchatPopupTargetUid;
+  if (!name || !uid) { window.showToast?.("Cannot trade: player ID not available.", "error"); return; }
+  window._closeDchatPlayerPopup();
+  _resolveDeityChatIdentity();
+  const tab   = _deityChatTab === "general" ? "general" : "rp";
+  const locId = _deityChatLocation || "";
+  if (window.updateTradeContext) window.updateTradeContext(tab, locId);
+  inkConfirm(`Trade with ${name}?\n\nBoth players must confirm before any items move.`).then(confirmed => {
+    if (confirmed) window.initiateTrade?.(uid, name).catch(e => window.showToast?.(e.message || "Failed to start trade.", "error"));
+  });
+};
+
+window._dchatDuelPlayer = function() {
+  const name = _dchatPopupTargetName;
+  const uid  = _dchatPopupTargetUid;
+  if (!name || !uid) { window.showToast?.("Cannot duel: player ID not available.", "error"); return; }
+  window._closeDchatPlayerPopup();
+  _resolveDeityChatIdentity();
+  const tab   = _deityChatTab === "general" ? "general" : "rp";
+  const locId = _deityChatLocation || "";
+  if (window.updateDuelContext) window.updateDuelContext(tab, locId);
+  inkConfirm(`Challenge ${name} to a PUBLIC duel?\n\nEveryone in chat will watch the fight live!`).then(confirmed => {
+    if (confirmed) window.initiateChatDuel?.(uid, name, tab, locId).catch(() => window.showToast?.("Failed to send duel challenge.", "error"));
+  });
 };
 
 // ── Load all active players for the general tab bar ───────────────────────
@@ -4416,7 +4631,7 @@ async function _dchatLoadAllPlayers() {
         ? `<img src="${p.avatarUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
         : `<span style="font-size:0.85rem">${p.avatarUrl || '⚔️'}</span>`;
       const chipName = (p.name || '?').replace(/'/g, "\\'");
-      return `<div class="dchat-player-chip" onclick="window._openDchatPlayerPopup('${chipName}')"
+      return `<div class="dchat-player-chip" onclick="window._openDchatPlayerPopup('${chipName}','${p.uid||''}')"
         title="${p.name||'?'} · ${p.rank||'Wanderer'} Lv.${p.level||1}" style="cursor:pointer">
         <div class="dchat-player-av">${av}</div>
         <span class="dchat-player-name">${p.name||'?'}</span>
