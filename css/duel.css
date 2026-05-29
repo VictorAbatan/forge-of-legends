@@ -386,6 +386,34 @@
 .duel-act-defend:hover { border-color: #6ab0f5; background: rgba(106,176,245,0.08); }
 .duel-act-skill:hover { border-color: #c9a84c; background: rgba(201,168,76,0.12); }
 
+/* ── Forfeit button ──────────────────────────────────── */
+.duel-forfeit-row {
+  padding: 0 14px 12px;
+  display: flex;
+  justify-content: flex-start;
+}
+.duel-forfeit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 14px;
+  border-radius: 8px;
+  border: 1.5px solid rgba(224,85,85,0.35);
+  background: rgba(224,85,85,0.06);
+  color: rgba(224,140,130,0.85);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s, transform 0.1s;
+}
+.duel-forfeit-btn:hover {
+  border-color: #e05555;
+  background: rgba(224,85,85,0.14);
+  color: #e09090;
+}
+.duel-forfeit-btn:active { transform: scale(0.95); }
+
 /* ── System chat message style ──────────────────────── */
 .chat-msg.system-duel-msg {
   justify-content: center;

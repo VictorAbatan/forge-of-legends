@@ -26,6 +26,43 @@ let _currentTradeId = null;
 function _getUid()      { return _uid      || window._uid      || null; }
 function _getCharData() { return _charData || window._charData || null; }
 
+// ── NPC context helpers ────────────────────────────
+// Returns { npcId, locationId } if the current charData is an NPC identity,
+// or null if it's a real player.
+function _getNpcContext() {
+  const cd = _getCharData();
+  if (!cd?.isDeity) return null;
+  // The active NPC id is stored on window by deity-dashboard when speaking as NPC
+  const npcId    = window._activeSpeakAsNpcId || null;
+  const locId    = window._activeSpeakAsLocId || _chatLocationId || null;
+  if (!npcId || !locId) return null;
+  return { npcId, locationId: locId };
+}
+
+// Reads an NPC's Firestore doc and returns its data (inventory, gold, etc.)
+async function _getNpcDocData(npcId, locationId) {
+  try {
+    const snap = await getDocFromServer(doc(db, 'npcs', locationId, 'list', npcId));
+    return snap.exists() ? snap.data() : null;
+  } catch (e) {
+    console.warn('[Trade] Could not read NPC doc:', e);
+    return null;
+  }
+}
+
+// Writes inventory/gold back to an NPC doc
+async function _writeNpcDoc(npcId, locationId, fields) {
+  try {
+    await updateDoc(doc(db, 'npcs', locationId, 'list', npcId), fields);
+    // Update local deity cache
+    const cache = window._deityNpcs || [];
+    const cached = cache.find(n => n.id === npcId);
+    if (cached) Object.assign(cached, fields);
+  } catch (e) {
+    console.warn('[Trade] Could not write NPC doc:', e);
+  }
+}
+
 // ── Init ───────────────────────────────────────────
 export function initTradeSystem(uid, charData) {
   _uid      = uid;
@@ -56,6 +93,10 @@ export async function initiateTrade(targetUid, targetName) {
     throw new Error('Open the chat panel first before trading.');
   }
 
+  // Resolve NPC context — if deity is speaking as NPC, store npcId on trade doc
+  // so _executeTrade can read/write the NPC's doc instead of characters/{uid}
+  const npcCtx = _getNpcContext();
+
   // Create the trade doc — items start empty, both sides unconfirmed
   const tradeRef = await addDoc(collection(db, 'trades'), {
     initiatorId:       uid,
@@ -63,6 +104,7 @@ export async function initiateTrade(targetUid, targetName) {
     initiatorItems:    [],   // { name, qty, icon } — offered items locked in escrow
     initiatorGold:     0,
     initiatorConfirmed: false,
+    ...(npcCtx ? { initiatorNpcId: npcCtx.npcId, initiatorNpcLoc: npcCtx.locationId } : {}),
     targetId:          targetUid,
     targetName,
     targetItems:       [],
@@ -211,7 +253,17 @@ export async function addTradeItem(tradeId, itemName, qty) {
   }
 
   // Verify player actually has enough of this item (inventory + equipped)
-  const allItems = _getTradableItems(charData);
+  // For NPC initiators, check the NPC's inventory from Firestore
+  let allItems;
+  if (isInitiator && trade.initiatorNpcId) {
+    const npcDoc = await _getNpcDocData(trade.initiatorNpcId, trade.initiatorNpcLoc);
+    allItems = (npcDoc?.inventory || []).map(i => ({ name: i.name, qty: i.qty ?? 1, icon: i.icon || '' }));
+  } else if (!isInitiator && trade.targetNpcId) {
+    const npcDoc = await _getNpcDocData(trade.targetNpcId, trade.targetNpcLoc);
+    allItems = (npcDoc?.inventory || []).map(i => ({ name: i.name, qty: i.qty ?? 1, icon: i.icon || '' }));
+  } else {
+    allItems = _getTradableItems(charData);
+  }
   const owned = allItems.find(i => i.name === itemName);
   if (!owned || owned.qty < qty) {
     window.showToast?.(`You don't have ${qty}× ${itemName}.`, 'error'); return;
@@ -308,15 +360,29 @@ export async function confirmTrade(tradeId) {
   const myGold      = isInitiator ? trade.initiatorGold  : trade.targetGold;
 
   // Verify player still has all offered items (prevent bait-and-switch)
-  const inv = charData.inventory || [];
+  // For NPC side, read from the NPC's Firestore doc
+  let verifyInv;
+  let verifyGold;
+  if (isInitiator && trade.initiatorNpcId) {
+    const npcDoc = await _getNpcDocData(trade.initiatorNpcId, trade.initiatorNpcLoc);
+    verifyInv  = npcDoc?.inventory || [];
+    verifyGold = npcDoc?.gold ?? 0;
+  } else if (!isInitiator && trade.targetNpcId) {
+    const npcDoc = await _getNpcDocData(trade.targetNpcId, trade.targetNpcLoc);
+    verifyInv  = npcDoc?.inventory || [];
+    verifyGold = npcDoc?.gold ?? 0;
+  } else {
+    verifyInv  = charData.inventory || [];
+    verifyGold = charData.gold || 0;
+  }
   for (const offered of (myItems || [])) {
-    const owned = inv.find(i => i.name === offered.name);
+    const owned = verifyInv.find(i => i.name === offered.name);
     if (!owned || (owned.qty ?? 1) < offered.qty) {
       window.showToast?.(`You no longer have ${offered.qty}× ${offered.name}.`, 'error'); return;
     }
   }
-  if ((charData.gold || 0) < (myGold || 0)) {
-    window.showToast?.(`You don't have enough gold.`, 'error'); return;
+  if (verifyGold < (myGold || 0)) {
+    window.showToast?.(`Not enough gold.`, 'error'); return;
   }
 
   const confField = isInitiator ? 'initiatorConfirmed' : 'targetConfirmed';
@@ -369,16 +435,24 @@ async function _executeTrade(tradeId, trade, confirmingUid) {
   }
 
   // Re-read both character docs fresh from server
-  const [initSnap, targSnap] = await Promise.all([
-    getDocFromServer(doc(db, 'characters', trade.initiatorId)),
-    getDocFromServer(doc(db, 'characters', trade.targetId)),
-  ]);
-  if (!initSnap.exists() || !targSnap.exists()) {
-    window.showToast?.('Could not verify player inventories.', 'error'); return;
+  // For NPC participants, read from npcs/{loc}/list/{npcId} instead of characters/{uid}
+  let initData, targData;
+  if (trade.initiatorNpcId) {
+    initData = await _getNpcDocData(trade.initiatorNpcId, trade.initiatorNpcLoc);
+    if (!initData) { window.showToast?.('Could not read NPC initiator data.', 'error'); return; }
+  } else {
+    const snap = await getDocFromServer(doc(db, 'characters', trade.initiatorId));
+    if (!snap.exists()) { window.showToast?.('Could not verify initiator inventory.', 'error'); return; }
+    initData = snap.data();
   }
-
-  const initData = initSnap.data();
-  const targData = targSnap.data();
+  if (trade.targetNpcId) {
+    targData = await _getNpcDocData(trade.targetNpcId, trade.targetNpcLoc);
+    if (!targData) { window.showToast?.('Could not read NPC target data.', 'error'); return; }
+  } else {
+    const snap = await getDocFromServer(doc(db, 'characters', trade.targetId));
+    if (!snap.exists()) { window.showToast?.('Could not verify target inventory.', 'error'); return; }
+    targData = snap.data();
+  }
 
   // Deep clone inventories
   let initInv  = [...(initData.inventory  || [])];
@@ -481,21 +555,29 @@ async function _executeTrade(tradeId, trade, confirmingUid) {
 async function _applyTradeResolution(trade, uid, initInv, initGold, targInv, targGold) {
   try {
     if (uid === trade.initiatorId) {
-      await updateDoc(doc(db, 'characters', uid), { inventory: initInv, gold: initGold });
-      if (window._charData) {
+      if (trade.initiatorNpcId) {
+        await _writeNpcDoc(trade.initiatorNpcId, trade.initiatorNpcLoc, { inventory: initInv, gold: initGold });
+      } else {
+        await updateDoc(doc(db, 'characters', uid), { inventory: initInv, gold: initGold });
+      }
+      if (window._charData && !trade.initiatorNpcId) {
         window._charData.inventory = initInv;
         window._charData.gold      = initGold;
         _charData = window._charData;
       }
-      window.renderInventory?.(initInv);
+      if (!trade.initiatorNpcId) window.renderInventory?.(initInv);
     } else if (uid === trade.targetId) {
-      await updateDoc(doc(db, 'characters', uid), { inventory: targInv, gold: targGold });
-      if (window._charData) {
+      if (trade.targetNpcId) {
+        await _writeNpcDoc(trade.targetNpcId, trade.targetNpcLoc, { inventory: targInv, gold: targGold });
+      } else {
+        await updateDoc(doc(db, 'characters', uid), { inventory: targInv, gold: targGold });
+      }
+      if (window._charData && !trade.targetNpcId) {
         window._charData.inventory = targInv;
         window._charData.gold      = targGold;
         _charData = window._charData;
       }
-      window.renderInventory?.(targInv);
+      if (!trade.targetNpcId) window.renderInventory?.(targInv);
     }
   } catch (e) {
     console.warn('[Trade] _applyTradeResolution failed:', e);
@@ -876,19 +958,36 @@ function _getTradableItems(charData) {
 
 // ── Item picker ───────────────────────────────────
 export function openTradeItemPicker() {
-  const charData = _getCharData();
-  if (!charData) return;
-
   const picker = document.getElementById('trade-item-picker');
   if (!picker) return;
   picker.style.display = 'block';
-  _renderTradePickerItems(_getTradableItems(charData), '');
+
+  const npcCtx = _getNpcContext();
+  if (npcCtx) {
+    // Async: fetch NPC inventory from Firestore, then render
+    _getNpcDocData(npcCtx.npcId, npcCtx.locationId).then(npcDoc => {
+      const items = (npcDoc?.inventory || []).map(i => ({ name: i.name, qty: i.qty ?? 1, icon: i.icon || _getIcon(i.name) }));
+      _renderTradePickerItems(items, '');
+    });
+  } else {
+    const charData = _getCharData();
+    if (!charData) return;
+    _renderTradePickerItems(_getTradableItems(charData), '');
+  }
 }
 
 window._filterTradeItems = function(query) {
-  const charData = _getCharData();
-  if (!charData) return;
-  _renderTradePickerItems(_getTradableItems(charData), query.toLowerCase());
+  const npcCtx = _getNpcContext();
+  if (npcCtx) {
+    _getNpcDocData(npcCtx.npcId, npcCtx.locationId).then(npcDoc => {
+      const items = (npcDoc?.inventory || []).map(i => ({ name: i.name, qty: i.qty ?? 1, icon: i.icon || _getIcon(i.name) }));
+      _renderTradePickerItems(items, query.toLowerCase());
+    });
+  } else {
+    const charData = _getCharData();
+    if (!charData) return;
+    _renderTradePickerItems(_getTradableItems(charData), query.toLowerCase());
+  }
 };
 
 function _renderTradePickerItems(items, filter) {

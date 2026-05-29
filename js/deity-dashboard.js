@@ -953,7 +953,7 @@ import { auth, db, storage } from "../firebase/firebase.js";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   doc, getDoc, getDocs, setDoc, collection, query, where,
-  orderBy, limit, addDoc, updateDoc, deleteDoc, onSnapshot, serverTimestamp, arrayUnion
+  orderBy, limit, limitToLast, addDoc, updateDoc, deleteDoc, onSnapshot, serverTimestamp, arrayUnion
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
   ref as storageRef, uploadBytes, getDownloadURL
@@ -2774,11 +2774,24 @@ window._openNpcBestowModal = function(npcId, npcName) {
   modal.innerHTML = `
     <div class="deity-modal-box" style="max-width:480px">
       <div class="deity-modal-title">🎒 Bestow to ${npcName}</div>
-      <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:14px">Add items directly to this NPC's inventory. Players can trade with or receive items from this NPC.</div>
+      <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:14px">Add items or gold directly to this NPC's inventory. Players can trade with or receive items from this NPC.</div>
 
       <div style="font-family:var(--ff-mono);font-size:0.6rem;color:var(--gold);letter-spacing:0.1em;margin-bottom:8px">CURRENT INVENTORY</div>
-      <div id="npc-bestow-inv-display" style="margin-bottom:16px;max-height:140px;overflow-y:auto;background:var(--ink2);border:1px solid var(--border);border-radius:8px;padding:10px">
+      <div id="npc-bestow-inv-display" style="margin-bottom:8px;max-height:120px;overflow-y:auto;background:var(--ink2);border:1px solid var(--border);border-radius:8px;padding:10px">
         ${invHtml}
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;padding:8px 10px;background:var(--ink2);border:1px solid var(--border);border-radius:8px">
+        <span style="font-size:1rem">💰</span>
+        <span style="font-size:0.82rem;color:var(--text-dim)">Current gold:</span>
+        <span style="font-size:0.85rem;font-weight:700;color:var(--gold)">${npc.gold ?? 0}</span>
+      </div>
+
+      <div style="font-family:var(--ff-mono);font-size:0.6rem;color:var(--gold);letter-spacing:0.1em;margin-bottom:8px">ADD GOLD</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;padding:8px 10px;background:var(--ink2);border:1px solid var(--border);border-radius:8px">
+        <span style="font-size:1rem">💰</span>
+        <input type="number" id="npc-bestow-gold" min="0" value="0" placeholder="0"
+          style="flex:1;background:transparent;border:none;outline:none;color:var(--text);font-size:0.9rem;min-width:0"/>
+        <span style="font-size:0.78rem;color:var(--text-dim)">gold</span>
       </div>
 
       <div style="font-family:var(--ff-mono);font-size:0.6rem;color:var(--gold);letter-spacing:0.1em;margin-bottom:8px">ADD ITEMS</div>
@@ -2916,36 +2929,54 @@ window._doNpcBestow = async function(npcId, locationId) {
   const errEl = document.getElementById("npc-bestow-error");
   errEl.textContent = "";
   const itemsRaw = document.getElementById("npc-bestow-items")?.value.trim();
-  if (!itemsRaw) { errEl.textContent = "Select at least one item."; return; }
+  const goldInput = parseInt(document.getElementById("npc-bestow-gold")?.value) || 0;
+
+  if (!itemsRaw && goldInput <= 0) { errEl.textContent = "Select at least one item or add gold."; return; }
 
   const newItems = [];
-  for (const line of itemsRaw.split("\n")) {
-    const p = line.split(",").map(x => x.trim());
-    if (p[0] && parseInt(p[1]) > 0) {
-      const def = ITEMS.find(i => i.name === p[0]);
-      newItems.push({ name: p[0], icon: def?.icon || "📦", type: def?.category || "material", qty: parseInt(p[1]) });
+  if (itemsRaw) {
+    for (const line of itemsRaw.split("\n")) {
+      const p = line.split(",").map(x => x.trim());
+      if (p[0] && parseInt(p[1]) > 0) {
+        const def = ITEMS.find(i => i.name === p[0]);
+        newItems.push({ name: p[0], icon: def?.icon || "📦", type: def?.category || "material", qty: parseInt(p[1]) });
+      }
     }
   }
-  if (!newItems.length) { errEl.textContent = "No valid items selected."; return; }
 
   const btn = document.querySelector("#npc-bestow-modal .btn-primary");
   if (btn) { btn.disabled = true; btn.textContent = "Saving..."; }
 
   try {
     const npc = _deityNpcs.find(n => n.id === npcId) || {};
-    const currentInv = [...(npc.inventory || [])];
-    for (const item of newItems) {
-      const existing = currentInv.find(i => i.name === item.name);
-      if (existing) existing.qty += item.qty;
-      else currentInv.push(item);
+    const updateData = {};
+
+    if (newItems.length) {
+      const currentInv = [...(npc.inventory || [])];
+      for (const item of newItems) {
+        const existing = currentInv.find(i => i.name === item.name);
+        if (existing) existing.qty += item.qty;
+        else currentInv.push(item);
+      }
+      updateData.inventory = currentInv;
+      const cached = _deityNpcs.find(n => n.id === npcId);
+      if (cached) cached.inventory = currentInv;
     }
-    await updateDoc(doc(db, "npcs", locationId, "list", npcId), { inventory: currentInv });
-    // Update local cache
-    const cached = _deityNpcs.find(n => n.id === npcId);
-    if (cached) cached.inventory = currentInv;
+
+    if (goldInput > 0) {
+      const currentGold = npc.gold ?? 0;
+      updateData.gold = currentGold + goldInput;
+      const cached = _deityNpcs.find(n => n.id === npcId);
+      if (cached) cached.gold = updateData.gold;
+    }
+
+    await updateDoc(doc(db, "npcs", locationId, "list", npcId), updateData);
 
     document.getElementById("npc-bestow-modal")?.remove();
-    window.showToast(`Items added to NPC inventory!`, "success");
+    const parts = [];
+    if (newItems.length) parts.push(`${newItems.length} item(s)`);
+    if (goldInput > 0)   parts.push(`${goldInput} gold`);
+    window.showToast(`Bestowed ${parts.join(" and ")} to NPC!`, "success");
     loadDeityNpcs(locationId);
   } catch(e) {
     errEl.textContent = e.message || "Failed to save inventory.";
@@ -3165,6 +3196,16 @@ function openDeityNpcForm(npcId) {
         <span style="color:var(--text-dim);font-size:0.8rem;font-style:italic">Select a class and rank above to see available skills.</span>
       </div>
     </div>
+    <div class="field-group" style="margin-bottom:10px">
+      <label class="field-label">⚔️ Duel Stance
+        <span style="color:var(--text-dim);font-size:0.75em"> — used when this NPC duels players</span>
+      </label>
+      <input class="field-input" id="dnpc-stance-name" value="${(existing.stances?.[0]?.name)||""}" placeholder="e.g. Shadow Style, Beast Form…" style="margin-bottom:6px"/>
+      <div style="font-size:0.72rem;color:var(--text-dim);margin-bottom:4px">Stance skills (picks from NPC's skill list above — save skills first, they'll appear here)</div>
+      <div id="dnpc-stance-skill-picker" style="background:var(--ink2);border:1px solid var(--border);border-radius:8px;padding:10px;min-height:36px;max-height:160px;overflow-y:auto">
+        <span style="color:var(--text-dim);font-size:0.8rem;font-style:italic">Save NPC with skills first, then re-edit to assign stance skills.</span>
+      </div>
+    </div>
     <div style="font-family:var(--ff-mono);font-size:0.6rem;color:var(--gold);letter-spacing:0.1em;margin-bottom:6px">⚡ AUTO-RESPONSES</div>
     <div style="font-size:0.75rem;color:var(--text-dim);margin-bottom:8px">When a player @tags this NPC, matching trigger → auto-reply fires. Leave trigger blank for a default reply.</div>
     <div id="dnpc-auto-rows">${autoRows}</div>
@@ -3244,6 +3285,29 @@ function openDeityNpcForm(npcId) {
   // Hook rank dropdown to refresh skills
   document.getElementById("dnpc-rank")?.addEventListener("change", window._onDnpcClassOrRankChange);
 
+  // ── Stance skill picker — shows selected skills from skill picker ────────
+  window._refreshDnpcStancePicker = function() {
+    const picker = document.getElementById("dnpc-stance-skill-picker");
+    if (!picker) return;
+    const selectedSkills = Array.from(document.querySelectorAll("#dnpc-skill-picker .dnpc-skill-cb:checked")).map(cb => cb.value);
+    const allSkills = selectedSkills.length ? selectedSkills : (existing.skills || []);
+    if (!allSkills.length) {
+      picker.innerHTML = `<span style="color:var(--text-dim);font-size:0.8rem;font-style:italic">No skills selected above yet.</span>`;
+      return;
+    }
+    const prevChecked = Array.from(picker.querySelectorAll(".dnpc-stance-skill-cb:checked")).map(cb => cb.value);
+    const savedStanceSkills = existing.stances?.[0]?.skills || [];
+    picker.innerHTML = allSkills.map(skill => {
+      const checked = (prevChecked.includes(skill) || savedStanceSkills.includes(skill)) ? "checked" : "";
+      return `<label style="display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:6px;cursor:pointer;user-select:none"
+        onmouseover="this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.background=''">
+        <input type="checkbox" class="dnpc-stance-skill-cb" value="${skill}" ${checked}
+          style="width:14px;height:14px;accent-color:var(--gold);cursor:pointer;flex-shrink:0"/>
+        <span style="font-size:0.83rem">${skill}</span>
+      </label>`;
+    }).join("");
+  };
+
   // Initialise picker if editing an existing NPC that has a class
   if (existing.charClass) {
     setTimeout(() => {
@@ -3253,9 +3317,16 @@ function openDeityNpcForm(npcId) {
         const saved = existing.skills || [];
         document.querySelectorAll("#dnpc-skill-picker .dnpc-skill-cb").forEach(cb => {
           cb.checked = saved.includes(cb.value);
+          // Refresh stance picker when any skill checkbox changes
+          cb.addEventListener("change", window._refreshDnpcStancePicker);
         });
+        // Populate stance picker with the saved skill list
+        window._refreshDnpcStancePicker();
       }, 50);
     }, 0);
+  } else if (existing.skills?.length) {
+    // NPC has skills but no class — directly populate stance picker from saved skills
+    setTimeout(() => window._refreshDnpcStancePicker(), 0);
   }
 
   window._addDnpcRow = () => {
@@ -3304,10 +3375,17 @@ function openDeityNpcForm(npcId) {
     const level     = parseInt(document.getElementById("dnpc-level")?.value) || 1;
     const charClass = document.getElementById("dnpc-class")?.value || "";
     const skills    = Array.from(document.querySelectorAll("#dnpc-skill-picker .dnpc-skill-cb:checked")).map(cb => cb.value);
+    // Build stance from the stance name + selected stance skills
+    const stanceName   = document.getElementById("dnpc-stance-name")?.value.trim() || "";
+    const stanceSkills = Array.from(document.querySelectorAll("#dnpc-stance-skill-picker .dnpc-stance-skill-cb:checked")).map(cb => cb.value);
+    const stances = (stanceName || stanceSkills.length)
+      ? [{ name: stanceName || (charClass ? `${charClass} Style` : 'Combat Stance'), skills: stanceSkills }]
+      : (existing.stances || []);
     const data = { name, avatar: avatar||"🧙", description: desc||"", autoResponses, locationId, updatedAt: serverTimestamp(),
       ...(rank      ? { rank, level } : {}),
       ...(charClass ? { charClass }   : {}),
       skills,
+      stances,
     };
     try {
       if (npcId) await setDoc(doc(db,"npcs",locationId,"list",npcId), data, { merge:true });
@@ -3492,173 +3570,210 @@ async function switchDeityChat(locationId) {
     );
   }
 
-  // Listen to chat messages
+  // Listen to chat messages — incremental pattern preserves duel card DOM nodes
   const msgsRef = collection(db, "chats", locationId, "messages");
-  const q = query(msgsRef, limit(60));
+  const q = query(msgsRef, orderBy("timestamp", "asc"), limitToLast(60));
   const container = document.getElementById("deity-chat-messages");
 
-  _deityChatUnsub = onSnapshot(q, { includeMetadataChanges: true }, snap => {
+  // ── Build a single message element ────────────────────────────────────────
+  function _buildLocMsgEl(d) {
+    const msg        = d.data();
+    const docId      = d.id;
+    const time       = msg.timestamp?.toDate?.() ? formatTime(msg.timestamp.toDate()) : "";
+    const isNpc      = msg.isNpc;
+    const isMyNpc    = isNpc && (msg.deityUid === _uid || _deityLocationNpcs.some(n => n.id === msg.npcId));
+    const isMe       = msg.uid === _uid || isMyNpc;
+    const locColPath = `chats/${locationId}/messages`;
+    const av = msg.avatarUrl?.startsWith("http")
+      ? `<img src="${msg.avatarUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:50%"/>`
+      : `<span style="font-size:1rem">${msg.avatarUrl||"⚔️"}</span>`;
+
+    const replyQuoteHTML = msg.replyTo ? `
+      <div class="chat-msg-reply-quote" onclick="window._deityJumpToMsg('${msg.replyTo.id}')">
+        <div class="chat-msg-reply-quote-bar"></div>
+        <div class="chat-msg-reply-quote-body">
+          <div class="chat-msg-reply-quote-name">${escapeHtml(msg.replyTo.charName||'')}</div>
+          <div class="chat-msg-reply-quote-text">${escapeHtml(msg.replyTo.text||'')}</div>
+        </div>
+      </div>` : '';
+
+    // ── DUEL CARD ──────────────────────────────────────────────────────────
+    if (msg.isDuelCard && msg.duelId) {
+      const el = document.createElement('div');
+      el.className = 'duel-card-wrapper';
+      el.dataset.duelId = msg.duelId;
+      el.dataset.msgId  = docId;
+      requestAnimationFrame(() => {
+        const snap = msg.duelSnapshot || null;
+        if (msg.isLiveDuelCard) {
+          window.mountDuelCard?.(msg.duelId, el, snap);
+        } else if (snap) {
+          window.renderDuelCard?.(snap, msg.duelId, el);
+        } else {
+          window.mountDuelCard?.(msg.duelId, el, null);
+        }
+      });
+      return el;
+    }
+
+    // ── DUEL EVENT bubble ──────────────────────────────────────────────────
+    if (msg.isDuelEvent) {
+      const el = document.createElement('div');
+      el.className = 'chat-msg duel-event-msg';
+      el.dataset.msgId = docId;
+      const displayText = msg.richText || msg.text || '';
+      const icon = msg.duelEventIcon || '⚔️';
+      el.innerHTML = `<div class="duel-event-bubble"><span class="duel-event-icon">${icon}</span><span class="duel-event-text">${displayText}</span><span class="duel-event-time">${time}</span></div>`;
+      return el;
+    }
+
+    // ── TRADE CARD ─────────────────────────────────────────────────────────
+    if (msg.isTradeCard && msg.tradeId) {
+      const el = document.createElement('div');
+      el.className = 'trade-card-wrapper';
+      el.dataset.tradeId = msg.tradeId;
+      el.dataset.msgId   = docId;
+      requestAnimationFrame(() => {
+        window.mountTradeCard?.(msg.tradeId, el, msg.tradeSnapshot || null);
+      });
+      return el;
+    }
+
+    // ── WORLD EVENT bubble ─────────────────────────────────────────────────
+    if (msg.isWorldEvent && msg.uid === 'system') {
+      const isUnexpected = msg.eventType === 'unexpected';
+      const el = document.createElement('div');
+      el.className = `chat-msg world-event-msg world-event-${msg.eventType || 'unexpected'}`;
+      el.dataset.msgId = docId;
+      el.innerHTML = `
+        <div class="world-event-bubble">
+          <div class="world-event-header">
+            <span class="world-event-icon">${isUnexpected ? '⚡' : '📖'}</span>
+            <span class="world-event-label">[${msg.eventLabel || (isUnexpected ? 'UNEXPECTED DEVELOPMENT' : 'LOGICAL DEVELOPMENT')}]</span>
+            <span class="world-event-time">${time}</span>
+          </div>
+          <div class="world-event-text">${formatChatText(msg.text || '')}</div>
+        </div>`;
+      return el;
+    }
+
+    // ── Regular message ────────────────────────────────────────────────────
+    const el = document.createElement("div");
+    el.className = `chat-msg${isMe?" own":""}${isNpc?" npc-msg":""}`;
+    el.dataset.msgId = docId;
+
+    if (isMe) {
+      el.innerHTML = `
+        <div class="chat-msg-body">
+          ${replyQuoteHTML}
+          <div class="chat-msg-text ${isNpc?"npc-bubble own-npc":"own-text"}">${formatChatText(msg.text||"")}</div>
+          <div class="chat-msg-actions">
+            <button class="chat-action-btn" title="Edit" onclick="window._dchatStartEdit('${docId}','${locColPath}',this)">✏️</button>
+            <button class="chat-action-btn" title="Delete" onclick="window._dchatDeleteMsg('${docId}','${locColPath}')">🗑️</button>
+          </div>
+          <div class="chat-msg-time own-time">${time}</div>
+        </div>
+        <div class="chat-msg-avatar ${isNpc?"npc-avatar":""}">${av}</div>`;
+      const msgBody = el.querySelector(".chat-msg-body");
+      let _ht = null;
+      msgBody.addEventListener("mouseenter", () => { clearTimeout(_ht); msgBody.classList.add("msg-hovered"); });
+      msgBody.addEventListener("mouseleave", () => { _ht = setTimeout(() => msgBody.classList.remove("msg-hovered"), 1500); });
+      el.querySelector(".own-text, .npc-bubble.own-npc")?.addEventListener("touchstart", e => {
+        e.stopPropagation();
+        const isOpen = msgBody.classList.contains("msg-hovered");
+        document.querySelectorAll(".chat-msg-body.msg-hovered").forEach(b => b.classList.remove("msg-hovered"));
+        if (!isOpen) msgBody.classList.add("msg-hovered");
+      }, { passive: true });
+    } else if (isNpc) {
+      const npcSafeName = escapeHtml(msg.charName||'NPC');
+      const npcSafeText = escapeHtml(msg.text||'').replace(/'/g,"\\'");
+      el.innerHTML = `
+        <div class="chat-msg-avatar npc-avatar">${av}</div>
+        <div class="chat-msg-body">
+          <div class="chat-msg-header">
+            <span class="chat-msg-name npc-name">🧙 ${npcSafeName}</span>
+            ${msg.title ? `<span class="chat-msg-title npc-role">${escapeHtml(msg.title)}</span>` : ""}
+            <span class="chat-msg-rank" style="color:var(--gold-dim);font-size:0.7rem">${msg.rank||"NPC"} · Lv.${msg.level||1}</span>
+            <span class="chat-msg-time">${time}</span>
+          </div>
+          ${replyQuoteHTML}
+          <div class="chat-msg-text npc-bubble">${formatChatText(msg.text||"")}</div>
+          <button class="reply-btn" onclick="window._deityStartReply('${docId}','${npcSafeName}','${npcSafeText}')">↩ Reply</button>
+        </div>`;
+    } else {
+      const safeName    = escapeHtml(msg.charName||'');
+      const safeText    = escapeHtml(msg.text||'').replace(/'/g,"\\'");
+      const locSafeName = (msg.charName||'').replace(/'/g,"\'");
+      el.innerHTML = `
+        <div class="chat-msg-avatar" onclick="window._openDchatPlayerPopup('${locSafeName}','${msg.uid||''}')" style="cursor:pointer">${av}</div>
+        <div class="chat-msg-body">
+          <div class="chat-msg-header">
+            <span class="chat-msg-name" onclick="window._openDchatPlayerPopup('${locSafeName}','${msg.uid||''}')" style="cursor:pointer">${safeName}</span>
+            ${msg.title ? `<span class="chat-msg-title">${escapeHtml(msg.title)}</span>` : ""}
+            <span class="chat-msg-rank">${msg.rank||"Wanderer"} · Lv.${msg.level||1}</span>
+            <span class="chat-msg-time">${time}</span>
+          </div>
+          ${replyQuoteHTML}
+          <div class="chat-msg-text">${formatChatText(msg.text||"")}</div>
+          <button class="reply-btn" onclick="window._deityStartReply('${docId}','${safeName}','${safeText}')">↩ Reply</button>
+          <button class="chat-action-btn" title="Delete" style="margin-left:4px" onclick="window._dchatDeleteMsg('${docId}','${locColPath}')">🗑️</button>
+        </div>`;
+    }
+    _attachDchatMsgHover(el);
+    return el;
+  }
+
+  let _locChatFirstLoad = true;
+
+  _deityChatUnsub = onSnapshot(q, snap => {
     if (!container) return;
-    const docs = [];
-    snap.forEach(d => docs.push(d));
-    docs.sort((a, b) => {
-      const ta = a.data().timestamp?.toMillis?.() ?? (a.metadata.hasPendingWrites ? Infinity : 0);
-      const tb = b.data().timestamp?.toMillis?.() ?? (b.metadata.hasPendingWrites ? Infinity : 0);
-      return ta - tb;
-    });
-    if (!docs.length) {
-      container.innerHTML = `<div class="chat-empty"><span>✦</span><span>No messages in this location yet.</span></div>`;
+
+    // ── FIRST LOAD: full render ────────────────────────────────────────────
+    if (_locChatFirstLoad) {
+      _locChatFirstLoad = false;
+      if (snap.empty) {
+        container.innerHTML = `<div class="chat-empty"><span>✦</span><span>No messages in this location yet.</span></div>`;
+        return;
+      }
+      container.innerHTML = "";
+      snap.forEach(d => {
+        const el = _buildLocMsgEl(d);
+        if (el) container.appendChild(el);
+      });
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        container.scrollTop = container.scrollHeight;
+      }));
       return;
     }
-    container.innerHTML = "";
-    docs.forEach(d => {
-      const msg    = d.data();
-      const docId  = d.id;
-      const time   = msg.timestamp?.toDate?.() ? formatTime(msg.timestamp.toDate()) : "";
-      const isNpc     = msg.isNpc;
-      const isMyNpc   = isNpc && (msg.deityUid === _uid || _deityLocationNpcs.some(n => n.id === msg.npcId));
-      const isMe      = msg.uid === _uid || isMyNpc;
-      const av = msg.avatarUrl?.startsWith("http")
-        ? `<img src="${msg.avatarUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:50%"/>`
-        : `<span style="font-size:1rem">${msg.avatarUrl||"⚔️"}</span>`;
 
-      // ── Reply quote block ──────────────────────────────────────
-      const replyQuoteHTML = msg.replyTo ? `
-        <div class="chat-msg-reply-quote" onclick="window._deityJumpToMsg('${msg.replyTo.id}')">
-          <div class="chat-msg-reply-quote-bar"></div>
-          <div class="chat-msg-reply-quote-body">
-            <div class="chat-msg-reply-quote-name">${escapeHtml(msg.replyTo.charName||'')}</div>
-            <div class="chat-msg-reply-quote-text">${escapeHtml(msg.replyTo.text||'')}</div>
-          </div>
-        </div>` : '';
-
-      const el = document.createElement("div");
-      el.className = `chat-msg${isMe?" own":""}${isNpc?" npc-msg":""}`;
-      el.dataset.msgId = docId;
-
-      const locColPath = `chats/${locationId}/messages`;
-
-      // ── DUEL / TRADE system cards ─────────────────────────────────
-      if (msg.uid === 'system' && (msg.isDuelCard || msg.isDuelEvent || msg.isTradeCard)) {
-        el.className = 'chat-msg system-duel-msg';
-
-        if (msg.isDuelCard && msg.duelId) {
-          // Use mountDuelCard for live repopulation on every turn (same as player dashboard)
-          const wrapper = document.createElement('div');
-          wrapper.className = 'duel-card-wrapper';
-          wrapper.dataset.duelId = msg.duelId;
-          wrapper.dataset.msgId  = docId;
-          el.appendChild(wrapper);
-          container.appendChild(el);
-          requestAnimationFrame(() => {
-            const snap = msg.duelSnapshot || null;
-            if (msg.isLiveDuelCard) {
-              window.mountDuelCard?.(msg.duelId, wrapper, snap);
-            } else if (snap) {
-              window.renderDuelCard?.(snap, msg.duelId, wrapper);
-            } else {
-              window.mountDuelCard?.(msg.duelId, wrapper, null);
-            }
-          });
-        } else if (msg.isDuelEvent) {
-          const rendered = window._renderDuelOrTradeCard?.(msg);
-          el.innerHTML = rendered || `<div class="duel-event-bubble"><span class="duel-event-icon">⚔️</span><span class="duel-event-text">${escapeHtml(msg.text||'')}</span></div>`;
-          container.appendChild(el);
-        } else if (msg.isTradeCard && msg.tradeId) {
-          const wrapper = document.createElement('div');
-          wrapper.className = 'trade-card-wrapper';
-          wrapper.dataset.tradeId = msg.tradeId;
-          wrapper.dataset.msgId   = docId;
-          el.appendChild(wrapper);
-          container.appendChild(el);
-          requestAnimationFrame(() => {
-            window.mountTradeCard?.(msg.tradeId, wrapper, msg.tradeSnapshot || null);
-          });
-        } else {
-          el.innerHTML = `<div class="duel-event-bubble"><span class="duel-event-icon">⚔️</span><span class="duel-event-text">${escapeHtml(msg.text||'')}</span></div>`;
-          container.appendChild(el);
+    // ── INCREMENTAL: only process changes — duel card DOM nodes are never destroyed ──
+    let didAppend = false;
+    snap.docChanges().forEach(change => {
+      if (change.type === 'added') {
+        if (container.querySelector(`[data-msg-id="${change.doc.id}"]`)) return;
+        const empty = container.querySelector('.chat-empty');
+        if (empty) empty.remove();
+        const el = _buildLocMsgEl(change.doc);
+        if (el) { container.appendChild(el); didAppend = true; }
+      } else if (change.type === 'modified') {
+        const existing = container.querySelector(`[data-msg-id="${change.doc.id}"]`);
+        if (existing) {
+          // Duel card wrappers: patch snapshot in-place — do NOT replace the node
+          if (existing.classList.contains('duel-card-wrapper')) {
+            const msg = change.doc.data();
+            if (msg.duelSnapshot) window.renderDuelCard?.(msg.duelSnapshot, msg.duelId, existing);
+          } else {
+            const updated = _buildLocMsgEl(change.doc);
+            if (updated) container.replaceChild(updated, existing);
+          }
         }
-        return;
+      } else if (change.type === 'removed') {
+        container.querySelector(`[data-msg-id="${change.doc.id}"]`)?.remove();
       }
-
-      // ── WORLD EVENT bubble ────────────────────────────────────────
-      if (msg.isWorldEvent && msg.uid === 'system') {
-        const isUnexpected = msg.eventType === 'unexpected';
-        el.className = `chat-msg world-event-msg world-event-${msg.eventType || 'unexpected'}`;
-        el.innerHTML = `
-          <div class="world-event-bubble">
-            <div class="world-event-header">
-              <span class="world-event-icon">${isUnexpected ? '⚡' : '📖'}</span>
-              <span class="world-event-label">[${msg.eventLabel || (isUnexpected ? 'UNEXPECTED DEVELOPMENT' : 'LOGICAL DEVELOPMENT')}]</span>
-              <span class="world-event-time">${time}</span>
-            </div>
-            <div class="world-event-text">${formatChatText(msg.text || '')}</div>
-          </div>`;
-        container.appendChild(el);
-        return;
-      }
-
-      if (isMe) {
-        el.innerHTML = `
-          <div class="chat-msg-body">
-            ${replyQuoteHTML}
-            <div class="chat-msg-text ${isNpc?"npc-bubble own-npc":"own-text"}">${formatChatText(msg.text||"")}</div>
-            <div class="chat-msg-actions">
-              <button class="chat-action-btn" title="Edit" onclick="window._dchatStartEdit('${docId}','${locColPath}',this)">✏️</button>
-              <button class="chat-action-btn" title="Delete" onclick="window._dchatDeleteMsg('${docId}','${locColPath}')">🗑️</button>
-            </div>
-            <div class="chat-msg-time own-time">${time}</div>
-          </div>
-          <div class="chat-msg-avatar ${isNpc?"npc-avatar":""}">${av}</div>`;
-        const msgBody = el.querySelector(".chat-msg-body");
-        let _ht = null;
-        msgBody.addEventListener("mouseenter", () => { clearTimeout(_ht); msgBody.classList.add("msg-hovered"); });
-        msgBody.addEventListener("mouseleave", () => { _ht = setTimeout(() => msgBody.classList.remove("msg-hovered"), 1500); });
-        el.querySelector(".own-text, .npc-bubble.own-npc")?.addEventListener("touchstart", e => {
-          e.stopPropagation();
-          const isOpen = msgBody.classList.contains("msg-hovered");
-          document.querySelectorAll(".chat-msg-body.msg-hovered").forEach(b => b.classList.remove("msg-hovered"));
-          if (!isOpen) msgBody.classList.add("msg-hovered");
-        }, { passive: true });
-      } else if (isNpc) {
-        const npcSafeName = escapeHtml(msg.charName||'NPC');
-        const npcSafeText = escapeHtml(msg.text||'').replace(/'/g,"\\'");
-        el.innerHTML = `
-          <div class="chat-msg-avatar npc-avatar">${av}</div>
-          <div class="chat-msg-body">
-            <div class="chat-msg-header">
-              <span class="chat-msg-name npc-name">🧙 ${npcSafeName}</span>
-              ${msg.title ? `<span class="chat-msg-title npc-role">${escapeHtml(msg.title)}</span>` : ""}
-              <span class="chat-msg-rank" style="color:var(--gold-dim);font-size:0.7rem">${msg.rank||"NPC"} · Lv.${msg.level||1}</span>
-              <span class="chat-msg-time">${time}</span>
-            </div>
-            ${replyQuoteHTML}
-            <div class="chat-msg-text npc-bubble">${formatChatText(msg.text||"")}</div>
-            <button class="reply-btn" onclick="window._deityStartReply('${docId}','${npcSafeName}','${npcSafeText}')">↩ Reply</button>
-          </div>`;
-      } else {
-        const safeName    = escapeHtml(msg.charName||'');
-        const safeText    = escapeHtml(msg.text||'').replace(/'/g,"\\'");
-        const locSafeName = (msg.charName||'').replace(/'/g,"\'");
-        el.innerHTML = `
-          <div class="chat-msg-avatar" onclick="window._openDchatPlayerPopup('${locSafeName}','${msg.uid||''}')" style="cursor:pointer">${av}</div>
-          <div class="chat-msg-body">
-            <div class="chat-msg-header">
-              <span class="chat-msg-name" onclick="window._openDchatPlayerPopup('${locSafeName}','${msg.uid||''}')" style="cursor:pointer">${safeName}</span>
-              ${msg.title ? `<span class="chat-msg-title">${escapeHtml(msg.title)}</span>` : ""}
-              <span class="chat-msg-rank">${msg.rank||"Wanderer"} · Lv.${msg.level||1}</span>
-              <span class="chat-msg-time">${time}</span>
-            </div>
-            ${replyQuoteHTML}
-            <div class="chat-msg-text">${formatChatText(msg.text||"")}</div>
-            <button class="reply-btn" onclick="window._deityStartReply('${docId}','${safeName}','${safeText}')">↩ Reply</button>
-            <button class="chat-action-btn" title="Delete" style="margin-left:4px" onclick="window._dchatDeleteMsg('${docId}','${locColPath}')">🗑️</button>
-          </div>`;
-      }
-      _attachDchatMsgHover(el);
-      container.appendChild(el);
     });
-    container.scrollTop = container.scrollHeight;
+    if (didAppend) requestAnimationFrame(() => requestAnimationFrame(() => {
+      container.scrollTop = container.scrollHeight;
+    }));
   });
 }
 
@@ -3853,171 +3968,208 @@ function _startGeneralChatListener() {
   }
 
   const msgsRef = collection(db, "general-chat", "global", "messages");
-  const q = query(msgsRef, limit(100));
+  const q = query(msgsRef, orderBy("timestamp", "asc"), limitToLast(100));
 
-  _deityChatGeneralUnsub = onSnapshot(q, { includeMetadataChanges: true }, snap => {
+  // ── Build a single general-chat message element ──────────────────────────
+  function _buildGenMsgEl(d) {
+    const msg       = d.data();
+    const docId     = d.id;
+    const time      = msg.timestamp?.toDate?.() ? formatTime(msg.timestamp.toDate()) : "";
+    const isNpc     = !!msg.isNpc;
+    const isMyNpc   = isNpc && msg.deityUid === _uid;
+    const isMe      = msg.uid === _uid || isMyNpc;
+    const gcColPath = `general-chat/global/messages`;
+    const av = msg.avatarUrl?.startsWith("http")
+      ? `<img src="${msg.avatarUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:50%"/>`
+      : `<span style="font-size:1rem">${msg.avatarUrl || "⚔️"}</span>`;
+
+    const replyQuoteHTML = msg.replyTo ? `
+      <div class="chat-msg-reply-quote" onclick="window._deityJumpToMsg('${msg.replyTo.id}')">
+        <div class="chat-msg-reply-quote-bar"></div>
+        <div class="chat-msg-reply-quote-body">
+          <div class="chat-msg-reply-quote-name">${escapeHtml(msg.replyTo.charName||'')}</div>
+          <div class="chat-msg-reply-quote-text">${escapeHtml(msg.replyTo.text||'')}</div>
+        </div>
+      </div>` : '';
+
+    // ── DUEL CARD ──────────────────────────────────────────────────────────
+    if (msg.isDuelCard && msg.duelId) {
+      const el = document.createElement('div');
+      el.className = 'duel-card-wrapper';
+      el.dataset.duelId = msg.duelId;
+      el.dataset.msgId  = docId;
+      requestAnimationFrame(() => {
+        const snap = msg.duelSnapshot || null;
+        if (msg.isLiveDuelCard) {
+          window.mountDuelCard?.(msg.duelId, el, snap);
+        } else if (snap) {
+          window.renderDuelCard?.(snap, msg.duelId, el);
+        } else {
+          window.mountDuelCard?.(msg.duelId, el, null);
+        }
+      });
+      return el;
+    }
+
+    // ── DUEL EVENT bubble ──────────────────────────────────────────────────
+    if (msg.isDuelEvent) {
+      const el = document.createElement('div');
+      el.className = 'chat-msg duel-event-msg';
+      el.dataset.msgId = docId;
+      const displayText = msg.richText || msg.text || '';
+      const icon = msg.duelEventIcon || '⚔️';
+      el.innerHTML = `<div class="duel-event-bubble"><span class="duel-event-icon">${icon}</span><span class="duel-event-text">${displayText}</span><span class="duel-event-time">${time}</span></div>`;
+      return el;
+    }
+
+    // ── TRADE CARD ─────────────────────────────────────────────────────────
+    if (msg.isTradeCard && msg.tradeId) {
+      const el = document.createElement('div');
+      el.className = 'trade-card-wrapper';
+      el.dataset.tradeId = msg.tradeId;
+      el.dataset.msgId   = docId;
+      requestAnimationFrame(() => {
+        window.mountTradeCard?.(msg.tradeId, el, msg.tradeSnapshot || null);
+      });
+      return el;
+    }
+
+    // ── WORLD EVENT bubble ─────────────────────────────────────────────────
+    if (msg.isWorldEvent && msg.uid === 'system') {
+      const isUnexpected = msg.eventType === 'unexpected';
+      const el = document.createElement('div');
+      el.className = `chat-msg world-event-msg world-event-${msg.eventType || 'unexpected'}`;
+      el.dataset.msgId = docId;
+      el.innerHTML = `
+        <div class="world-event-bubble">
+          <div class="world-event-header">
+            <span class="world-event-icon">${isUnexpected ? '⚡' : '📖'}</span>
+            <span class="world-event-label">[${msg.eventLabel || (isUnexpected ? 'UNEXPECTED DEVELOPMENT' : 'LOGICAL DEVELOPMENT')}]</span>
+            <span class="world-event-time">${time}</span>
+          </div>
+          <div class="world-event-text">${formatChatText(msg.text || '')}</div>
+        </div>`;
+      return el;
+    }
+
+    // ── Regular message ────────────────────────────────────────────────────
+    const el = document.createElement("div");
+    el.className = `chat-msg${isMe ? " own" : ""}${isNpc ? " npc-msg" : ""}`;
+    el.dataset.msgId = docId;
+
+    if (isMe) {
+      el.innerHTML = `
+        <div class="chat-msg-body">
+          ${replyQuoteHTML}
+          <div class="chat-msg-text ${isNpc ? "npc-bubble own-npc" : "own-text"}">${formatChatText(msg.text || "")}</div>
+          <div class="chat-msg-actions">
+            <button class="chat-action-btn" title="Edit" onclick="window._dchatStartEdit('${docId}','${gcColPath}',this)">✏️</button>
+            <button class="chat-action-btn" title="Delete" onclick="window._dchatDeleteMsg('${docId}','${gcColPath}')">🗑️</button>
+          </div>
+          <div class="chat-msg-time own-time">${time}</div>
+        </div>
+        <div class="chat-msg-avatar ${isNpc ? "npc-avatar" : ""}">${av}</div>`;
+      const msgBody = el.querySelector(".chat-msg-body");
+      let _ht = null;
+      msgBody.addEventListener("mouseenter", () => { clearTimeout(_ht); msgBody.classList.add("msg-hovered"); });
+      msgBody.addEventListener("mouseleave", () => { _ht = setTimeout(() => msgBody.classList.remove("msg-hovered"), 1500); });
+      el.querySelector(".own-text, .npc-bubble.own-npc")?.addEventListener("touchstart", e => {
+        e.stopPropagation();
+        const isOpen = msgBody.classList.contains("msg-hovered");
+        document.querySelectorAll(".chat-msg-body.msg-hovered").forEach(b => b.classList.remove("msg-hovered"));
+        if (!isOpen) msgBody.classList.add("msg-hovered");
+      }, { passive: true });
+    } else if (isNpc) {
+      const npcSafeName = escapeHtml(msg.charName||'NPC');
+      const npcSafeText = escapeHtml(msg.text||'').replace(/'/g,"\\'");
+      el.innerHTML = `
+        <div class="chat-msg-avatar npc-avatar">${av}</div>
+        <div class="chat-msg-body">
+          <div class="chat-msg-header">
+            <span class="chat-msg-name npc-name">🧙 ${npcSafeName}</span>
+            ${msg.title ? `<span class="chat-msg-title npc-role">${escapeHtml(msg.title)}</span>` : ""}
+            <span class="chat-msg-rank" style="color:var(--gold-dim);font-size:0.7rem">${msg.rank||"NPC"} · Lv.${msg.level||1}</span>
+            <span class="chat-msg-time">${time}</span>
+          </div>
+          <div class="chat-msg-location">📍 ${escapeHtml(msg.location||"General")}</div>
+          ${replyQuoteHTML}
+          <div class="chat-msg-text npc-bubble">${formatChatText(msg.text||"")}</div>
+          <button class="reply-btn" onclick="window._deityStartReply('${docId}','${npcSafeName}','${npcSafeText}')">↩ Reply</button>
+        </div>`;
+    } else {
+      const safeName   = escapeHtml(msg.charName||'');
+      const safeText   = escapeHtml(msg.text||'').replace(/'/g,"\\'");
+      const gcSafeName = (msg.charName||'').replace(/'/g,"\'");
+      el.innerHTML = `
+        <div class="chat-msg-avatar" onclick="window._openDchatPlayerPopup('${gcSafeName}','${msg.uid||''}')" style="cursor:pointer">${av}</div>
+        <div class="chat-msg-body">
+          <div class="chat-msg-header">
+            <span class="chat-msg-name" onclick="window._openDchatPlayerPopup('${gcSafeName}','${msg.uid||''}')" style="cursor:pointer">${safeName}</span>
+            ${msg.title ? `<span class="chat-msg-title">${escapeHtml(msg.title)}</span>` : ""}
+            <span class="chat-msg-rank">${msg.rank||"Wanderer"} · Lv.${msg.level||1}</span>
+            <span class="chat-msg-time">${time}</span>
+          </div>
+          <div class="chat-msg-location">📍 ${escapeHtml(msg.location||"")}</div>
+          ${replyQuoteHTML}
+          <div class="chat-msg-text">${formatChatText(msg.text || "")}</div>
+          <button class="reply-btn" onclick="window._deityStartReply('${docId}','${safeName}','${safeText}')">↩ Reply</button>
+          <button class="chat-action-btn" title="Delete" style="margin-left:4px" onclick="window._dchatDeleteMsg('${docId}','${gcColPath}')">🗑️</button>
+        </div>`;
+    }
+    _attachDchatMsgHover(el);
+    return el;
+  }
+
+  let _genChatFirstLoad = true;
+
+  _deityChatGeneralUnsub = onSnapshot(q, snap => {
     if (!container) return;
-    const docs = [];
-    snap.forEach(d => docs.push(d));
-    docs.sort((a, b) => {
-      const ta = a.data().timestamp?.toMillis?.() ?? (a.metadata.hasPendingWrites ? Infinity : 0);
-      const tb = b.data().timestamp?.toMillis?.() ?? (b.metadata.hasPendingWrites ? Infinity : 0);
-      return ta - tb;
-    });
-    if (!docs.length) {
-      container.innerHTML = `<div class="chat-empty"><span>✦</span><span>No general chat messages yet.</span></div>`;
+
+    // ── FIRST LOAD: full render ────────────────────────────────────────────
+    if (_genChatFirstLoad) {
+      _genChatFirstLoad = false;
+      if (snap.empty) {
+        container.innerHTML = `<div class="chat-empty"><span>✦</span><span>No general chat messages yet.</span></div>`;
+        return;
+      }
+      container.innerHTML = "";
+      snap.forEach(d => {
+        const el = _buildGenMsgEl(d);
+        if (el) container.appendChild(el);
+      });
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        container.scrollTop = container.scrollHeight;
+      }));
       return;
     }
-    container.innerHTML = "";
-    docs.forEach(d => {
-      const msg     = d.data();
-      const docId   = d.id;
-      const time    = msg.timestamp?.toDate?.() ? formatTime(msg.timestamp.toDate()) : "";
-      const isNpc   = !!msg.isNpc;
-      const isMyNpc = isNpc && msg.deityUid === _uid;
-      const isMe    = msg.uid === _uid || isMyNpc;
-      const av      = msg.avatarUrl?.startsWith("http")
-        ? `<img src="${msg.avatarUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:50%"/>`
-        : `<span style="font-size:1rem">${msg.avatarUrl || "⚔️"}</span>`;
 
-      // ── Reply quote ──────────────────────────────────────────────
-      const replyQuoteHTML = msg.replyTo ? `
-        <div class="chat-msg-reply-quote" onclick="window._deityJumpToMsg('${msg.replyTo.id}')">
-          <div class="chat-msg-reply-quote-bar"></div>
-          <div class="chat-msg-reply-quote-body">
-            <div class="chat-msg-reply-quote-name">${escapeHtml(msg.replyTo.charName||'')}</div>
-            <div class="chat-msg-reply-quote-text">${escapeHtml(msg.replyTo.text||'')}</div>
-          </div>
-        </div>` : '';
-
-      const el = document.createElement("div");
-      el.className = `chat-msg${isMe ? " own" : ""}${isNpc ? " npc-msg" : ""}`;
-      el.dataset.msgId = docId;
-
-      // ── DUEL / TRADE system cards ─────────────────────────────────
-      if (msg.uid === 'system' && (msg.isDuelCard || msg.isDuelEvent || msg.isTradeCard)) {
-        el.className = 'chat-msg system-duel-msg';
-
-        if (msg.isDuelCard && msg.duelId) {
-          const wrapper = document.createElement('div');
-          wrapper.className = 'duel-card-wrapper';
-          wrapper.dataset.duelId = msg.duelId;
-          wrapper.dataset.msgId  = docId;
-          el.appendChild(wrapper);
-          container.appendChild(el);
-          requestAnimationFrame(() => {
-            const snap = msg.duelSnapshot || null;
-            if (msg.isLiveDuelCard) {
-              window.mountDuelCard?.(msg.duelId, wrapper, snap);
-            } else if (snap) {
-              window.renderDuelCard?.(snap, msg.duelId, wrapper);
-            } else {
-              window.mountDuelCard?.(msg.duelId, wrapper, null);
-            }
-          });
-        } else if (msg.isDuelEvent) {
-          const rendered = window._renderDuelOrTradeCard?.(msg);
-          el.innerHTML = rendered || `<div class="duel-event-bubble"><span class="duel-event-icon">⚔️</span><span class="duel-event-text">${escapeHtml(msg.text||'')}</span></div>`;
-          container.appendChild(el);
-        } else if (msg.isTradeCard && msg.tradeId) {
-          const wrapper = document.createElement('div');
-          wrapper.className = 'trade-card-wrapper';
-          wrapper.dataset.tradeId = msg.tradeId;
-          wrapper.dataset.msgId   = docId;
-          el.appendChild(wrapper);
-          container.appendChild(el);
-          requestAnimationFrame(() => {
-            window.mountTradeCard?.(msg.tradeId, wrapper, msg.tradeSnapshot || null);
-          });
-        } else {
-          el.innerHTML = `<div class="duel-event-bubble"><span class="duel-event-icon">⚔️</span><span class="duel-event-text">${escapeHtml(msg.text||'')}</span></div>`;
-          container.appendChild(el);
+    // ── INCREMENTAL: only process changes ─────────────────────────────────
+    let didAppend = false;
+    snap.docChanges().forEach(change => {
+      if (change.type === 'added') {
+        if (container.querySelector(`[data-msg-id="${change.doc.id}"]`)) return;
+        const empty = container.querySelector('.chat-empty');
+        if (empty) empty.remove();
+        const el = _buildGenMsgEl(change.doc);
+        if (el) { container.appendChild(el); didAppend = true; }
+      } else if (change.type === 'modified') {
+        const existing = container.querySelector(`[data-msg-id="${change.doc.id}"]`);
+        if (existing) {
+          if (existing.classList.contains('duel-card-wrapper')) {
+            const msg = change.doc.data();
+            if (msg.duelSnapshot) window.renderDuelCard?.(msg.duelSnapshot, msg.duelId, existing);
+          } else {
+            const updated = _buildGenMsgEl(change.doc);
+            if (updated) container.replaceChild(updated, existing);
+          }
         }
-        return;
+      } else if (change.type === 'removed') {
+        container.querySelector(`[data-msg-id="${change.doc.id}"]`)?.remove();
       }
-
-      // ── WORLD EVENT bubble ────────────────────────────────────────
-      if (msg.isWorldEvent && msg.uid === 'system') {
-        const isUnexpected = msg.eventType === 'unexpected';
-        el.className = `chat-msg world-event-msg world-event-${msg.eventType || 'unexpected'}`;
-        el.innerHTML = `
-          <div class="world-event-bubble">
-            <div class="world-event-header">
-              <span class="world-event-icon">${isUnexpected ? '⚡' : '📖'}</span>
-              <span class="world-event-label">[${msg.eventLabel || (isUnexpected ? 'UNEXPECTED DEVELOPMENT' : 'LOGICAL DEVELOPMENT')}]</span>
-              <span class="world-event-time">${time}</span>
-            </div>
-            <div class="world-event-text">${formatChatText(msg.text || '')}</div>
-          </div>`;
-        container.appendChild(el);
-        return;
-      }
-
-      const gcColPath = `general-chat/global/messages`;
-
-      if (isMe) {
-        el.innerHTML = `
-          <div class="chat-msg-body">
-            ${replyQuoteHTML}
-            <div class="chat-msg-text ${isNpc ? "npc-bubble own-npc" : "own-text"}">${formatChatText(msg.text || "")}</div>
-            <div class="chat-msg-actions">
-              <button class="chat-action-btn" title="Edit" onclick="window._dchatStartEdit('${docId}','${gcColPath}',this)">✏️</button>
-              <button class="chat-action-btn" title="Delete" onclick="window._dchatDeleteMsg('${docId}','${gcColPath}')">🗑️</button>
-            </div>
-            <div class="chat-msg-time own-time">${time}</div>
-          </div>
-          <div class="chat-msg-avatar ${isNpc ? "npc-avatar" : ""}">${av}</div>`;
-        const msgBody = el.querySelector(".chat-msg-body");
-        let _ht = null;
-        msgBody.addEventListener("mouseenter", () => { clearTimeout(_ht); msgBody.classList.add("msg-hovered"); });
-        msgBody.addEventListener("mouseleave", () => { _ht = setTimeout(() => msgBody.classList.remove("msg-hovered"), 1500); });
-        el.querySelector(".own-text, .npc-bubble.own-npc")?.addEventListener("touchstart", e => {
-          e.stopPropagation();
-          const isOpen = msgBody.classList.contains("msg-hovered");
-          document.querySelectorAll(".chat-msg-body.msg-hovered").forEach(b => b.classList.remove("msg-hovered"));
-          if (!isOpen) msgBody.classList.add("msg-hovered");
-        }, { passive: true });
-      } else if (isNpc) {
-        const npcSafeName = escapeHtml(msg.charName||'NPC');
-        const npcSafeText = escapeHtml(msg.text||'').replace(/'/g,"\\'");
-        el.innerHTML = `
-          <div class="chat-msg-avatar npc-avatar">${av}</div>
-          <div class="chat-msg-body">
-            <div class="chat-msg-header">
-              <span class="chat-msg-name npc-name">🧙 ${npcSafeName}</span>
-              ${msg.title ? `<span class="chat-msg-title npc-role">${escapeHtml(msg.title)}</span>` : ""}
-              <span class="chat-msg-rank" style="color:var(--gold-dim);font-size:0.7rem">${msg.rank||"NPC"} · Lv.${msg.level||1}</span>
-              <span class="chat-msg-time">${time}</span>
-            </div>
-            <div class="chat-msg-location">📍 ${escapeHtml(msg.location||"General")}</div>
-            ${replyQuoteHTML}
-            <div class="chat-msg-text npc-bubble">${formatChatText(msg.text||"")}</div>
-            <button class="reply-btn" onclick="window._deityStartReply('${docId}','${npcSafeName}','${npcSafeText}')">↩ Reply</button>
-          </div>`;
-      } else {
-        const safeName   = escapeHtml(msg.charName||'');
-        const safeText   = escapeHtml(msg.text||'').replace(/'/g,"\\'");
-        const gcSafeName = (msg.charName||'').replace(/'/g,"\'");
-        el.innerHTML = `
-          <div class="chat-msg-avatar" onclick="window._openDchatPlayerPopup('${gcSafeName}','${msg.uid||''}')" style="cursor:pointer">${av}</div>
-          <div class="chat-msg-body">
-            <div class="chat-msg-header">
-              <span class="chat-msg-name" onclick="window._openDchatPlayerPopup('${gcSafeName}','${msg.uid||''}')" style="cursor:pointer">${safeName}</span>
-              ${msg.title ? `<span class="chat-msg-title">${escapeHtml(msg.title)}</span>` : ""}
-              <span class="chat-msg-rank">${msg.rank||"Wanderer"} · Lv.${msg.level||1}</span>
-              <span class="chat-msg-time">${time}</span>
-            </div>
-            <div class="chat-msg-location">📍 ${escapeHtml(msg.location||"")}</div>
-            ${replyQuoteHTML}
-            <div class="chat-msg-text">${formatChatText(msg.text || "")}</div>
-            <button class="reply-btn" onclick="window._deityStartReply('${docId}','${safeName}','${safeText}')">↩ Reply</button>
-            <button class="chat-action-btn" title="Delete" style="margin-left:4px" onclick="window._dchatDeleteMsg('${docId}','${gcColPath}')">🗑️</button>
-          </div>`;
-      }
-      _attachDchatMsgHover(el);
-      container.appendChild(el);
     });
-    container.scrollTop = container.scrollHeight;
+    if (didAppend) requestAnimationFrame(() => requestAnimationFrame(() => {
+      container.scrollTop = container.scrollHeight;
+    }));
   });
 }
 
@@ -4539,21 +4691,26 @@ window._dchatSpeakToPlayer = function() {
 function _resolveDeityChatIdentity() {
   const tabIsGeneral = _deityChatTab === "general";
   let displayData = null;
+  let activeNpcId  = null;
+  let activeNpcLoc = null;
   if (tabIsGeneral) {
     const speakAs = document.getElementById("deity-general-as")?.value || "self";
     if (speakAs !== "self") {
       const npcId = speakAs.replace("npc_", "");
       const npc   = _dchatGeneralNpcs.find(n => n.id === npcId);
-      if (npc) displayData = { ...npc };
+      if (npc) { displayData = { ...npc }; activeNpcId = npcId; activeNpcLoc = npc.locationId || _deityChatLocation || ''; }
     }
   } else {
     const speakAs = document.getElementById("deity-chat-as")?.value || "self";
     if (speakAs !== "self") {
       const npcId = speakAs.replace("npc_", "");
       const npc   = _deityLocationNpcs.find(n => n.id === npcId);
-      if (npc) displayData = { ...npc };
+      if (npc) { displayData = { ...npc }; activeNpcId = npcId; activeNpcLoc = _deityChatLocation || ''; }
     }
   }
+  // Expose active NPC identity so trade.js / duel.js can detect NPC context
+  window._activeSpeakAsNpcId = activeNpcId;
+  window._activeSpeakAsLocId = activeNpcLoc;
   // Build the charData: real auth UID always, display fields from NPC or deity
   const base = displayData || _deityChar || {};
   window._charData = { ...base, isDeity: true };

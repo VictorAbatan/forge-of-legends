@@ -12,6 +12,7 @@ import {
 // ── Module state ───────────────────────────────────
 let _uid            = null;
 let _charData       = null;
+let _isDeity        = false;   // set once at init; never cleared by charData swaps
 let _chatTab        = null;
 let _chatLocationId = null;
 
@@ -53,7 +54,13 @@ function _findSkillDef(charClass, skillName) {
 export function initDuelSystem(uid, charData) {
   _uid      = uid;
   _charData = charData;
+  if (charData?.isDeity) _isDeity = true;  // latch: once a deity, always a deity for this session
   _listenForIncomingChallenges();
+  // If this is a deity, also watch for challenges addressed to any NPC uid
+  // (npc_xxx format) so the deity can auto-respond on behalf of the NPC.
+  if (charData?.isDeity) {
+    _listenForNpcChallenges();
+  }
 }
 
 export function updateDuelCharData(charData) {
@@ -82,10 +89,17 @@ export async function initiateChatDuel(targetUid, targetName, chatTab, chatLocat
   const stance = _getActiveStance(charData);
 
   let targetData = _buildFallbackCombatant(targetUid, targetName);
-  try {
-    const snap = await getDoc(doc(db, 'characters', targetUid));
-    if (snap.exists()) targetData = _buildCombatant(snap.data(), targetUid);
-  } catch (e) { console.warn('[Duel] Could not fetch target data:', e); }
+  // Skip Firestore lookup for NPC targets (npc_xxx) — use local cache instead
+  if (targetUid.startsWith('npc_')) {
+    const npcId   = targetUid.replace('npc_', '');
+    const npcData = (window._deityNpcs || []).find(n => n.id === npcId);
+    if (npcData) targetData = _buildCombatant(npcData, targetUid);
+  } else {
+    try {
+      const snap = await getDoc(doc(db, 'characters', targetUid));
+      if (snap.exists()) targetData = _buildCombatant(snap.data(), targetUid);
+    } catch (e) { console.warn('[Duel] Could not fetch target data:', e); }
+  }
 
   const tab   = chatTab        || _chatTab        || 'rp';
   const locId = chatLocationId || _chatLocationId || '';
@@ -150,12 +164,12 @@ export async function initiateChatDuel(targetUid, targetName, chatTab, chatLocat
   };
 
   const cardRef = await _postDuelCard(duelRef.id, tab, locId, me.name, targetName, snapshot);
-  if (cardRef) {
-    await updateDoc(duelRef, { messageId: cardRef.id });
-  }
-
-  try {
-    await addDoc(collection(db, 'notifications'), {
+  // Fire card message + notification + messageId update concurrently
+  const postWrites = [];
+  if (cardRef) postWrites.push(updateDoc(duelRef, { messageId: cardRef.id }));
+  // Skip notification for NPC targets — they don't have a real inbox
+  if (!targetUid.startsWith('npc_')) {
+    postWrites.push(addDoc(collection(db, 'notifications'), {
       uid:       targetUid,
       type:      'duel-challenge',
       title:     '⚔️ Duel Challenge!',
@@ -165,8 +179,9 @@ export async function initiateChatDuel(targetUid, targetName, chatTab, chatLocat
       createdAt: serverTimestamp(),
       fromUid:   uid,
       fromName:  me.name,
-    });
-  } catch (e) { console.warn('[Duel] Notification failed:', e); }
+    }).catch(e => console.warn('[Duel] Notification failed:', e)));
+  }
+  await Promise.all(postWrites);
 
   window.showToast?.(`⚔️ Challenge sent to ${targetName}! Check the chat.`, '');
 }
@@ -274,15 +289,29 @@ export async function doDuelTurn(duelId, action, extraArg) {
   const duel = snap.data();
 
   if (duel.status !== 'active')    { window.showToast?.('Duel is not active.', 'error'); return; }
-  if (duel.currentTurnUid !== uid) { window.showToast?.("⏳ It's not your turn!", 'error'); return; }
 
-  const isChallenger = duel.challengerId === uid;
-  const me  = isChallenger ? duel.challengerData : duel.targetData;
-  const opp = isChallenger ? duel.targetData     : duel.challengerData;
+  const isNpcTurn = duel.currentTurnUid?.startsWith('npc_');
+  const amChallenger = duel.challengerId === uid;
+  const amTarget     = duel.targetId     === uid;
 
-  let myHp    = isChallenger ? duel.challengerHp    : duel.targetHp;
-  let oppHp   = isChallenger ? duel.targetHp        : duel.challengerHp;
-  let myMana  = isChallenger ? duel.challengerMana  : duel.targetMana;
+  // Allow a human player (or deity) to act on behalf of the NPC
+  const canActForNpc = isNpcTurn && (amChallenger || _isDeity);
+
+  if (!canActForNpc && duel.currentTurnUid !== uid) {
+    window.showToast?.("⏳ It's not your turn!", 'error'); return;
+  }
+
+  // When acting on behalf of NPC, the NPC is the "me" (attacker), human is "opp"
+  const actingAsNpc = isNpcTurn;
+  const isChallenger = actingAsNpc ? (duel.targetId === duel.currentTurnUid ? false : true)
+    : (duel.challengerId === uid);
+  // For NPC turns: NPC is always targetId (npc_xxx), human is challengerId
+  const me  = actingAsNpc ? duel.targetData     : (isChallenger ? duel.challengerData : duel.targetData);
+  const opp = actingAsNpc ? duel.challengerData : (isChallenger ? duel.targetData     : duel.challengerData);
+
+  let myHp    = actingAsNpc ? duel.targetHp      : (isChallenger ? duel.challengerHp    : duel.targetHp);
+  let oppHp   = actingAsNpc ? duel.challengerHp  : (isChallenger ? duel.targetHp        : duel.challengerHp);
+  let myMana  = actingAsNpc ? duel.targetMana    : (isChallenger ? duel.challengerMana  : duel.targetMana);
 
   let dmg      = 0;
   let eventIcon = '⚔️';
@@ -360,19 +389,24 @@ export async function doDuelTurn(duelId, action, extraArg) {
     eventIcon = '✨';
   }
 
-  const nextUid  = isChallenger ? duel.targetId    : duel.challengerId;
-  const nextName = isChallenger ? duel.targetName  : duel.challengerName;
-  const newRound = isChallenger ? duel.round       : duel.round + 1;
+  const nextUid  = actingAsNpc ? duel.challengerId   : (isChallenger ? duel.targetId    : duel.challengerId);
+  const nextName = actingAsNpc ? duel.challengerName : (isChallenger ? duel.targetName  : duel.challengerName);
+  const newRound = actingAsNpc ? duel.round + 1      : (isChallenger ? duel.round       : duel.round + 1);
 
   const isDuelOver = oppHp <= 0;
+
+  // For NPC acting as target: myHp → targetHp, oppHp → challengerHp
+  const myHpKey   = actingAsNpc ? 'targetHp'       : (isChallenger ? 'challengerHp'   : 'targetHp');
+  const myManaKey = actingAsNpc ? 'targetMana'     : (isChallenger ? 'challengerMana' : 'targetMana');
+  const oppHpKey  = actingAsNpc ? 'challengerHp'   : (isChallenger ? 'targetHp'       : 'challengerHp');
 
   const updates = {
     round:          newRound,
     currentTurnUid: isDuelOver ? null : nextUid,
-    [isChallenger ? 'challengerHp'   : 'targetHp']:    myHp,
-    [isChallenger ? 'challengerMana' : 'targetMana']:  myMana,
-    [isChallenger ? 'targetHp'       : 'challengerHp']: oppHp,
-    ...(isDuelOver ? { status: 'complete', winnerId: uid, winnerName: me.name, loserName: opp.name } : {}),
+    [myHpKey]:   myHp,
+    [myManaKey]: myMana,
+    [oppHpKey]:  oppHp,
+    ...(isDuelOver ? { status: 'complete', winnerId: actingAsNpc ? duel.targetId : uid, winnerName: me.name, loserName: opp.name } : {}),
   };
 
   try {
@@ -449,7 +483,7 @@ export async function forfeitChatDuel(duelId) {
   const duel = snap.data();
 
   const isParticipant = duel.challengerId === uid || duel.targetId === uid;
-  const isDeity       = window._charData?.isDeity;
+  const isDeity       = _isDeity;
   if (!isParticipant && !isDeity) {
     window.showToast?.('Only a duelist or deity can forfeit this duel.', 'error');
     return;
@@ -493,7 +527,7 @@ export async function forfeitChatDuel(duelId) {
 // Clears chatDuels collection AND all isDuelCard/isDuelEvent messages
 // from every active chat collection. Deity only.
 export async function clearAllDuelData() {
-  if (!window._charData?.isDeity) {
+  if (!_isDeity) {
     window.showToast?.('Only a Deity can wipe duel data.', 'error');
     return;
   }
@@ -545,7 +579,7 @@ export async function clearAllDuelData() {
 
 // ── Admin: clear ALL chatDuels (deity only) ────────
 export async function clearAllChatDuels() {
-  if (!window._charData?.isDeity) {
+  if (!_isDeity) {
     window.showToast?.('Only a Deity can clear all duels.', 'error');
     return;
   }
@@ -611,9 +645,15 @@ export function renderDuelCard(duel, duelId, el) {
   const isComplete = duel.status === 'complete';
   const isDeclined = duel.status === 'declined';
 
-  const isMyTurn     = isActive && duel.currentTurnUid === myUid;
   const amTarget     = duel.targetId     === myUid;
   const amChallenger = duel.challengerId === myUid;
+  const isNpcTurn    = isActive && duel.currentTurnUid?.startsWith('npc_');
+  // It's "my turn" if it's literally my uid, OR if it's the NPC's turn and
+  // I am the challenger (player) or a deity — so the action panel renders.
+  const isMyTurn     = isActive && (
+    duel.currentTurnUid === myUid ||
+    (isNpcTurn && (amChallenger || _isDeity))
+  );
 
   const chHpPct = _pct(duel.challengerHp,   duel.challengerMaxHp || duel.challengerData?.maxHp);
   const tgHpPct = _pct(duel.targetHp,       duel.targetMaxHp || duel.targetData?.maxHp);
@@ -643,7 +683,10 @@ export function renderDuelCard(duel, duelId, el) {
   } else if (isMyTurn) {
     statusBand = `<div class="duel-band duel-band-your-turn">⚡ YOUR TURN — Choose your move!</div>`;
   } else if (isActive) {
-    const turnName = duel.currentTurnUid === duel.challengerId ? duel.challengerName : duel.targetName;
+    const isNpcTurnNow = duel.currentTurnUid?.startsWith('npc_');
+    const turnName = isNpcTurnNow
+      ? duel.targetName                                                    // NPC's turn
+      : (duel.currentTurnUid === duel.challengerId ? duel.challengerName : duel.targetName);
     statusBand = `<div class="duel-band duel-band-watching">👁 ${turnName} is making their move...</div>`;
   } else if (isComplete) {
     const badge = duel.forfeit
@@ -657,8 +700,21 @@ export function renderDuelCard(duel, duelId, el) {
   // ── Action panel ──────────────────────────────
   let actionPanel = '';
   if (isMyTurn) {
-    const mySkills = amChallenger ? (duel.challengerSkills || []) : (duel.targetSkills || []);
-    const myStanceName = amChallenger ? (duel.challengerStance || '') : (duel.targetStance || '');
+    // When it's the NPC's turn, show the NPC's stance/skills (target side)
+    const actingAsNpc = isNpcTurn;
+
+    // Resolve skills: prefer the duel-doc arrays; fall back to charData.stances[0].skills
+    let mySkills, myStanceName;
+    if (actingAsNpc) {
+      mySkills     = (duel.targetSkills?.length   ? duel.targetSkills   : duel.targetData?.stances?.[0]?.skills)   || [];
+      myStanceName = duel.targetStance || duel.targetData?.stances?.[0]?.name || '';
+    } else if (amChallenger) {
+      mySkills     = (duel.challengerSkills?.length ? duel.challengerSkills : duel.challengerData?.stances?.[0]?.skills) || [];
+      myStanceName = duel.challengerStance || duel.challengerData?.stances?.[0]?.name || '';
+    } else {
+      mySkills     = (duel.targetSkills?.length   ? duel.targetSkills   : duel.targetData?.stances?.[0]?.skills)   || [];
+      myStanceName = duel.targetStance || duel.targetData?.stances?.[0]?.name || '';
+    }
     const hasStance = mySkills.length > 0;
     const stanceBtn = hasStance
       ? `<button class="duel-act-btn duel-act-skill" onclick="window.openDuelStancePicker('${duelId}')">
@@ -679,7 +735,7 @@ export function renderDuelCard(duel, duelId, el) {
       </div>`;
   }
 
-  const canForfeit = isActive && (amTarget || amChallenger || window._charData?.isDeity);
+  const canForfeit = isActive && (amTarget || amChallenger || _isDeity);
   const forfeitBtn = canForfeit
     ? `<div class="duel-forfeit-row"><button class="duel-forfeit-btn" onclick="window.forfeitChatDuel('${duelId}')">🏳️ Forfeit</button></div>`
     : '';
@@ -755,15 +811,21 @@ export function openDuelStancePicker(duelId) {
   // doDuelTurn already has them; we re-read from window state set by mountDuelCard
   const duelState = window._duelStates?.[duelId];
   const isChallenger = duelState?.challengerId === uid;
-  const mySkills = duelState
-    ? (isChallenger ? duelState.challengerSkills : duelState.targetSkills) || []
-    : [];
-  const myMana = duelState
-    ? (isChallenger ? duelState.challengerMana : duelState.targetMana) ?? 0
-    : 0;
-  const stanceName = duelState
-    ? (isChallenger ? duelState.challengerStance : duelState.targetStance) || 'Stance'
-    : 'Stance';
+  const isNpcTurn = duelState?.currentTurnUid?.startsWith('npc_');
+
+  // When it's the NPC's turn, show NPC's (target) skills so the player can pick one
+  let mySkills, myMana, stanceName;
+  if (isNpcTurn) {
+    mySkills   = (duelState?.targetSkills?.length ? duelState.targetSkills : duelState?.targetData?.stances?.[0]?.skills) || [];
+    myMana     = duelState?.targetMana   ?? 0;
+    stanceName = duelState?.targetStance || duelState?.targetData?.stances?.[0]?.name || 'NPC Stance';
+  } else {
+    const rawSkills = duelState ? (isChallenger ? duelState.challengerSkills : duelState.targetSkills) : null;
+    const fallbackStance = duelState ? (isChallenger ? duelState.challengerData?.stances?.[0] : duelState.targetData?.stances?.[0]) : null;
+    mySkills   = (rawSkills?.length ? rawSkills : fallbackStance?.skills) || [];
+    myMana     = duelState ? (isChallenger ? duelState.challengerMana  : duelState.targetMana)  ?? 0  : 0;
+    stanceName = duelState ? ((isChallenger ? duelState.challengerStance : duelState.targetStance) || fallbackStance?.name || 'Stance') : 'Stance';
+  }
 
   let ov = document.getElementById('duel-skill-overlay');
   if (!ov) {
@@ -815,6 +877,164 @@ function _listenForIncomingChallenges() {
       });
     }
   );
+}
+
+// ── Listen for challenges sent to any NPC (deity only) ─
+let _npcChallengeUnsub = null;
+function _listenForNpcChallenges() {
+  if (_npcChallengeUnsub) { _npcChallengeUnsub(); _npcChallengeUnsub = null; }
+  // Query for pending duels where targetId starts with "npc_" — we can't use
+  // a prefix query directly, so we poll on 'pending' duels and filter client-side.
+  _npcChallengeUnsub = onSnapshot(
+    query(collection(db, 'chatDuels'), where('status', '==', 'pending')),
+    (snap) => {
+      snap.docChanges().forEach(ch => {
+        if (ch.type !== 'added') return;
+        const d = ch.doc.data();
+        // Only care about NPC-targeted duels
+        if (!d.targetId?.startsWith('npc_')) return;
+        _showNpcChallengeToast(ch.doc.id, d.challengerName, d.targetName, d.targetId);
+      });
+    }
+  );
+}
+
+function _showNpcChallengeToast(duelId, challengerName, npcName, npcId) {
+  const toastId = `duel-npc-toast-${duelId}`;
+  document.getElementById(toastId)?.remove();
+  const t = document.createElement('div');
+  t.id        = toastId;
+  t.className = 'duel-challenge-toast';
+  t.innerHTML = `
+    <div class="dct-glow"></div>
+    <div class="dct-swords">⚔️</div>
+    <div class="dct-body">
+      <div class="dct-title">NPC DUEL CHALLENGE!</div>
+      <div class="dct-msg"><b>${challengerName}</b> challenges <b>${npcName}</b>!</div>
+      <div class="dct-hint">Accept or decline on behalf of the NPC</div>
+      <div class="dct-btns">
+        <button class="duel-btn duel-btn-accept"  onclick="window.acceptNpcDuel('${duelId}','${npcId}')">⚔ FIGHT</button>
+        <button class="duel-btn duel-btn-decline" onclick="window.declineChatDuel('${duelId}');document.getElementById('${toastId}')?.remove()">✕ DECLINE</button>
+      </div>
+    </div>
+    <button class="dct-close" onclick="this.closest('.duel-challenge-toast').remove()">✕</button>`;
+  document.body.appendChild(t);
+  requestAnimationFrame(() => requestAnimationFrame(() => t.classList.add('visible')));
+}
+
+// ── Accept a duel challenge on behalf of an NPC ────
+export async function acceptNpcDuelChallenge(duelId, npcUid) {
+  const uid = _getUid();
+  const charData = _getCharData();
+  if (!uid || !charData?.isDeity) {
+    window.showToast?.('Only a deity can accept on behalf of an NPC.', 'error'); return;
+  }
+
+  const duelRef = doc(db, 'chatDuels', duelId);
+  const snap    = await getDoc(duelRef);
+  if (!snap.exists()) { window.showToast?.('Duel not found.', 'error'); return; }
+  const duel = snap.data();
+
+  if (duel.status !== 'pending') { window.showToast?.('Duel already handled.', 'error'); return; }
+  if (!duel.targetId?.startsWith('npc_')) { window.showToast?.('Target is not an NPC.', 'error'); return; }
+
+  // Resolve the NPC's data from the local cache
+  const resolvedNpcId = (npcUid || duel.targetId).replace('npc_', '');
+  const npcCache = window._deityNpcs || [];
+  const npcData  = npcCache.find(n => n.id === resolvedNpcId) || {};
+
+  // Build combatant from NPC doc fields
+  const npcCombatant = _buildCombatant({
+    ...npcData,
+    hp:      npcData.hp      ?? npcData.hpMax   ?? 120,
+    hpMax:   npcData.hpMax   ?? npcData.hp      ?? 120,
+    mana:    npcData.mana    ?? npcData.manaMax  ?? 60,
+    manaMax: npcData.manaMax ?? npcData.mana     ?? 60,
+    str:     npcData.str     ?? 12,
+    dex:     npcData.dex     ?? 10,
+    int:     npcData.int     ?? 10,
+    def:     npcData.def     ?? 6,
+  }, duel.targetId);
+
+  // Pick NPC stance — use first stance if available, else auto-build from skills
+  let npcStanceName = 'No Stance';
+  let npcSkills     = [];
+  if (npcData.stances?.length) {
+    const s = npcData.stances[0];
+    npcStanceName = s.name || 'No Stance';
+    npcSkills     = s.skills || [];
+  } else if (npcData.skills?.length) {
+    // Auto-build: use first 3 skills as a default stance
+    npcSkills     = npcData.skills.slice(0, 3);
+    npcStanceName = npcData.name ? `${npcData.name}'s Style` : 'Combat Stance';
+  }
+
+  const tab   = duel.chatTab        || _chatTab        || 'rp';
+  const locId = duel.chatLocationId || _chatLocationId || '';
+
+  const newSnapshot = {
+    challengerId:       duel.challengerId      || '',
+    challengerName:     duel.challengerName    || '',
+    challengerData:     duel.challengerData    || {},
+    challengerHp:       duel.challengerHp      ?? duel.challengerData?.hp    ?? 100,
+    challengerMana:     duel.challengerMana    ?? duel.challengerData?.mana  ?? 50,
+    challengerMaxHp:    duel.challengerMaxHp   ?? duel.challengerData?.maxHp ?? 100,
+    challengerMaxMana:  duel.challengerMaxMana ?? duel.challengerData?.maxMana ?? 50,
+    challengerStance:   duel.challengerStance  || 'No Stance',
+    challengerSkills:   duel.challengerSkills  || [],
+    challengerRank:     duel.challengerData?.rank  || 'Wanderer',
+    challengerLevel:    duel.challengerData?.level || 1,
+    challengerAvatar:   duel.challengerData?.avatarUrl || '',
+    targetId:           duel.targetId          || '',
+    targetName:         duel.targetName        || '',
+    targetData:         npcCombatant,
+    targetHp:           npcCombatant.hp,
+    targetMana:         npcCombatant.mana,
+    targetMaxHp:        npcCombatant.maxHp,
+    targetMaxMana:      npcCombatant.maxMana,
+    targetStance:       npcStanceName,
+    targetSkills:       npcSkills,
+    targetRank:         npcCombatant.rank,
+    targetLevel:        npcCombatant.level,
+    targetAvatar:       npcCombatant.avatarUrl,
+    chatTab:            tab,
+    chatLocationId:     locId,
+    status:             'active',
+    round:              1,
+    currentTurnUid:     duel.challengerId || '',
+    log:                [],
+  };
+
+  await updateDoc(duelRef, {
+    status:         'active',
+    targetData:     npcCombatant,
+    targetHp:       npcCombatant.hp,
+    targetMana:     npcCombatant.mana,
+    targetStance:   npcStanceName,
+    targetSkills:   npcSkills,
+    chatTab:        tab,
+    chatLocationId: locId,
+    acceptedAt:     serverTimestamp(),
+    log:            [],
+  });
+
+  const writes = [];
+  if (duel.messageId) {
+    writes.push(_patchDuelCard(duel.messageId, tab, locId, newSnapshot,
+      `⚔️ ${duel.challengerName} VS ${duel.targetName} — THE DUEL HAS BEGUN!`));
+  } else {
+    writes.push(_postDuelCard(duelId, tab, locId,
+      duel.challengerName, duel.targetName, newSnapshot).then(cardRef => {
+        if (cardRef) updateDoc(duelRef, { messageId: cardRef.id });
+      }));
+  }
+  writes.push(_postEventBubble(tab, locId, duelId,
+    `⚔️ <b>${duel.challengerName}</b> vs <b>${duel.targetName}</b> — the duel has begun! <b>${duel.challengerName}</b> takes the first move.`,
+    '🔔'));
+  writes.push(_postDuelSnapshot(duelId, tab, locId, newSnapshot));
+  await Promise.all(writes);
+
+  window.showToast?.(`⚔️ ${duel.targetName} accepts the challenge!`, '');
 }
 
 function _showChallengeToast(duelId, challengerName) {
@@ -972,21 +1192,22 @@ function _calcDamage(me, opp, skillType = null) {
 
 // ── Build combatant objects ────────────────────────
 function _buildCombatant(d, uid) {
+  // Firestore rejects undefined — every field must have a concrete fallback
   return {
-    uid,
-    name:      d.name,
-    avatarUrl: d.avatarUrl  || '',
-    charClass: d.charClass  || 'Warrior',
-    rank:      d.rank       || 'Wanderer',
-    level:     d.level      || 1,
-    hp:        d.hp         ?? d.hpMax   ?? 100,
-    maxHp:     d.hpMax      ?? d.hp      ?? 100,
-    mana:      d.mana       ?? d.manaMax ?? 50,
-    maxMana:   d.manaMax    ?? d.mana    ?? 50,
-    str:       d.str  ?? 10,
-    dex:       d.dex  ?? 8,
-    int:       d.int  ?? 8,
-    def:       d.def  ?? 5,
+    uid:       uid       || '',
+    name:      d.name    || d.charName || 'Unknown',
+    avatarUrl: d.avatarUrl || '',
+    charClass: d.charClass || 'Warrior',
+    rank:      d.rank      || 'Wanderer',
+    level:     Number(d.level)  || 1,
+    hp:        Number(d.hp    ?? d.hpMax   ?? 100),
+    maxHp:     Number(d.hpMax  ?? d.hp     ?? 100),
+    mana:      Number(d.mana   ?? d.manaMax ?? 50),
+    maxMana:   Number(d.manaMax ?? d.mana   ?? 50),
+    str:       Number(d.str ?? 10),
+    dex:       Number(d.dex ?? 8),
+    int:       Number(d.int ?? 8),
+    def:       Number(d.def ?? 5),
   };
 }
 function _buildFallbackCombatant(uid, name) {
@@ -1016,6 +1237,11 @@ window.acceptChatDuel       = async (id) => {
   document.getElementById('duel-challenge-toast')?.remove();
   await acceptDuelChallenge(id).catch(e => window.showToast?.(e.message, 'error'));
 };
+window.acceptNpcDuel        = async (id, npcUid) => {
+  const toastId = `duel-npc-toast-${id}`;
+  document.getElementById(toastId)?.remove();
+  await acceptNpcDuelChallenge(id, npcUid).catch(e => window.showToast?.(e.message, 'error'));
+};
 window.declineChatDuel      = async (id) => {
   document.getElementById('duel-challenge-toast')?.remove();
   await declineDuelChallenge(id).catch(e => window.showToast?.(e.message, 'error'));
@@ -1027,4 +1253,5 @@ window.clearAllDuelData     = clearAllDuelData;
 window.mountDuelCard        = mountDuelCard;
 window.renderDuelCard       = renderDuelCard;
 window.openDuelStancePicker  = openDuelStancePicker;
-window.closeDuelSkillPicker  = () => { const e = document.getElementById('duel-skill-overlay'); if (e) e.style.display = 'none'; };   
+window.closeDuelSkillPicker  = () => { const e = document.getElementById('duel-skill-overlay'); if (e) e.style.display = 'none'; };
+window.acceptNpcDuelChallenge = acceptNpcDuelChallenge;
