@@ -1102,58 +1102,141 @@ const ALL_ARMOR_NAMES = [
 //  EQUIP MODAL LOGIC
 // ═══════════════════════════════════════════════════
 
+
+// ── Equipment panel renderer ──────────────────────────────────────────────────
+// Renders each equipped slot as its own card: icon, name, grade badge,
+// enchant badge, base stats + enchant bonus.
+// Cross-references window._allInvItems by base name to find enchantLevel/grade.
+function _renderEquipPanel(charData) {
+  const panel = document.getElementById('equip-panel');
+  if (!panel) return;
+
+  const inv = window._allInvItems || [];
+  const gradeColour = { E:'#888', D:'#5dbe85', C:'#5b9fe0', B:'#c9a84c', A:'#e07060', S:'#b88fe0' };
+
+  function resolveGrade(baseName) {
+    const fromInv = inv.find(i => (i.name || '').replace(/\s*\+\d+$/, '') === baseName);
+    if (fromInv?.grade) return fromInv.grade;
+    if (window.ITEMS) {
+      const found = window.ITEMS.find(i => i.name === baseName);
+      if (found?.grade) return found.grade;
+    }
+    return 'E';
+  }
+
+  function makeSlotCard(slotLabel, slotType, itemName) {
+    const isEmpty  = !itemName;
+    const baseName = itemName ? itemName.replace(/\s*\+\d+$/, '') : '';
+
+    // Find best enchanted match from inventory
+    let enchantLevel = 0, invGrade = '';
+    if (baseName) {
+      const matches = inv
+        .filter(i => (i.name || '').replace(/\s*\+\d+$/, '') === baseName && (i.type === 'equipment' || i.type === slotType))
+        .sort((a, b) => (b.enchantLevel || 0) - (a.enchantLevel || 0));
+      if (matches.length) { enchantLevel = matches[0].enchantLevel || 0; invGrade = matches[0].grade || ''; }
+    }
+
+    const grade    = invGrade || (baseName ? resolveGrade(baseName) : 'E');
+    const gradeCol = gradeColour[grade] || '#888';
+    const statsMap = slotType === 'weapon' ? EQUIP_WEAPON_STATS : EQUIP_ARMOR_STATS;
+    const rawStats = baseName ? (statsMap[baseName] || {}) : {};
+    const enchBonus = enchantLevel > 0 ? enchantLevel : 0;
+    const statParts = Object.entries(rawStats).map(([k, v]) => {
+      const label = k.toUpperCase();
+      return enchBonus > 0
+        ? `+${v}<span class="equip-item-enchant-bonus">+${enchBonus}</span> ${label}`
+        : `+${v} ${label}`;
+    });
+    const statsHtml = statParts.length
+      ? statParts.join(' &thinsp;·&thinsp; ')
+      : (isEmpty ? '' : '<span style="color:var(--text-dim);font-style:italic">—</span>');
+
+    const icon = baseName ? getItemIcon(baseName) : '—';
+    const gradeBadge   = !isEmpty ? `<span class="equip-item-grade" style="color:${gradeCol};border-color:${gradeCol}33;background:${gradeCol}11">${grade}</span>` : '';
+    const enchantBadge = enchantLevel > 0 ? `<span class="equip-item-enchant">✨ +${enchantLevel}</span>` : '';
+    const displayName  = isEmpty
+      ? `<span class="equip-item-name equip-item-none">— None —</span>`
+      : `<span class="equip-item-name">${baseName}</span>`;
+
+    return `
+      <div class="equip-item-card${isEmpty ? ' equip-item-empty' : ''}">
+        <div class="equip-item-slot-label">${slotLabel}</div>
+        <div class="equip-item-row">
+          <span class="equip-item-icon">${icon}</span>
+          <div class="equip-item-info">
+            <div class="equip-item-nameline">${displayName}${gradeBadge}${enchantBadge}</div>
+            ${statsHtml ? `<div class="equip-item-stats">${statsHtml}</div>` : ''}
+          </div>
+          <button class="equip-item-change-btn" onclick="openEquipModal('${slotType}')">Change</button>
+        </div>
+      </div>`;
+  }
+
+  panel.innerHTML =
+    makeSlotCard('WEAPON', 'weapon', charData.equipment?.weapon || '') +
+    makeSlotCard('ARMOR',  'armor',  charData.equipment?.armor  || '');
+}
+
 window.openEquipModal = function(type) {
-  // DEBUG: Log inventory and filtering
-  console.log('[EQUIP DEBUG] Inventory:', window._allInvItems);
   const modal = document.getElementById('equip-modal');
-  const list = document.getElementById('equip-modal-list');
+  const list  = document.getElementById('equip-modal-list');
   const title = document.getElementById('equip-modal-title');
-  const btn = document.getElementById('btn-equip-confirm');
+  const btn   = document.getElementById('btn-equip-confirm');
   const error = document.getElementById('equip-modal-error');
   let selected = null;
   error.textContent = '';
   btn.disabled = true;
-  btn.onclick = null;
+  btn.onclick  = null;
 
-  // Filter inventory for correct type
+  // Use getItemType (keyword-based, works on enchanted names like "Iron Dagger +2")
+  // then cross-check the correct slot via ALL_WEAPON_NAMES / ALL_ARMOR_NAMES on base name.
   const inv = window._allInvItems || [];
-  const isWeapon = (item) => {
-    const n = item.name || '';
-    return ["Sword","Dagger","Bow","Axe","Spear","Wand","Rod","Knife","Mace","Staff","Greatsword","Blade","Hammer"].some(k => n.includes(k));
-  };
-  const isArmor = (item) => {
-    const n = item.name || '';
-    return ["Armor","Plate","Vest","Cloak","Coat","Guard"].some(k => n.includes(k));
-  };
-  let filtered = inv.filter(i => i.type === 'equipment' && (type === 'weapon' ? isWeapon(i) : isArmor(i)));
+  const nameList = type === 'weapon' ? ALL_WEAPON_NAMES : ALL_ARMOR_NAMES;
+  const filtered = inv.filter(i => {
+    if (getItemType(i.name) !== 'equipment') return false;
+    const base = (i.name || '').replace(/\s*\+\d+$/, '').trim();
+    return nameList.includes(base);
+  });
 
-  // Modal title
   title.textContent = type === 'weapon' ? 'Equip Weapon' : 'Equip Armor';
 
-  // List items
   if (filtered.length === 0) {
-    list.innerHTML = `<div style="color:var(--text-dim);font-size:0.95rem;padding:18px 0;text-align:center">No ${type === 'weapon' ? 'weapons' : 'armor'} available in inventory.</div>`;
+    list.innerHTML = `<div class="equip-modal-empty">No ${type === 'weapon' ? 'weapons' : 'armor'} in inventory.</div>`;
     btn.disabled = true;
-    return modal.style.display = 'block';
+    modal.style.display = 'flex';
+    return;
   }
-  list.innerHTML = filtered.map((item, idx) =>
-    `<div class="equip-modal-item" data-idx="${idx}" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:10px 8px;cursor:pointer;border-radius:8px;border:1px solid transparent;margin-bottom:6px;transition:background 0.15s">
-      <span style="font-size:1.2rem;width:2.2em;text-align:center">${getItemIcon(item.name)}</span>
-      <span style="flex:1;font-size:1.01rem">${item.name}</span>
-      <span style="color:var(--gold-dim);font-size:0.9em">x${item.qty||1}</span>
-    </div>`
-  ).join('');
+
+  list.innerHTML = filtered.map((item, idx) => {
+    const baseName = (item.name || '').replace(/\s*\+\d+$/, '');
+    // enchantLevel may be a dedicated field OR baked into the name as "+N"
+    const nameMatch  = (item.name || '').match(/\+(\d+)$/);
+    const enchantLevel = item.enchantLevel || (nameMatch ? parseInt(nameMatch[1]) : 0);
+    const enchantBadge = enchantLevel > 0
+      ? `<span class="equip-modal-enchant-badge">✨ +${enchantLevel}</span>`
+      : '';
+    const gradeColor = { E:'#8a8a8a', D:'#4fc870', C:'#5b9fe0', B:'#c9a84c', A:'#b07fff', S:'#ff6b6b' }[item.grade] || 'var(--text-dim)';
+    const gradeBadge = item.grade
+      ? `<span class="equip-modal-grade-badge" style="color:${gradeColor};border-color:${gradeColor}44">${item.grade}</span>`
+      : '';
+    const qty = (item.qty && item.qty > 1) ? `<span class="equip-modal-qty">×${item.qty}</span>` : '';
+    return `<div class="equip-modal-item" data-idx="${idx}" tabindex="0">
+      <span class="equip-modal-icon">${getItemIcon(baseName)}</span>
+      <span class="equip-modal-name">${baseName}${gradeBadge}${enchantBadge}</span>
+      ${qty}
+    </div>`;
+  }).join('');
 
   // Selection logic
   Array.from(list.children).forEach((el, idx) => {
-    el.onclick = () => select(idx);
-    el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') select(idx); };
+    el.onclick    = () => select(idx);
+    el.onkeydown  = (e) => { if (e.key === 'Enter' || e.key === ' ') select(idx); };
   });
   function select(idx) {
     selected = filtered[idx];
     Array.from(list.children).forEach((el, i) => {
-      el.style.background = i === idx ? 'rgba(201,168,76,0.08)' : '';
-      el.style.borderColor = i === idx ? 'var(--gold-dim)' : 'transparent';
+      el.classList.toggle('equip-modal-item-selected', i === idx);
     });
     btn.disabled = false;
   }
@@ -1163,27 +1246,33 @@ window.openEquipModal = function(type) {
     btn.disabled = true;
     error.textContent = '';
     try {
-      // Update equipped item in Firestore
-      const charRef = doc(db, "characters", _uid);
-      const field = type === 'weapon' ? 'equipment.weapon' : 'equipment.armor';
-      await updateDoc(charRef, { [field]: selected.name });
-      // Update local display
-      set(type === 'weapon' ? 'equip-weapon' : 'equip-armor', selected.name);
+      const charRef   = doc(db, "characters", _uid);
+      const field     = type === 'weapon' ? 'equipment.weapon' : 'equipment.armor';
+      const storeName = (selected.name || '').replace(/\s*\+\d+$/, '').trim();
+      await updateDoc(charRef, { [field]: storeName });
+      if (window._charData) {
+        if (!window._charData.equipment) window._charData.equipment = {};
+        window._charData.equipment[type] = storeName;
+      }
+      _renderEquipPanel(window._charData || {});
       closeEquipModal();
-      showToast(`${selected.name} equipped!`, 'success');
+      const nameMatch    = (selected.name || '').match(/\+(\d+)$/);
+      const lvl          = selected.enchantLevel || (nameMatch ? parseInt(nameMatch[1]) : 0);
+      const displayName  = lvl ? `${storeName} +${lvl}` : storeName;
+      showToast(`${displayName} equipped!`, 'success');
     } catch(e) {
       error.textContent = 'Failed to equip. Try again.';
       btn.disabled = false;
     }
   };
 
-  modal.style.display = 'block';
-  // Trap focus for accessibility
-  setTimeout(() => { list.children[0]?.focus(); }, 100);
+  modal.style.display = 'flex';
+  setTimeout(() => list.querySelector('.equip-modal-item')?.focus(), 80);
 };
 
 window.closeEquipModal = function() {
-  document.getElementById('equip-modal').style.display = 'none';
+  const m = document.getElementById('equip-modal');
+  if (m) m.style.display = 'none';
 };
 // ═══════════════════════════════════════════════════
 //  FORGE OF LEGENDS — Dashboard Logic  (Phase A + B)
@@ -2602,6 +2691,7 @@ export function initDashboard() {
       checkTravelStatus();
       renderActivityFeed();
       loadFirestoreBosses();
+      window.initPubSystem?.(_uid, _charData);
       hideLoading();
     } catch (err) {
       console.error(err);
@@ -2735,8 +2825,7 @@ function populateDashboard(c) {
   set("s-xp",    `${c.xp??0} / ${c.xpMax??100}`);
   set("s-faith", c.faithLevel ?? 0);
   set("s-rep",   c.reputation ?? 0);
-  set("equip-weapon", c.equipment?.weapon || "— None —");
-  set("equip-armor",  c.equipment?.armor  || "— None —");
+  _renderEquipPanel(c);
 
   // Stat allocation + equipment bonuses
   const stats = c.stats || { str:10, int:10, def:10, dex:10 };
@@ -6708,13 +6797,19 @@ window.openEquipModal = function(type) {
 
   // Filter inventory for correct type using explicit name lists
   const inv = window._allInvItems || [];
-  let filtered = inv.filter(i =>
-    (type === 'weapon' ? i.type === 'weapon' && ALL_WEAPON_NAMES.includes(i.name)
-                      : i.type === 'armor'  && ALL_ARMOR_NAMES.includes(i.name))
-  );
-  console.log(`[EQUIP DEBUG] Filtered ${type}s:`, filtered);
-  // Sort alphabetically by name
-  filtered = filtered.sort((a, b) => a.name.localeCompare(b.name));
+  // Strip +N suffix before matching so enchanted items (e.g. "Iron Dagger +2") are included
+  let filtered = inv.filter(i => {
+    const base = (i.name || '').replace(/\s*\+\d+$/, '');
+    return type === 'weapon'
+      ? (i.type === 'weapon' || i.type === 'equipment') && ALL_WEAPON_NAMES.includes(base)
+      : (i.type === 'armor'  || i.type === 'equipment') && ALL_ARMOR_NAMES.includes(base);
+  });
+  // Sort: by enchant level desc (enchanted first), then alphabetically
+  filtered = filtered.sort((a, b) => {
+    const ea = a.enchantLevel || 0, eb = b.enchantLevel || 0;
+    if (eb !== ea) return eb - ea;
+    return (a.name || '').localeCompare(b.name || '');
+  });
 
   // Modal title
   title.textContent = type === 'weapon' ? 'Equip Weapon' : 'Equip Armor';
@@ -6725,13 +6820,20 @@ window.openEquipModal = function(type) {
     btn.disabled = true;
     return modal.style.display = 'block';
   }
-  list.innerHTML = filtered.map((item, idx) =>
-    `<div class="equip-modal-item" data-idx="${idx}" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:10px 8px;cursor:pointer;border-radius:8px;border:1px solid transparent;margin-bottom:6px;transition:background 0.15s">
-      <span style="font-size:1.2rem;width:2.2em;text-align:center">${getItemIcon(item.name)}</span>
-      <span style="flex:1;font-size:1.01rem">${item.name}</span>
-      <span style="color:var(--gold-dim);font-size:0.9em">x${item.qty||1}</span>
-    </div>`
-  ).join('');
+  list.innerHTML = filtered.map((item, idx) => {
+    const baseName     = (item.name || '').replace(/\s*\+\d+$/, '');
+    const enchantLevel = item.enchantLevel || 0;
+    const enchantBadge = enchantLevel > 0
+      ? `<span style="font-family:var(--font-mono);font-size:0.58rem;padding:1px 6px;border-radius:5px;background:rgba(201,168,76,0.12);border:1px solid rgba(201,168,76,0.3);color:var(--gold);margin-left:4px">✨ +${enchantLevel}</span>`
+      : '';
+    const gradeBadge = item.grade
+      ? `<span style="font-family:var(--font-mono);font-size:0.55rem;padding:1px 5px;border-radius:5px;margin-left:4px;background:rgba(128,128,128,0.1);color:var(--text-dim)">${item.grade}</span>`
+      : '';
+    return `<div class="equip-modal-item" data-idx="${idx}" tabindex="0" style="display:flex;align-items:center;gap:10px;padding:10px 8px;cursor:pointer;border-radius:8px;border:1px solid transparent;margin-bottom:6px;transition:background 0.15s">
+      <span style="font-size:1.2rem;width:2.2em;text-align:center;flex-shrink:0">${getItemIcon(baseName)}</span>
+      <span style="flex:1;font-size:0.92rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${baseName}${gradeBadge}${enchantBadge}</span>
+    </div>`;
+  }).join('');
 
   // Selection logic
   Array.from(list.children).forEach((el, idx) => {
@@ -6752,12 +6854,13 @@ window.openEquipModal = function(type) {
     btn.disabled = true;
     error.textContent = '';
     try {
-      // Update equipped item in Firestore
+      // Update equipped item in Firestore — store base name so panel can cross-ref enchant from inventory
       const charRef = doc(db, "characters", _uid);
       const field = type === 'weapon' ? 'equipment.weapon' : 'equipment.armor';
-      await updateDoc(charRef, { [field]: selected.name });
+      const storeName = (selected.name || '').replace(/\s*\+\d+$/, '');
+      await updateDoc(charRef, { [field]: storeName });
       // Update local display
-      set(type === 'weapon' ? 'equip-weapon' : 'equip-armor', selected.name);
+      if (window._charData) { if (!window._charData.equipment) window._charData.equipment = {}; window._charData.equipment[type] = storeName; } _renderEquipPanel(window._charData || {});
       closeEquipModal();
       showToast(`${selected.name} equipped!`, 'success');
     } catch(e) {
@@ -11816,6 +11919,7 @@ async function refreshCharData() {
       _syncAllDisplays(_charData);
       window.renderInventory(window._allInvItems);
       updateZoneLocks();
+      window.updatePubCharData?.(_charData);
       // If companion panel is active, re-render it
       const companionPanel = document.getElementById('panel-companion');
       if (companionPanel && companionPanel.classList.contains('active')) {

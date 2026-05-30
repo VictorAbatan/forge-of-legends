@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="../css/dashboard.css"/>
 <link rel="stylesheet" href="../css/duel.css"/>
 <link rel="stylesheet" href="../css/trade.css"/>
+<link rel="stylesheet" href="../css/pub.css"/>
 <style>
 /* ── Mobile touch: eliminate 300ms double-tap delay on all buttons ─────────── */
 button,
@@ -85,7 +86,13 @@ button,
 /* ── Modal z-index stack ─────────────────────────────────────────────────────
    Must sit above panel content but below encounter popup (9999) / stance (10000). */
 .confirm-modal, .sell-modal, .avatar-modal,
-.travel-modal, .crafting-modal, .equip-modal {
+.travel-modal, .crafting-modal {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 800 !important;
+  pointer-events: auto !important;
+}
+.equip-modal {
   position: fixed !important;
   inset: 0 !important;
   z-index: 800 !important;
@@ -346,6 +353,7 @@ button,
       <div class="nav-item"        data-panel="market"    onclick="switchPanel('market')">     <span class="nav-icon">🏪</span> Market</div>
       <div class="nav-item"        data-panel="faction"   onclick="switchPanel('faction')">    <span class="nav-icon">🛡️</span> Faction</div>
       <div class="nav-item"        data-panel="companion" onclick="switchPanel('companion')">  <span class="nav-icon">🐾</span> Companion</div>
+      <div class="nav-item"        data-panel="pub"       onclick="switchPanel('pub')">        <span class="nav-icon">🍺</span> The Pub</div>
       <!-- COMPANION PANEL moved to main-content below -->
       <div class="nav-section-label" style="margin-top:8px">ACCOUNT</div>
       <a href="deity-dashboard.html" class="nav-item" id="btn-deity-view" style="display:none;text-decoration:none;color:inherit"><span class="nav-icon">⚡</span> Deity View</a>
@@ -371,6 +379,11 @@ button,
         <p>Magical pets that grant unique bonuses. Unlocked at Follower rank.</p>
       </div>
       <div id="companion-panel-container"></div>
+    </div>
+
+    <!-- THE PUB PANEL -->
+    <div class="panel" id="panel-pub">
+      <!-- Rendered by pub.js → window.renderPubPanel() -->
     </div>
 
     <!-- Notification Bell (desktop) -->
@@ -489,35 +502,19 @@ button,
           </div>
           <div class="card" style="margin-bottom:12px">
             <div class="card-title">EQUIPMENT</div>
-            <div class="equip-slots">
-              <div class="equip-slot">
-                <div class="equip-slot-label">Weapon</div>
-                <div style="display:flex;align-items:center;gap:8px;justify-content:center">
-                  <div class="equip-slot-value" id="equip-weapon">— None —</div>
-                  <button class="btn-secondary" style="font-size:0.65rem;padding:4px 10px;" onclick="openEquipModal('weapon')">Change</button>
-                </div>
-              </div>
-              <div class="equip-slot">
-                <div class="equip-slot-label">Armor</div>
-                <div style="display:flex;align-items:center;gap:8px;justify-content:center">
-                  <div class="equip-slot-value" id="equip-armor">— None —</div>
-                  <button class="btn-secondary" style="font-size:0.65rem;padding:4px 10px;" onclick="openEquipModal('armor')">Change</button>
-                </div>
-              </div>
+            <!-- Rendered by _renderEquipPanel(c) in dashboard.js -->
+            <div id="equip-panel" class="equip-panel"></div>
             <!-- EQUIP MODAL -->
             <div class="equip-modal" id="equip-modal" style="display:none">
               <div class="equip-modal-box">
                 <div class="equip-modal-title" id="equip-modal-title">Equip Item</div>
-                <div class="equip-modal-list" id="equip-modal-list">
-                  <!-- Items will be injected here -->
-                </div>
+                <div class="equip-modal-list" id="equip-modal-list"></div>
                 <div class="equip-modal-actions">
                   <button class="btn-primary" id="btn-equip-confirm" disabled>Equip</button>
                   <button class="btn-secondary" onclick="closeEquipModal()">Cancel</button>
                 </div>
                 <div class="form-error" id="equip-modal-error" style="margin-top:8px"></div>
               </div>
-            </div>
             </div>
           </div>
           <div class="card">
@@ -1559,6 +1556,7 @@ button,
     if (name === 'market')  window._loadPlayerListings?.();
     if (name === 'map')     { positionPlayerPin(); initMapInteraction(); }
     if (name === 'battle')  window._refreshFarmingZones?.();
+    if (name === 'pub')     window.renderPubPanel?.();
     window._onPanelSwitch?.(name);
     closeNav();
   }
@@ -2366,6 +2364,7 @@ document.addEventListener('DOMContentLoaded', function() {
   import '../js/map.js';
   import '../js/duel.js';
   import '../js/trade.js';
+  import '../js/pub.js';
   // Small delay ensures the regular <script> block above has fully executed
   // and window.showToast / window.renderInventory are defined before dashboard.js runs
   setTimeout(() => initDashboard(), 0);

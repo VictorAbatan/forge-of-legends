@@ -49,6 +49,7 @@ const CONTINENTS = {
     capitalImage:"frostspire_capital",
     capitalPin: { x:53.5, y:57.2 },  // pin on continent map pointing to Ice Castle / Frostspire city
     image:"frostspire", wildlandsId:"frost_wildlands",
+    pubPin: { x:26.0, y:52.0 },  // pub pin — near Living Quarters, Frostspire capital
     travelCost:100, travelTime:300,
     // Frostspire pins: settlements=1-4, wildlands=5, player=6
     settlements:[
@@ -87,6 +88,7 @@ const CONTINENTS = {
     capitalImage:"solmere_capital",
     capitalPin: { x:52.0, y:46.5 },  // pin on continent map pointing to Grand Castle / Solmere city
     image:"solmere", wildlandsId:"verdantis_wildlands",
+    pubPin: { x:25.0, y:55.0 },  // pub pin — near Living Quarters, Solmere capital
     travelCost:100, travelTime:300,
     // Solmere pins: player=1, settlements=2-5, wildlands=6
     settlements:[
@@ -663,6 +665,23 @@ function renderContinent(cid) {
         </div>`;
       el.querySelector(".lmap-explore-dot").addEventListener("click",e=>{ e.stopPropagation(); _openTT(el, e); });
       el.querySelector('[data-action="wildlands"]')?.addEventListener("click",e=>{ e.stopPropagation(); _closeTT(); _mapBreadcrumbs.push({id:cid,label:cont.name}); renderWildlands(cid); });
+    } else if(p._type==="pub") {
+      const atCap=_isAtCapital(cid);
+      const pubDot=atCap
+        ?'background:#c9784c;box-shadow:0 0 0 4px rgba(201,120,76,0.3),0 0 16px rgba(201,120,76,0.8);animation:lmap-pulse-player 1.8s infinite'
+        :'background:#8b5030;box-shadow:0 0 0 3px rgba(139,80,48,0.3),0 0 10px rgba(201,120,76,0.4)';
+      el.innerHTML=`<div class="lmap-loc-pin-dot" style="${pubDot};width:11px;height:11px;border-radius:50%;"></div>
+        <div class="lmap-loc-pin-label" style="color:#c9784c">🍺 Pub</div>
+        <div class="lmap-wpin-tooltip">
+          <div class="lmap-wpin-tt-name">🍺 The Pub</div>
+          <div style="font-size:10px;color:#aaa;margin:4px 0;">Games · Gambling · Glory</div>
+          ${atCap
+            ?`<div class="lmap-wpin-tt-here">✓ You are here — enter anytime</div>
+               <button class="lmap-wpin-travel-btn" data-action="pub" style="background:rgba(201,120,76,0.15);border-color:rgba(201,120,76,0.5);color:#c9784c;margin-top:6px;">🍺 ENTER PUB →</button>`
+            :`<div style="font-size:10px;color:#777;margin-top:4px;">Travel to the capital first.</div>`}
+        </div>`;
+      el.querySelector(".lmap-loc-pin-dot").addEventListener("click",e=>{ e.stopPropagation(); _openTT(el, e); });
+      el.querySelector('[data-action="pub"]')?.addEventListener("click",e=>{ e.stopPropagation(); _closeTT(); window._openPubPanel?.(); });
     } else {
       // Settlement pin
       const atS=_isAtLocation(p.id);
@@ -848,6 +867,7 @@ function renderCapital(cid) {
           <div class="lmap-info-item"><span class="lmap-info-dot" style="background:#5b9fe0;"></span><span class="lmap-info-name">🧑 NPCs — vendors, quest givers, guild masters</span></div>
           <div class="lmap-info-item"><span class="lmap-info-dot" style="background:#c9a84c;"></span><span class="lmap-info-name">🏪 Market — buy and sell with other players</span></div>
           <div class="lmap-info-item"><span class="lmap-info-dot" style="background:#c44dff;"></span><span class="lmap-info-name">✦ Shrine — worship your deity here</span></div>
+          <div class="lmap-info-item"><span class="lmap-info-dot" style="background:#c9784c;"></span><span class="lmap-info-name">🍺 The Pub — games, gambling &amp; glory</span></div>
         </div>
         <div class="lmap-sidebar-footer">
           ${!here
@@ -861,20 +881,50 @@ function renderCapital(cid) {
   _initZoomPan(document.getElementById("lmap-img-side"), document.getElementById("lmap-zoom-wrap"));
   c.querySelector("#lmap-capital-travel")?.addEventListener("click",()=>window.openTravelModal?.(cont.capital||cont.name,cont.label.split("·")[0].trim(),cont.travelCost,cont.travelTime));
 
-  // Player pin if here
-  if(here && cont.capitalPlayerPin) {
-    const imgEl=document.getElementById("lmap-loc-img");
-    const placePin=()=>{
-      const pinsEl=document.createElement("div");
-      pinsEl.style.cssText="position:absolute;inset:0;pointer-events:none;z-index:10;";
-      document.getElementById("lmap-zoom-wrap").appendChild(pinsEl);
-      const dot=document.createElement("div");
-      dot.className="lmap-player-dot";
-      dot.style.cssText=`position:absolute;left:${cont.capitalPlayerPin.x}%;top:${cont.capitalPlayerPin.y}%;transform:translate(-50%,-50%);`;
+  const _capImg    = document.getElementById("lmap-loc-img");
+  const _capWrap   = document.getElementById("lmap-zoom-wrap");
+
+  function _placeCapitalPins() {
+    _capWrap.querySelectorAll(".lmap-capital-pins").forEach(el=>el.remove());
+    const pinsEl = document.createElement("div");
+    pinsEl.className = "lmap-capital-pins";
+    pinsEl.style.cssText = "position:absolute;inset:0;pointer-events:none;z-index:10;overflow:visible;";
+    _capWrap.appendChild(pinsEl);
+
+    // Player dot
+    if(here && cont.capitalPlayerPin) {
+      const dot = document.createElement("div");
+      dot.className = "lmap-player-dot";
+      dot.style.cssText = `position:absolute;left:${cont.capitalPlayerPin.x}%;top:${cont.capitalPlayerPin.y}%;transform:translate(-50%,-50%);`;
       pinsEl.appendChild(dot);
-    };
-    imgEl.complete ? placePin() : imgEl.addEventListener("load", placePin);
+    }
+
+    // Pub pin
+    if(cont.pubPin) {
+      const pubEl = document.createElement("div");
+      pubEl.className = "lmap-loc-pin";
+      pubEl.style.cssText = `position:absolute;left:${cont.pubPin.x}%;top:${cont.pubPin.y}%;transform:translate(-50%,-50%);pointer-events:all;overflow:visible;`;
+      const pubDot = here
+        ? "background:#c9784c;box-shadow:0 0 0 4px rgba(201,120,76,0.3),0 0 16px rgba(201,120,76,0.8);animation:lmap-pulse-player 1.8s infinite"
+        : "background:#8b5030;box-shadow:0 0 0 3px rgba(139,80,48,0.3),0 0 10px rgba(201,120,76,0.4)";
+      pubEl.innerHTML =
+        `<div class="lmap-loc-pin-dot" style="${pubDot};width:12px;height:12px;border-radius:50%;cursor:pointer;"></div>` +
+        `<div class="lmap-loc-pin-label" style="color:#c9784c;pointer-events:none;">🍺 Pub</div>` +
+        `<div class="lmap-wpin-tooltip">` +
+          `<div class="lmap-wpin-tt-name">🍺 The Pub</div>` +
+          `<div style="font-size:10px;color:#aaa;margin:4px 0;">Games · Gambling · Glory</div>` +
+          (here
+            ? `<div class="lmap-wpin-tt-here">✓ You are here — enter anytime</div>` +
+              `<button class="lmap-wpin-travel-btn" data-action="pub" style="background:rgba(201,120,76,0.15);border-color:rgba(201,120,76,0.5);color:#c9784c;margin-top:6px;">🍺 ENTER PUB →</button>`
+            : `<div style="font-size:10px;color:#777;margin-top:6px;">Travel to ${cont.capital||cont.name} first.</div>`) +
+        `</div>`;
+      pubEl.querySelector(".lmap-loc-pin-dot").addEventListener("click", e=>{ e.stopPropagation(); _openTT(pubEl, e); });
+      pubEl.querySelector('[data-action="pub"]')?.addEventListener("click", e=>{ e.stopPropagation(); _closeTT(); window._openPubPanel?.(); });
+      pinsEl.appendChild(pubEl);
+    }
   }
+
+  _capImg.complete ? _placeCapitalPins() : _capImg.addEventListener("load", _placeCapitalPins);
 }
 
 function renderSettlement(sid, cid) {
