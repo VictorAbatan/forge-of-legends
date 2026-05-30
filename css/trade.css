@@ -48,8 +48,8 @@
   text-transform: uppercase;
   margin-bottom: 4px;
 }
-.trt-msg { font-size: 0.9rem; color: #e8dcc8; margin-bottom: 4px; }
-.trt-hint { font-size: 0.72rem; color: #7a6e58; margin-bottom: 10px; font-style: italic; }
+.trt-msg { font-size: 0.9rem; color: #f0e8d0; font-weight: 600; margin-bottom: 4px; text-shadow: 0 1px 4px rgba(0,0,0,0.95); }
+.trt-hint { font-size: 0.72rem; color: #b8a878; margin-bottom: 10px; font-style: italic; text-shadow: 0 1px 4px rgba(0,0,0,0.95); }
 .trt-btns { display: flex; gap: 8px; }
 .trt-close {
   background: none; border: none; color: #7a6e58;
@@ -110,8 +110,10 @@
 }
 .trade-modal-participants {
   font-size: 0.82rem;
-  color: #9a8e72;
+  color: #c8b888;
+  font-weight: 600;
   flex: 1;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.9);
 }
 .trade-modal-close {
   background: transparent;
@@ -161,11 +163,12 @@
   flex: 1;
 }
 .trade-offer-empty {
-  color: #5a5040;
+  color: #8a7a60;
   font-size: 0.8rem;
   font-style: italic;
   text-align: center;
   padding: 20px 0;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.95);
 }
 .trade-offer-item {
   display: flex;
@@ -176,11 +179,13 @@
   border-radius: 6px;
   padding: 6px 10px;
   font-size: 0.82rem;
-  color: #e8dcc8;
+  color: #ffffff;
+  font-weight: 600;
+  text-shadow: 0 2px 6px rgba(0,0,0,1), 0 1px 2px rgba(0,0,0,1);
 }
 .trade-item-icon { font-size: 1.1rem; flex-shrink: 0; }
 .trade-item-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.trade-item-qty  { color: #c9a84c; font-size: 0.78rem; flex-shrink: 0; }
+.trade-item-qty  { color: #f0c84a; font-size: 0.78rem; flex-shrink: 0; font-weight: 700; }
 .trade-remove-item {
   background: none; border: none; color: #7a5050;
   font-size: 0.8rem; cursor: pointer; padding: 2px 4px; flex-shrink: 0;
@@ -197,19 +202,21 @@
   border-radius: 6px;
   padding: 6px 10px;
 }
-.trade-gold-label { font-size: 0.8rem; color: #c9a84c; flex-shrink: 0; }
+.trade-gold-label { font-size: 0.8rem; color: #f0c84a; flex-shrink: 0; font-weight: 700; text-shadow: 0 1px 4px rgba(0,0,0,0.95); }
 .trade-gold-input {
   flex: 1;
   background: transparent;
   border: none;
   outline: none;
-  color: #e8dcc8;
+  color: #f0e8d0;
   font-size: 0.85rem;
+  font-weight: 600;
   min-width: 0;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.95);
 }
 .trade-gold-input::-webkit-inner-spin-button,
 .trade-gold-input::-webkit-outer-spin-button { opacity: 0.3; }
-.trade-gold-value { flex: 1; font-size: 0.85rem; color: #e8dcc8; }
+.trade-gold-value { flex: 1; font-size: 0.85rem; color: #f0e8d0; font-weight: 600; text-shadow: 0 1px 4px rgba(0,0,0,0.95); }
 
 /* Buttons */
 .trade-add-btn {
@@ -277,20 +284,23 @@
 .trade-status-bar {
   padding: 10px 20px;
   font-size: 0.8rem;
-  color: #9a8e72;
+  color: #c8b888;
+  font-weight: 600;
   text-align: center;
   border-top: 1px solid #c9a84c18;
-  background: rgba(0,0,0,0.2);
+  background: rgba(0,0,0,0.4);
+  text-shadow: 0 1px 4px rgba(0,0,0,0.95);
 }
-.trade-status-ready    { color: #c9a84c; }
-.trade-status-one      { color: #7ecfa0; }
-.trade-status-complete { color: #7ecfa0; background: rgba(76,175,138,0.08); }
-.trade-status-cancelled{ color: #c07070; background: rgba(180,60,60,0.08); }
+.trade-status-ready    { color: #f0c84a; font-weight: 700; }
+.trade-status-one      { color: #7ecfa0; font-weight: 700; }
+.trade-status-complete { color: #7ecfa0; background: rgba(76,175,138,0.15); font-weight: 700; }
+.trade-status-cancelled{ color: #e07070; background: rgba(180,60,60,0.15); font-weight: 700; }
 
 .trade-spectator-note {
   padding: 6px 20px;
   font-size: 0.75rem;
-  color: #6a8ea0;
+  color: #7ab8d0;
+  font-weight: 600;
   text-align: center;
   font-style: italic;
   border-top: 1px solid #c9a84c12;
@@ -357,15 +367,17 @@
   border-color: #c9a84c66;
 }
 .trade-picker-icon { font-size: 1.5rem; }
-.trade-picker-name { font-size: 0.68rem; color: #e8dcc8; text-align: center; line-height: 1.2; }
-.trade-picker-qty  { font-size: 0.65rem; color: #c9a84c; }
+.trade-picker-name { font-size: 0.68rem; color: #f0e8d0; font-weight: 600; text-align: center; line-height: 1.2; text-shadow: 0 1px 3px rgba(0,0,0,0.9); }
+.trade-picker-qty  { font-size: 0.65rem; color: #f0c84a; font-weight: 700; }
 .trade-picker-empty {
   grid-column: 1/-1; text-align: center;
-  color: #5a5040; font-style: italic; padding: 24px 0; font-size: 0.85rem;
+  color: #8a7a60; font-style: italic; padding: 24px 0; font-size: 0.85rem;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.9);
 }
 .trade-picker-qty-prompt {
   grid-column: 1/-1; text-align: center;
-  color: #e8dcc8; padding: 20px 0;
+  color: #f0e8d0; font-weight: 600; padding: 20px 0;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.9);
 }
 .trade-qty-btn {
   background: rgba(201,168,76,0.1); border: 1px solid #c9a84c44;
@@ -381,15 +393,16 @@
   padding: 0 4px;
 }
 .trade-card {
-  background: linear-gradient(135deg, #1c1810 0%, #15130f 100%);
-  border: 1px solid #c9a84c44;
+  background: rgba(15, 12, 8, 0.96);
+  border: 1px solid #c9a84c66;
   border-radius: 12px;
   overflow: hidden;
   max-width: 520px;
   margin: 0 auto;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.85);
 }
-.trade-card.complete { border-color: #4caf8a55; }
-.trade-card.cancelled { border-color: #c0707044; opacity: 0.7; }
+.trade-card.complete { border-color: #4caf8a88; background: rgba(18,28,20,0.95); }
+.trade-card.cancelled { border-color: #c0707088; background: rgba(22,12,12,0.95); }
 
 .trade-card-header {
   display: flex;
@@ -409,16 +422,19 @@
 .trade-card-status {
   margin-left: auto;
   font-size: 0.72rem;
-  color: #9a8e72;
+  color: #c8b888;
+  font-weight: 700;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.9);
 }
 .trade-card.complete  .trade-card-status { color: #7ecfa0; }
-.trade-card.cancelled .trade-card-status { color: #c07070; }
+.trade-card.cancelled .trade-card-status { color: #e07070; }
 
 .trade-card-body {
   display: flex;
   align-items: stretch;
   padding: 12px 14px;
   gap: 0;
+  background: rgba(8, 6, 4, 0.6);
 }
 .trade-card-side {
   flex: 1;
@@ -430,8 +446,9 @@
 .trade-card-player {
   font-size: 0.78rem;
   font-weight: 700;
-  color: #c9a84c;
+  color: #f0c84a;
   margin-bottom: 4px;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.9);
 }
 .trade-card-items { display: flex; flex-direction: column; gap: 4px; }
 .tc-item {
@@ -439,10 +456,12 @@
   align-items: center;
   gap: 6px;
   font-size: 0.78rem;
-  color: #c8bea8;
+  color: #ffffff;
+  font-weight: 600;
+  text-shadow: 0 2px 6px rgba(0,0,0,1), 0 1px 2px rgba(0,0,0,1);
 }
-.tc-qty { color: #c9a84c; font-size: 0.72rem; }
-.tc-empty { font-size: 0.75rem; color: #5a5040; font-style: italic; }
+.tc-qty { color: #f0c84a; font-size: 0.72rem; font-weight: 700; }
+.tc-empty { font-size: 0.75rem; color: #8a7a60; font-style: italic; text-shadow: 0 1px 3px rgba(0,0,0,0.9); }
 
 .trade-card-vs {
   padding: 0 12px;
@@ -478,4 +497,91 @@
   .trade-divider-line { width: auto; height: 1px; flex: 1; background: linear-gradient(to right, transparent, #c9a84c44, transparent); }
   .trade-vs-badge { width: 28px; height: 28px; font-size: 1rem; }
   .trade-picker-grid { grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); }
+}
+/* ── Trade system messages in chat ─────────────────── */
+/* Cancelled trade */
+.chat-msg.system-trade-msg {
+  justify-content: center;
+}
+.chat-msg.system-trade-msg .chat-msg-body {
+  background: rgba(201,168,76,0.07);
+  border: 1px solid rgba(201,168,76,0.22);
+  border-radius: 10px;
+  padding: 7px 16px;
+  text-align: center;
+  max-width: 100%;
+}
+.system-trade-text {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  /* Solid bright color — readable on any dark or map background */
+  color: #e8c97a;
+  text-shadow:
+    0 1px 6px rgba(0,0,0,0.95),
+    0 0px 2px rgba(0,0,0,1);
+}
+
+/* Cancelled variant — pinkish-red, still readable everywhere */
+.system-trade-text.cancelled,
+.system-trade-text[data-type="cancelled"] {
+  color: #f08080;
+  text-shadow:
+    0 1px 6px rgba(0,0,0,0.95),
+    0 0px 2px rgba(0,0,0,1);
+}
+
+/* Complete variant — green, still readable everywhere */
+.system-trade-text.complete,
+.system-trade-text[data-type="complete"] {
+  color: #7ecfa0;
+  text-shadow:
+    0 1px 6px rgba(0,0,0,0.95),
+    0 0px 2px rgba(0,0,0,1);
+}
+
+/* Fallback: if trade system msgs reuse the duel class, override here too */
+.chat-msg.system-duel-msg .system-duel-text[data-trade="cancelled"] {
+  color: #f08080;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.95), 0 0px 2px rgba(0,0,0,1);
+}
+.chat-msg.system-duel-msg .system-duel-text[data-trade="complete"] {
+  color: #7ecfa0;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.95), 0 0px 2px rgba(0,0,0,1);
+}
+
+/* ── Trade system messages in chat ────────────────────────────────────
+   The chat renderer should apply .system-trade-msg on the wrapper and
+   .system-trade-text on the text span, with data-subtype="cancelled"
+   or data-subtype="complete". Falls back to emoji-prefix detection.
+   ─────────────────────────────────────────────────────────────────── */
+.chat-msg.system-trade-msg {
+  justify-content: center;
+}
+.chat-msg.system-trade-msg .chat-msg-body {
+  background: rgba(201,168,76,0.06);
+  border: 1px solid rgba(201,168,76,0.22);
+  border-radius: 10px;
+  padding: 7px 16px;
+  text-align: center;
+  max-width: 100%;
+}
+.system-trade-text {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #e8c97a;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,1);
+}
+/* Cancelled — red */
+.system-trade-text[data-subtype="cancelled"],
+.system-trade-text.cancelled {
+  color: #f08080;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,1);
+}
+/* Complete — green */
+.system-trade-text[data-subtype="complete"],
+.system-trade-text.complete {
+  color: #7ecfa0;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,1);
 }

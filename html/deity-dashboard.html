@@ -508,8 +508,17 @@
     <!-- BESTOW -->
     <div class="deity-panel" id="deity-panel-bestow">
       <div class="panel-header"><h2>BESTOW INGREDIENTS</h2><p>Grant advancement ingredients to your worshippers</p></div>
-      <div class="bestow-warning">⚠️ You are a god — bestow fairly and sparingly. To bestow, open a worshipper&apos;s profile from the Worshippers tab and click <b>✶ Bestow Ingredient</b>.</div>
-      <div style="margin-top:24px">
+      <div class="bestow-warning">⚠️ You are a god — bestow fairly and sparingly.</div>
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-title">SELECT WORSHIPPER</div>
+        <div style="display:flex;gap:10px;align-items:center">
+          <select id="bestow-panel-target" class="field-input" style="flex:1;cursor:pointer">
+            <option value="">Choose a worshipper...</option>
+          </select>
+          <button class="btn-primary" style="width:auto;padding:10px 22px;white-space:nowrap" onclick="(function(){var sel=document.getElementById('bestow-panel-target');if(!sel.value){window.showToast('Select a worshipper first.','');return;}var name=sel.options[sel.selectedIndex].text;window._openModalForWorshipper('bestow',sel.value,name);})()">✶ Bestow Ingredient</button>
+        </div>
+      </div>
+      <div style="margin-top:8px">
         <div class="card-title" style="font-family:var(--ff-display);font-size:0.75rem;letter-spacing:0.12em;color:var(--gold);margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--border)">BESTOW HISTORY (THIS SESSION)</div>
         <div id="bestow-log"><p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">No bestowals yet.</p></div>
       </div>
@@ -626,13 +635,36 @@
     <!-- NPC MANAGER -->
     <div class="deity-panel" id="deity-panel-npcs">
       <div class="panel-header"><h2>NPC MANAGER</h2><p>Create and control NPCs across all locations. Set their auto-responses and speak through them in chat.</p></div>
-      <div style="margin-bottom:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+
+      <!-- NPC sub-tabs -->
+      <div class="dchat-tabs" id="npc-tabs" style="margin-bottom:16px">
+        <button class="dchat-tab" id="npc-tab-all"      onclick="window._switchNpcTab?.('all')">📋 All NPCs</button>
+        <button class="dchat-tab" id="npc-tab-general"  onclick="window._switchNpcTab?.('general')">🌍 General NPCs</button>
+        <button class="dchat-tab active" id="npc-tab-location" onclick="window._switchNpcTab?.('location')">📍 Location NPCs</button>
+      </div>
+
+      <!-- Location NPCs controls -->
+      <div id="npc-location-controls" style="margin-bottom:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <select class="field-input" id="npc-location-filter" style="max-width:260px;cursor:pointer" onchange="window._loadDeityNpcs?.(this.value)">
           <option value="">— Select a location —</option>
         </select>
         <button class="btn-primary" onclick="window._openDeityNpcForm?.(null)">+ CREATE NPC</button>
       </div>
+
+      <!-- General NPC controls -->
+      <div id="npc-general-controls" style="display:none;margin-bottom:16px">
+        <button class="btn-primary" onclick="window._openDeityNpcForm?.(null, 'global')">+ CREATE GENERAL NPC</button>
+      </div>
+
+      <!-- All NPCs controls -->
+      <div id="npc-all-controls" style="display:none;margin-bottom:16px">
+        <button class="btn-primary" onclick="window._openDeityNpcForm?.(null)">+ CREATE NPC</button>
+      </div>
+
+      <!-- List containers — one per tab -->
       <div id="deity-npc-list"><p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">Select a location to manage its NPCs.</p></div>
+      <div id="deity-npc-general-list" style="display:none"><p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">Loading general NPCs…</p></div>
+      <div id="deity-npc-all-list"     style="display:none"><p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">Loading all NPCs…</p></div>
     </div>
 
     <!-- RP CHAT -->
@@ -899,12 +931,15 @@
   import { initDeityDashboard } from '../js/deity-dashboard.js';
   import { initAllCustomSelects, refreshCustomSelect } from '../js/custom-select.js';
   import { updateDuelContext, getDuelContext, initiateChatDuel } from '../js/duel.js';
-  import { updateTradeContext, initiateTrade } from '../js/trade.js';
+  import { initTradeSystem, updateTradeCharData, updateTradeContext, initiateTrade, acceptNpcTrade } from '../js/trade.js';
   window.getDuelContext    = getDuelContext;
   window.updateDuelContext = updateDuelContext;
   window.initiateChatDuel  = initiateChatDuel;
-  window.updateTradeContext = updateTradeContext;
-  window.initiateTrade     = initiateTrade;
+  window.initTradeSystem     = initTradeSystem;
+  window.updateTradeCharData = updateTradeCharData;
+  window.updateTradeContext  = updateTradeContext;
+  window.initiateTrade       = initiateTrade;
+  window.acceptNpcTrade      = (id, npcUid) => acceptNpcTrade(id, npcUid).catch(e => window.showToast?.(e.message,'error'));
 
   await initDeityDashboard();
 

@@ -3861,6 +3861,27 @@ function buildDeityIngredients(deity) {
   // Qty required = 2^rankIndex (Wanderer=1x, Follower=2x, Disciple=4x, Master=8x, ...)
   const rankIdx  = RANK_ORDER.indexOf(_charData?.rank || 'Wanderer');
   const required = Math.pow(2, rankIdx);
+  const level    = _charData?.level || 1;
+  const rank     = _charData?.rank  || 'Wanderer';
+
+  // Ascension is available when at the last level of current rank (level % 100 === 0)
+  const levelWithinRank = ((level - 1) % 100) + 1;
+  const atMaxLevel      = levelWithinRank === 100;
+  const allIngsMet      = ings.every(ing => ((_charData?.inventory||[]).find(i => i.name === ing)?.qty ?? 0) >= required);
+  const canAscend       = atMaxLevel && allIngsMet && RANK_ORDER.indexOf(rank) < RANK_ORDER.length - 1;
+  const isMaxRank       = RANK_ORDER.indexOf(rank) >= RANK_ORDER.length - 1;
+  const nextRank        = isMaxRank ? null : RANK_ORDER[RANK_ORDER.indexOf(rank) + 1];
+
+  const ascendBtnHtml = isMaxRank
+    ? `<p style="font-size:0.8rem;color:var(--gold);font-style:italic;margin-top:14px;text-align:center">✦ You have reached the pinnacle — Eternal rank.</p>`
+    : canAscend
+      ? `<button id="ascend-btn" class="btn-primary" style="margin-top:16px" onclick="window.doRankAscension()">⬆ ASCEND TO ${nextRank.toUpperCase()}</button>`
+      : `<div style="margin-top:14px;padding:10px 14px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:var(--radius);font-size:0.78rem;color:var(--text-dim);font-style:italic">
+          ${!atMaxLevel
+            ? `Reach level ${Math.ceil(level / 100) * 100} to unlock ascension. (Currently level ${level} — ${100 - levelWithinRank} level${100 - levelWithinRank === 1 ? '' : 's'} away)`
+            : `Collect all required ingredients to ascend.`
+          }
+        </div>`;
 
   container.innerHTML = `
     <p style="font-size:0.82rem;color:var(--text-dim);font-style:italic;margin-bottom:8px">
@@ -3872,10 +3893,10 @@ function buildDeityIngredients(deity) {
       <span style="color:var(--ash);font-size:0.6rem">(doubles each rank)</span>
     </p>
     <div class="ingredient-list">${ings.map(ing => {
-      const owned   = (_charData?.inventory||[]).find(i => i.name === ing)?.qty ?? 0;
-      const met     = owned >= required;
-      const color   = met ? '#7ec87e' : owned > 0 ? 'var(--gold)' : 'var(--text-dim)';
-      const icon    = met ? '✅' : owned > 0 ? '✦' : '✦';
+      const owned = (_charData?.inventory||[]).find(i => i.name === ing)?.qty ?? 0;
+      const met   = owned >= required;
+      const color = met ? '#7ec87e' : owned > 0 ? 'var(--gold)' : 'var(--text-dim)';
+      const icon  = met ? '✅' : '✦';
       return `
       <div class="ingredient-item">
         <span class="ingredient-icon">${icon}</span>
@@ -3883,8 +3904,98 @@ function buildDeityIngredients(deity) {
         <span class="ingredient-qty" style="color:${color}">${owned} / ${required}</span>
       </div>`;
     }).join('')}
-    </div>`;
+    </div>
+    ${ascendBtnHtml}`;
 }
+
+// ═══════════════════════════════════════════════════
+//  RANK ASCENSION
+// ═══════════════════════════════════════════════════
+window.doRankAscension = async function() {
+  const deity    = _charData?.deity;
+  const ings     = DEITY_INGREDIENTS[deity];
+  const rank     = _charData?.rank  || 'Wanderer';
+  const level    = _charData?.level || 1;
+  const rankIdx  = RANK_ORDER.indexOf(rank);
+  const required = Math.pow(2, rankIdx);
+
+  if (!ings) { window.showToast('No deity assigned.', 'error'); return; }
+  if (RANK_ORDER.indexOf(rank) >= RANK_ORDER.length - 1) { window.showToast('Already at maximum rank.', 'error'); return; }
+
+  const levelWithinRank = ((level - 1) % 100) + 1;
+  if (levelWithinRank !== 100) {
+    window.showToast(`Reach level ${Math.ceil(level / 100) * 100} first.`, 'error'); return;
+  }
+
+  const inv = _charData.inventory || [];
+  for (const ing of ings) {
+    const owned = inv.find(i => i.name === ing)?.qty ?? 0;
+    if (owned < required) {
+      window.showToast(`Not enough ${ing}. Need ${required}×, have ${owned}×.`, 'error'); return;
+    }
+  }
+  const confirmed = await inkConfirm(
+    `Ascend from ${rank} to ${RANK_ORDER[rankIdx + 1]}?
+
+This will consume:
+${ings.map(i => `  • ${required}× ${i}`).join("\n")}
+
+You will gain:
+  • +150 Max HP
+  • +75 Max Mana
+  • +25 Stat Points
+  • 2 new skills unlocked`
+  );
+  if (!confirmed) return;
+
+  const btn = document.getElementById('ascend-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Ascending...'; }
+
+  try {
+    // Consume ingredients
+    for (const ing of ings) {
+      const idx = inv.findIndex(i => i.name === ing);
+      if (idx !== -1) {
+        inv[idx].qty -= required;
+        if (inv[idx].qty <= 0) inv.splice(idx, 1);
+      }
+    }
+
+    const newRank      = RANK_ORDER[rankIdx + 1];
+    const newRankIdx   = rankIdx + 1;
+    const newHpMax     = (_charData.hpMax  || 100) + 150;
+    const newManaMax   = (_charData.manaMax || 50) + 75;
+    const newStatPts   = (_charData.statPoints || 0) + 25;
+
+    await updateDoc(doc(db, 'characters', _uid), {
+      rank:       newRank,
+      hpMax:      newHpMax,
+      manaMax:    newManaMax,
+      statPoints: newStatPts,
+      inventory:  inv,
+    });
+
+    // Update local cache
+    _charData.rank       = newRank;
+    _charData.hpMax      = newHpMax;
+    _charData.manaMax    = newManaMax;
+    _charData.statPoints = newStatPts;
+    _charData.inventory  = inv;
+
+    // Refresh UI
+    buildDeityIngredients(deity);
+    if (typeof renderCharacterPanel === 'function') renderCharacterPanel(_charData);
+    if (typeof refreshStatDisplay   === 'function') refreshStatDisplay(_charData);
+    if (typeof buildSkillTree       === 'function') buildSkillTree(_charData.charClass, _charData);
+
+    logActivity('⬆️', `<b>Rank Ascension:</b> Advanced to <b>${newRank}</b>! +150 HP, +75 Mana, +25 Stat Points.`, '#c9a84c');
+    window.showToast(`✦ You have ascended to ${newRank}!`, 'success');
+  } catch(e) {
+    console.error('[doRankAscension]', e);
+    window.showToast('Ascension failed. Try again.', 'error');
+    if (btn) { btn.disabled = false; btn.textContent = `⬆ ASCEND TO ${RANK_ORDER[rankIdx + 1].toUpperCase()}`; }
+  }
+};
 
 // ═══════════════════════════════════════════════════
 //  PROFESSION

@@ -1060,6 +1060,26 @@
 .ingredient-name { flex: 1; color: var(--text); }
 .ingredient-qty { font-family: var(--font-mono); font-size: 0.62rem; color: var(--ash-light); }
 
+/* ── Rank ascension button ── */
+#ascend-btn {
+  background: linear-gradient(135deg, #3a2d10 0%, #c9a84c 100%);
+  border: 1px solid var(--gold);
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: 0.78rem;
+  letter-spacing: 0.18em;
+  font-weight: 700;
+  padding: 13px 24px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  width: 100%;
+  transition: opacity 0.2s, transform 0.1s;
+  box-shadow: 0 0 18px rgba(201,168,76,0.25);
+}
+#ascend-btn:hover  { opacity: 0.9; }
+#ascend-btn:active { transform: scale(0.98); }
+#ascend-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
 /* ══════════
    SKILL TREE
 ══════════ */
@@ -5283,10 +5303,12 @@
 .duel-act-skill:hover { border-color: #c9a84c; background: rgba(201,168,76,0.12); }
 
 /* ── System chat message style ──────────────────────── */
-.chat-msg.system-duel-msg {
+.chat-msg.system-duel-msg,
+.chat-msg.system-trade-msg {
   justify-content: center;
 }
-.chat-msg.system-duel-msg .chat-msg-body {
+.chat-msg.system-duel-msg .chat-msg-body,
+.chat-msg.system-trade-msg .chat-msg-body {
   background: rgba(201,168,76,0.06);
   border: 1px solid rgba(201,168,76,0.18);
   border-radius: 10px;
@@ -5294,11 +5316,24 @@
   text-align: center;
   max-width: 100%;
 }
-.system-duel-text {
-  font-size: 0.78rem;
-  color: var(--gold-dim, #9a7a3a);
-  font-weight: 600;
+.system-duel-text,
+.system-trade-text {
+  font-size: 0.8rem;
+  color: #e8c97a;
+  font-weight: 700;
   letter-spacing: 0.04em;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,1);
+}
+
+/* Trade cancelled — red */
+.system-trade-text.cancelled {
+  color: #f08080;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,1);
+}
+/* Trade complete — green */
+.system-trade-text.complete {
+  color: #7ecfa0;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,1);
 }
 
 /* ── Skill picker overlay ───────────────────────────── */

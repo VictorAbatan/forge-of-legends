@@ -79,6 +79,21 @@ export function getDuelContext() {
 }
 
 // ── Initiate a duel ────────────────────────────────
+// ── NPC location helper ────────────────────────────
+// General chat NPCs live under npcs/global/list; location NPCs under npcs/{locId}/list.
+// Returns the correct Firestore location segment for any chat context.
+function _npcLocId(chatTab, chatLocationId) {
+  if (chatTab === 'general' || (!chatLocationId && !chatTab)) return 'global';
+  return chatLocationId || '';
+}
+
+// Unified NPC cache lookup — checks both deity location cache and general-chat cache.
+function _findNpcInCache(npcId) {
+  const locationCache = window._deityNpcs       || [];
+  const generalCache  = window._dchatGeneralNpcs || [];
+  return locationCache.find(n => n.id === npcId) || generalCache.find(n => n.id === npcId) || null;
+}
+
 export async function initiateChatDuel(targetUid, targetName, chatTab, chatLocationId) {
   const uid = _getUid();
   const charData = _getCharData();
@@ -89,11 +104,31 @@ export async function initiateChatDuel(targetUid, targetName, chatTab, chatLocat
   const stance = _getActiveStance(charData);
 
   let targetData = _buildFallbackCombatant(targetUid, targetName);
-  // Skip Firestore lookup for NPC targets (npc_xxx) — use local cache instead
+  let targetStanceForDuel = 'No Stance';
+  let targetSkillsForDuel = [];
   if (targetUid.startsWith('npc_')) {
-    const npcId   = targetUid.replace('npc_', '');
-    const npcData = (window._deityNpcs || []).find(n => n.id === npcId);
-    if (npcData) targetData = _buildCombatant(npcData, targetUid);
+    // Try unified cache first (covers both location & general-chat NPCs),
+    // then fall back to Firestore — works for general chat (locId='global') too.
+    const npcId    = targetUid.replace('npc_', '');
+    let   npcData  = _findNpcInCache(npcId);
+    if (!npcData) {
+      try {
+        const fetchLocId = _npcLocId(chatTab, chatLocationId || _chatLocationId || '');
+        const npcSnap = await getDoc(doc(db, 'npcs', fetchLocId, 'list', npcId));
+        if (npcSnap.exists()) npcData = { id: npcId, ...npcSnap.data() };
+      } catch (e) { console.warn('[Duel] Could not fetch NPC from Firestore:', e); }
+    }
+    if (npcData) {
+      targetData = _buildCombatant(npcData, targetUid);
+      if (npcData.stances?.length) {
+        const s = npcData.stances[0];
+        targetStanceForDuel = s.name || 'No Stance';
+        targetSkillsForDuel = s.skills || [];
+      } else if (npcData.skills?.length) {
+        targetSkillsForDuel = npcData.skills.slice(0, 3);
+        targetStanceForDuel = npcData.name ? `${npcData.name}'s Style` : 'Combat Stance';
+      }
+    }
   } else {
     try {
       const snap = await getDoc(doc(db, 'characters', targetUid));
@@ -117,12 +152,17 @@ export async function initiateChatDuel(targetUid, targetName, chatTab, chatLocat
     challengerStance:    stance?.name || 'No Stance',
     challengerSkills:    stance?.skills || [],
     targetId:            targetUid,
-    targetName,
+    targetName:          targetData.name || targetName,
     targetData,
     targetHp:            targetData.hp,
     targetMana:          targetData.mana,
-    targetStance:        'No Stance',
-    targetSkills:        [],
+    targetMaxHp:         targetData.maxHp,
+    targetMaxMana:       targetData.maxMana,
+    targetStance:        targetStanceForDuel,
+    targetSkills:        targetSkillsForDuel,
+    targetRank:          targetData.rank  || '',
+    targetLevel:         targetData.level || 1,
+    targetAvatar:        targetData.avatarUrl || '',
     participants:        [uid, targetUid],
     chatTab:             tab,
     chatLocationId:      locId,
@@ -146,16 +186,17 @@ export async function initiateChatDuel(targetUid, targetName, chatTab, chatLocat
     challengerLevel:    me.level,
     challengerAvatar:   me.avatarUrl,
     targetId:           targetUid,
-    targetName,
+    targetName:         targetData.name || targetName,
     targetData,
     targetHp:           targetData.hp,
     targetMana:         targetData.mana,
     targetMaxHp:        targetData.maxHp,
     targetMaxMana:      targetData.maxMana,
-    targetStance:       'No Stance',
-    targetRank:         targetData.rank,
-    targetLevel:        targetData.level,
-    targetAvatar:       targetData.avatarUrl,
+    targetStance:       targetStanceForDuel,
+    targetSkills:       targetSkillsForDuel,
+    targetRank:         targetData.rank  || '',
+    targetLevel:        targetData.level || 1,
+    targetAvatar:       targetData.avatarUrl || '',
     status:             'pending',
     round:              1,
     currentTurnUid:     uid,
@@ -294,8 +335,8 @@ export async function doDuelTurn(duelId, action, extraArg) {
   const amChallenger = duel.challengerId === uid;
   const amTarget     = duel.targetId     === uid;
 
-  // Allow a human player (or deity) to act on behalf of the NPC
-  const canActForNpc = isNpcTurn && (amChallenger || _isDeity);
+  // Only deities can act on behalf of an NPC — players must wait
+  const canActForNpc = isNpcTurn && _isDeity;
 
   if (!canActForNpc && duel.currentTurnUid !== uid) {
     window.showToast?.("⏳ It's not your turn!", 'error'); return;
@@ -313,6 +354,15 @@ export async function doDuelTurn(duelId, action, extraArg) {
   let oppHp   = actingAsNpc ? duel.challengerHp  : (isChallenger ? duel.targetHp        : duel.challengerHp);
   let myMana  = actingAsNpc ? duel.targetMana    : (isChallenger ? duel.challengerMana  : duel.targetMana);
 
+  // Safe display names — fall back to duel doc names so Firestore IDs never leak.
+  // When actingAsNpc: me=NPC(target), opp=player(challenger) — always use targetName/challengerName directly.
+  const meDisplayName  = actingAsNpc
+    ? (duel.targetName      || me.name  || 'Fighter')
+    : (me.name  || (isChallenger ? duel.challengerName : duel.targetName)  || 'Fighter');
+  const oppDisplayName = actingAsNpc
+    ? (duel.challengerName  || opp.name || 'Fighter')
+    : (opp.name || (isChallenger ? duel.targetName     : duel.challengerName) || 'Fighter');
+
   let dmg      = 0;
   let eventIcon = '⚔️';
   let eventText = '';
@@ -322,7 +372,7 @@ export async function doDuelTurn(duelId, action, extraArg) {
     dmg = _calcDamage(me, opp);
     oppHp = Math.max(0, oppHp - dmg);
     eventIcon = '⚔️';
-    eventText = `<b>${me.name}</b> strikes <b>${opp.name}</b> for <span class="duel-dmg">${dmg}</span> damage!`;
+    eventText = `<b>${meDisplayName}</b> strikes <b>${oppDisplayName}</b> for <span class="duel-dmg">${dmg}</span> damage!`;
 
   } else if (action === 'defend') {
     const hRegen = Math.round(me.maxHp * 0.10);
@@ -330,11 +380,27 @@ export async function doDuelTurn(duelId, action, extraArg) {
     myHp   = Math.min(me.maxHp,         myHp   + hRegen);
     myMana = Math.min(me.maxMana || 50, myMana + mRegen);
     eventIcon = '🛡️';
-    eventText = `<b>${me.name}</b> takes a defensive stance — recovered <span class="duel-heal">+${hRegen} HP</span>, <span style="color:#6ab0f5">+${mRegen} MP</span>!`;
+    eventText = `<b>${meDisplayName}</b> takes a defensive stance — recovered <span class="duel-heal">+${hRegen} HP</span>, <span style="color:#6ab0f5">+${mRegen} MP</span>!`;
 
   } else if (action === 'skill') {
-    const SKILL_DATA = window.SKILL_DATA || {};
-    const sk = SKILL_DATA[extraArg];
+    // Use module-level SKILL_DATA (always available); merge with window.SKILL_DATA
+    // in case dashboard.js has added custom skills at runtime.
+    const _skillRegistry = Object.assign({}, SKILL_DATA, window.SKILL_DATA || {});
+    let sk = _skillRegistry[extraArg];
+    if (!sk) {
+      // Try to find it in the skill trees (covers timing/load-order edge cases)
+      const treeDef = _findSkillDef(me.charClass, extraArg);
+      if (treeDef) {
+        const manaMatch = treeDef.desc?.match(/(\d+)\s*Mana/);
+        sk = { mana: manaMatch ? parseInt(manaMatch[1]) : 0, type: 'damage', mult: 1.0 };
+      }
+    }
+    // Final fallback — unknown skill, treat as basic damage so duel never freezes
+    // Last resort for any unrecognised skill (custom/future skills):
+    // treat as a plain damage move so the duel always continues.
+    if (!sk) {
+      sk = { mana: 0, type: 'damage', mult: 1.0 };
+    }
     if (!sk) {
       window.showToast?.(`Skill "${extraArg}" not found.`, 'error');
       return;
@@ -349,25 +415,25 @@ export async function doDuelTurn(duelId, action, extraArg) {
     if (sk.type === 'damage') {
       dmg = Math.max(1, Math.round(_calcDamage(me, opp) * (sk.mult || 1.0)));
       oppHp = Math.max(0, oppHp - dmg);
-      eventText = `<b>${me.name}</b> uses <b>${extraArg}</b> for <span class="duel-dmg">${dmg}</span> damage!`;
+      eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> for <span class="duel-dmg">${dmg}</span> damage!`;
     } else if (sk.type === 'heal' || sk.type === 'hot') {
       const healed = Math.round(me.maxHp * (sk.healPct || sk.hotPct || 0.12));
       myHp = Math.min(me.maxHp, myHp + healed);
-      eventText = `<b>${me.name}</b> uses <b>${extraArg}</b> — healed <span class="duel-heal">+${healed} HP</span>!`;
+      eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — healed <span class="duel-heal">+${healed} HP</span>!`;
     } else if (sk.type === 'buff') {
-      eventText = `<b>${me.name}</b> uses <b>${extraArg}</b> — power surges!`;
+      eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — power surges!`;
     } else if (sk.type === 'dot') {
       dmg = Math.max(1, Math.round(_calcDamage(me, opp) * (sk.dotPct || 0.15)));
       oppHp = Math.max(0, oppHp - dmg);
-      eventText = `<b>${me.name}</b> uses <b>${extraArg}</b> — dealing <span class="duel-dmg">${dmg}</span> damage!`;
+      eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — dealing <span class="duel-dmg">${dmg}</span> damage!`;
     } else if (sk.type === 'shield') {
       const shielded = Math.round(me.maxHp * (sk.shieldPct || 0.15));
       myHp = Math.min(me.maxHp, myHp + shielded);
-      eventText = `<b>${me.name}</b> uses <b>${extraArg}</b> — shielded for <span class="duel-heal">+${shielded} HP</span>!`;
+      eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — shielded for <span class="duel-heal">+${shielded} HP</span>!`;
     } else if (sk.type === 'stun') {
       dmg = Math.max(1, Math.round(_calcDamage(me, opp) * (sk.mult || 1.0)));
       oppHp = Math.max(0, oppHp - dmg);
-      eventText = `<b>${me.name}</b> uses <b>${extraArg}</b> — stunning for <span class="duel-dmg">${dmg}</span> damage!`;
+      eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — stunning for <span class="duel-dmg">${dmg}</span> damage!`;
     } else if (sk.type === 'multihit') {
       const hits = sk.hits || 2;
       for (let h = 0; h < hits; h++) {
@@ -375,16 +441,16 @@ export async function doDuelTurn(duelId, action, extraArg) {
         dmg += hDmg;
       }
       oppHp = Math.max(0, oppHp - dmg);
-      eventText = `<b>${me.name}</b> uses <b>${extraArg}</b> — ${sk.hits} hits for <span class="duel-dmg">${dmg}</span> total damage!`;
+      eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — ${sk.hits} hits for <span class="duel-dmg">${dmg}</span> total damage!`;
     } else if (sk.type === 'sacrificial') {
       const selfCost = Math.round(me.maxHp * (sk.selfHpCost || 0.15));
       myHp = Math.max(1, myHp - selfCost);
-      eventText = `<b>${me.name}</b> uses <b>${extraArg}</b> — sacrifices <span class="duel-dmg">${selfCost} HP</span> for power!`;
+      eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — sacrifices <span class="duel-dmg">${selfCost} HP</span> for power!`;
     } else {
       // Fallback: treat as a damage move
       dmg = Math.max(1, Math.round(_calcDamage(me, opp) * (sk.mult || 1.0)));
       oppHp = Math.max(0, oppHp - dmg);
-      eventText = `<b>${me.name}</b> uses <b>${extraArg}</b> for <span class="duel-dmg">${dmg}</span> damage!`;
+      eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> for <span class="duel-dmg">${dmg}</span> damage!`;
     }
     eventIcon = '✨';
   }
@@ -406,7 +472,7 @@ export async function doDuelTurn(duelId, action, extraArg) {
     [myHpKey]:   myHp,
     [myManaKey]: myMana,
     [oppHpKey]:  oppHp,
-    ...(isDuelOver ? { status: 'complete', winnerId: actingAsNpc ? duel.targetId : uid, winnerName: me.name, loserName: opp.name } : {}),
+    ...(isDuelOver ? { status: 'complete', winnerId: actingAsNpc ? duel.targetId : uid, winnerName: meDisplayName, loserName: oppDisplayName } : {}),
   };
 
   try {
@@ -427,7 +493,7 @@ export async function doDuelTurn(duelId, action, extraArg) {
 
   if (isDuelOver) {
     await _postEventBubble(tab, locId, duelId,
-      `💀 <b>${opp.name}</b> has fallen! 🏆 <b>${me.name}</b> wins the duel!`, '🏆');
+      `💀 <b>${oppDisplayName}</b> has fallen! 🏆 <b>${meDisplayName}</b> wins the duel!`, '🏆');
   } else {
     // "next turn" bell notification
     await _postEventBubble(tab, locId, duelId,
@@ -648,11 +714,11 @@ export function renderDuelCard(duel, duelId, el) {
   const amTarget     = duel.targetId     === myUid;
   const amChallenger = duel.challengerId === myUid;
   const isNpcTurn    = isActive && duel.currentTurnUid?.startsWith('npc_');
-  // It's "my turn" if it's literally my uid, OR if it's the NPC's turn and
-  // I am the challenger (player) or a deity — so the action panel renders.
+  // It's "my turn" if it's literally my uid, OR it's an NPC's turn and I am a deity.
+  // Players always wait when it's the NPC's turn — NPCs are deity-controlled.
   const isMyTurn     = isActive && (
     duel.currentTurnUid === myUid ||
-    (isNpcTurn && (amChallenger || _isDeity))
+    (isNpcTurn && _isDeity)
   );
 
   const chHpPct = _pct(duel.challengerHp,   duel.challengerMaxHp || duel.challengerData?.maxHp);
@@ -660,8 +726,8 @@ export function renderDuelCard(duel, duelId, el) {
   const chMpPct = _pct(duel.challengerMana, duel.challengerMaxMana || duel.challengerData?.maxMana);
   const tgMpPct = _pct(duel.targetMana,     duel.targetMaxMana || duel.targetData?.maxMana);
 
-  const chAv    = _avHtml(duel.challengerAvatar || duel.challengerData?.avatarUrl, 52);
-  const tgAv    = _avHtml(duel.targetAvatar || duel.targetData?.avatarUrl,     52);
+  const chAv    = _avHtml(duel.challengerAvatar || duel.challengerData?.avatarUrl || duel.challengerData?.avatar, 52);
+  const tgAv    = _avHtml(duel.targetAvatar     || duel.targetData?.avatarUrl     || duel.targetData?.avatar,     52);
   const hpColor = p => p > 50 ? '#4caf8a' : p > 25 ? '#e0a83c' : '#e05555';
 
   const chStanceKey = duel.challengerStance || 'No Stance';
@@ -680,14 +746,18 @@ export function renderDuelCard(duel, duelId, el) {
       </div>`;
   } else if (isPending) {
     statusBand = `<div class="duel-band duel-band-waiting">⏳ Waiting for <b>${duel.targetName}</b> to accept...</div>`;
+  } else if (isMyTurn && isNpcTurn) {
+    statusBand = `<div class="duel-band duel-band-your-turn">⚡ Choose <b>${duel.targetName}</b>'s move!</div>`;
   } else if (isMyTurn) {
     statusBand = `<div class="duel-band duel-band-your-turn">⚡ YOUR TURN — Choose your move!</div>`;
   } else if (isActive) {
     const isNpcTurnNow = duel.currentTurnUid?.startsWith('npc_');
     const turnName = isNpcTurnNow
-      ? duel.targetName                                                    // NPC's turn
+      ? duel.targetName                                                    // NPC's turn — deity controls
       : (duel.currentTurnUid === duel.challengerId ? duel.challengerName : duel.targetName);
-    statusBand = `<div class="duel-band duel-band-watching">👁 ${turnName} is making their move...</div>`;
+    statusBand = isNpcTurnNow
+      ? `<div class="duel-band duel-band-watching">⏳ Waiting for <b>${turnName}</b>'s move...</div>`
+      : `<div class="duel-band duel-band-watching">👁 ${turnName} is making their move...</div>`;
   } else if (isComplete) {
     const badge = duel.forfeit
       ? `🏳️ ${duel.loserName} forfeited! ${duel.winnerName} wins!`
@@ -725,6 +795,7 @@ export function renderDuelCard(duel, duelId, el) {
         </button>`;
     actionPanel = `
       <div class="duel-action-panel">
+
         <button class="duel-act-btn duel-act-melee" onclick="window.duelTurn('${duelId}','melee')">
           <span>⚔️</span><span>Strike</span>
         </button>
@@ -801,24 +872,44 @@ export function renderDuelCard(duel, duelId, el) {
 // ── Stance skill picker overlay ───────────────────
 // Shows skills from the player's active duel stance so they can pick one.
 export function openDuelStancePicker(duelId) {
-  // Get skills stored on the duel doc for this player
-  // We read them from the live Firestore snap via mountDuelCard,
-  // but they're also available via the last rendered snapshot in the DOM.
   const wrapper = document.querySelector(`[data-duel-id="${duelId}"]`);
   const uid = _getUid();
 
-  // Pull skills from the global duel state — cheapest path
-  // doDuelTurn already has them; we re-read from window state set by mountDuelCard
   const duelState = window._duelStates?.[duelId];
   const isChallenger = duelState?.challengerId === uid;
   const isNpcTurn = duelState?.currentTurnUid?.startsWith('npc_');
 
-  // When it's the NPC's turn, show NPC's (target) skills so the player can pick one
+  // When it's the NPC's turn, show NPC's (target) skills
   let mySkills, myMana, stanceName;
   if (isNpcTurn) {
-    mySkills   = (duelState?.targetSkills?.length ? duelState.targetSkills : duelState?.targetData?.stances?.[0]?.skills) || [];
+    // Prefer flat targetSkills on duel doc; fall back to nested stances on targetData;
+    // last resort: look up the NPC directly from _deityNpcs cache
+    const npcId    = (duelState?.targetId || '').replace('npc_', '');
+    const npcCache = _findNpcInCache(npcId);
+    const stanceFromCache = npcCache?.stances?.[0];
+    mySkills   = (duelState?.targetSkills?.length   ? duelState.targetSkills
+                : duelState?.targetData?.stances?.[0]?.skills?.length ? duelState.targetData.stances[0].skills
+                : stanceFromCache?.skills)
+                || [];
     myMana     = duelState?.targetMana   ?? 0;
-    stanceName = duelState?.targetStance || duelState?.targetData?.stances?.[0]?.name || 'NPC Stance';
+    stanceName = duelState?.targetStance || duelState?.targetData?.stances?.[0]?.name || stanceFromCache?.name || 'NPC Stance';
+
+    // If we still have no skills (old duel doc, pre-fix), patch the duel doc live
+    if (!mySkills.length && npcCache?.stances?.length) {
+      const s = npcCache.stances[0];
+      mySkills   = s.skills || [];
+      stanceName = s.name   || 'NPC Stance';
+      // Patch Firestore so future renders are correct too
+      const duelRef = doc(db, 'chatDuels', duelId);
+      updateDoc(duelRef, { targetSkills: mySkills, targetStance: stanceName,
+        targetName: npcCache?.name || duelState?.targetName || '' })
+        .catch(e => console.warn('[Duel] Could not patch targetSkills:', e));
+      // Also update local state
+      if (window._duelStates?.[duelId]) {
+        window._duelStates[duelId].targetSkills = mySkills;
+        window._duelStates[duelId].targetStance = stanceName;
+      }
+    }
   } else {
     const rawSkills = duelState ? (isChallenger ? duelState.challengerSkills : duelState.targetSkills) : null;
     const fallbackStance = duelState ? (isChallenger ? duelState.challengerData?.stances?.[0] : duelState.targetData?.stances?.[0]) : null;
@@ -835,11 +926,12 @@ export function openDuelStancePicker(duelId) {
     document.body.appendChild(ov);
   }
 
-  const SKILL_DATA = window.SKILL_DATA || {};
+  // Merge module-level + window SKILL_DATA so deity dashboard also sees mana costs
+  const _skillRegistry = Object.assign({}, SKILL_DATA, window.SKILL_DATA || {});
 
   const html = mySkills.length
     ? mySkills.map(skillName => {
-        const sk  = SKILL_DATA[skillName] || {};
+        const sk  = _skillRegistry[skillName] || {};
         const cost = sk.mana ?? 0;
         const ok  = myMana >= cost;
         return `
@@ -938,10 +1030,17 @@ export async function acceptNpcDuelChallenge(duelId, npcUid) {
   if (duel.status !== 'pending') { window.showToast?.('Duel already handled.', 'error'); return; }
   if (!duel.targetId?.startsWith('npc_')) { window.showToast?.('Target is not an NPC.', 'error'); return; }
 
-  // Resolve the NPC's data from the local cache
+  // Resolve the NPC's data — try local deity cache first, then Firestore
   const resolvedNpcId = (npcUid || duel.targetId).replace('npc_', '');
-  const npcCache = window._deityNpcs || [];
-  const npcData  = npcCache.find(n => n.id === resolvedNpcId) || {};
+  let npcData = _findNpcInCache(resolvedNpcId);
+  if (!npcData) {
+    try {
+      const fetchLocId2 = _npcLocId(duel.chatTab, duel.chatLocationId || _chatLocationId || '');
+      const npcSnap2 = await getDoc(doc(db, 'npcs', fetchLocId2, 'list', resolvedNpcId));
+      if (npcSnap2.exists()) npcData = { id: resolvedNpcId, ...npcSnap2.data() };
+    } catch (e2) { console.warn('[Duel] acceptNpcDuelChallenge: could not fetch NPC', e2); }
+  }
+  npcData = npcData || {};
 
   // Build combatant from NPC doc fields
   const npcCombatant = _buildCombatant({
@@ -1010,8 +1109,14 @@ export async function acceptNpcDuelChallenge(duelId, npcUid) {
     targetData:     npcCombatant,
     targetHp:       npcCombatant.hp,
     targetMana:     npcCombatant.mana,
+    targetMaxHp:    npcCombatant.maxHp,
+    targetMaxMana:  npcCombatant.maxMana,
     targetStance:   npcStanceName,
     targetSkills:   npcSkills,
+    targetRank:     npcCombatant.rank,
+    targetLevel:    npcCombatant.level,
+    targetAvatar:   npcCombatant.avatarUrl,
+    targetName:     npcData.name || duel.targetName || '',
     chatTab:        tab,
     chatLocationId: locId,
     acceptedAt:     serverTimestamp(),
@@ -1191,12 +1296,109 @@ function _calcDamage(me, opp, skillType = null) {
 }
 
 // ── Build combatant objects ────────────────────────
+// ── Skill registry — canonical source of truth for mana costs and effects.
+// Defined here (not just in dashboard.js) so duel.js works correctly on
+// both the player dashboard AND the deity dashboard, where dashboard.js
+// SKILL_DATA is never loaded.
+const SKILL_DATA = {
+  // ── Warrior ──
+  "Cleave":            { mana:0,  type:"damage",      mult:1.05, stat:"str" },
+  "Battle Cry":        { mana:10, type:"buff",         stat:"str",  buffMult:0.20 },
+  "Crushing Blow":     { mana:0,  type:"damage",      mult:1.10, stat:"str", defPen:0.10 },
+  "War Stomp":         { mana:0,  type:"stun",         mult:1.00, stat:"str" },
+  "Bleeding Edge":     { mana:20, type:"dot",          dotPct:0.15, dotTurns:3, stat:"str" },
+  "Iron Momentum":     { mana:20, type:"buff",         stat:"str",  buffMult:0.30 },
+  "Blood Gamble":      { mana:25, type:"sacrificial",  selfHpCost:0.15, buffStat:"str", buffMult:0.50 },
+  "Titan Breaker":     { mana:50, type:"damage",      mult:1.70, stat:"str", defPen:0.50 },
+  "Berserker's Oath":  { mana:40, type:"sacrificial",  selfHpCost:0.25, buffStat:"str", buffMult:0.60, buffStat2:"dex", buffMult2:0.20 },
+  "War God's Fury":    { mana:50, type:"buff",         stat:"str",  buffMult:0.80 },
+  // ── Guardian ──
+  "Shield Bash":       { mana:0,  type:"stun",         mult:1.00, stat:"def" },
+  "Fortify":           { mana:10, type:"buff",         stat:"def",  buffMult:0.20 },
+  "Iron Guard":        { mana:0,  type:"shield",       shieldPct:0.15 },
+  "Stone Skin":        { mana:25, type:"buff",         stat:"def",  buffMult:0.40 },
+  "Reinforced Core":   { mana:20, type:"hot",          hotPct:0.10, hotTurns:3 },
+  "Taunting Roar":     { mana:20, type:"skillock" },
+  "Pain Conversion":   { mana:25, type:"sacrificial",  selfHpCost:0.20, buffStat:"def", buffMult:0.50 },
+  "Aegis of Eternity": { mana:40, type:"hpbuff",       hpMult:0.50 },
+  "Colossus Form":     { mana:50, type:"buff",         stat:"def",  buffMult:0.60, hpBonus:0.30 },
+  "Unbreakable Will":  { mana:50, type:"cleanse" },
+  // ── Arcanist ──
+  "Arcane Bolt":       { mana:5,  type:"damage",      mult:1.05, stat:"int" },
+  "Mana Pulse":        { mana:0,  type:"damage",      mult:1.00, stat:"int" },
+  "Robust Mind":       { mana:10, type:"buff",         stat:"int",  buffMult:0.20 },
+  "Astral Lance":      { mana:25, type:"damage",      mult:1.40, stat:"int" },
+  "Mind Burn":         { mana:20, type:"dot",          dotPct:0.15, dotTurns:3, stat:"int" },
+  "Echo-strike":       { mana:25, type:"echo" },
+  "Rune Sacrifice":    { mana:20, type:"sacrificial",  selfHpCost:0.20, buffStat:"int", buffMult:0.50 },
+  "Meteorfall":        { mana:50, type:"damage",      mult:1.80, stat:"int" },
+  "Arcane Shower":     { mana:50, type:"buff",         stat:"int",  buffMult:0.80 },
+  "Hex":               { mana:50, type:"dot",          dotPct:0.05, dotTurns:5, stat:"int" },
+  // ── Hunter ──
+  "Pierce":            { mana:0,  type:"damage",      mult:1.05, stat:"dex" },
+  "Hunter's Poison":   { mana:10, type:"dot",          dotPct:0.10, dotTurns:3, stat:"dex" },
+  "Quick Shot":        { mana:0,  type:"priority" },
+  "Split Arrow":       { mana:20, type:"dot",          dotPct:0.15, dotTurns:3, stat:"dex" },
+  "Ensnare":           { mana:0,  type:"stun",         mult:0.80, stat:"dex" },
+  "Falcon Sight":      { mana:20, type:"buff",         stat:"dex",  buffMult:0.30 },
+  "Vital Shot":        { mana:0,  type:"damage",      mult:1.35, stat:"dex" },
+  "Slayer":            { mana:0,  type:"damage",      mult:1.70, stat:"dex" },
+  "Predator's Instinct":{ mana:40, type:"buff",        stat:"dex",  buffMult:0.60 },
+  "Executioner":       { mana:50, type:"execute",     mult:2.00, stat:"dex", threshold:0.40 },
+  // ── Assassin ──
+  "Backstab":          { mana:0,  type:"backstab",    mult:1.20, multAfter:1.10, stat:"dex" },
+  "Scorching Blade":   { mana:10, type:"dot",          dotPct:0.15, dotTurns:3, dotLabel:"Burn", stat:"dex" },
+  "Shadow Step":       { mana:5,  type:"priority" },
+  "Thunder Strike":    { mana:0,  type:"damage",      mult:1.35, stat:"dex" },
+  "Venom Surge":       { mana:20, type:"dot",          dotPct:0.15, dotTurns:3, dotLabel:"Poison", stat:"dex" },
+  "Trickster":         { mana:20, type:"cleanse" },
+  "Blood Pact":        { mana:25, type:"sacrificial",  selfHpCost:0.15, buffStat:"dex", buffMult:0.50 },
+  "Death Mark":        { mana:40, type:"debuff",       debuffType:"deathmark", dmgBonus:0.60 },
+  "Phantom Assault":   { mana:50, type:"multihit",    hits:3,  multPerHit:0.65, stat:"dex" },
+  "Predator":          { mana:50, type:"condDamage",  mult:2.00, stat:"dex", condDebuff:true },
+  // ── Cleric ──
+  "Healing Light":     { mana:10, type:"heal",         healPct:0.15 },
+  "Sacred Spark":      { mana:5,  type:"damage",      mult:1.05, stat:"int" },
+  "Neptune's Embrace": { mana:15, type:"buff",         stat:"int",  buffMult:0.20 },
+  "Divine Barrier":    { mana:25, type:"shield",       shieldPct:0.80 },
+  "Purify":            { mana:25, type:"cleanse" },
+  "Radiant Pulse":     { mana:20, type:"hot",          hotPct:0.10, hotTurns:3 },
+  "Life Exchange":     { mana:20, type:"sacrificial",  selfHpCost:0.15, buffStat:"all", buffMult:0.20 },
+  "Sanctuary":         { mana:40, type:"hpbuff",       hpMult:0.50 },
+  "Divine Ascension":  { mana:50, type:"buff",         stat:"int",  buffMult:0.60 },
+  "Lazarus":           { mana:50, type:"heal",         healPct:0.50 },
+  // ── Summoner ──
+  "Lashing":           { mana:5,  type:"damage",      mult:1.05, stat:"int" },
+  "Soul Bind":         { mana:10, type:"stun",         mult:1.00, stat:"int" },
+  "Essence Sap":       { mana:10, type:"dot",          dotPct:0.10, dotTurns:4, stat:"int" },
+  "Beastmaster":       { mana:25, type:"summon",       summonDmgPct:0.40, summonTurns:3 },
+  "Beast Empowerment": { mana:25, type:"summonbuff",   summonBuffMult:0.30 },
+  "Usurper":           { mana:25, type:"dot",          dotPct:0.05, dotTurns:4, lifesteal:true, stat:"int" },
+  "Offering":          { mana:20, type:"heal",         healPct:0.20 },
+  "Leviathan":         { mana:50, type:"summon",       summonDmgPct:1.20, stat:"int", unique:true },
+  "Abyssal-touch":     { mana:50, type:"debuff",       debuffType:"defbreak", defReduce:0.40 },
+  "Profane Lord":      { mana:50, type:"damage",      mult:2.00, stat:"int" },
+};
+
+// Skills per class for in-battle menu (keep for menu building)
+const BATTLE_SKILLS = {
+  Warrior:  ["Cleave","Battle Cry","Crushing Blow","War Stomp","Bleeding Edge","Iron Momentum","Blood Gamble","Titan Breaker","Berserker's Oath","War God's Fury"],
+  Guardian: ["Shield Bash","Fortify","Iron Guard","Stone Skin","Reinforced Core","Taunting Roar","Pain Conversion","Aegis of Eternity","Colossus Form","Unbreakable Will"],
+  Arcanist: ["Arcane Bolt","Mana Pulse","Robust Mind","Astral Lance","Mind Burn","Echo-strike","Rune Sacrifice","Meteorfall","Arcane Shower","Hex"],
+  Hunter:   ["Pierce","Hunter's Poison","Quick Shot","Split Arrow","Ensnare","Falcon Sight","Vital Shot","Slayer","Predator's Instinct","Executioner"],
+  Assassin: ["Backstab","Scorching Blade","Shadow Step","Thunder Strike","Venom Surge","Trickster","Blood Pact","Death Mark","Phantom Assault","Predator"],
+  Cleric:   ["Healing Light","Sacred Spark","Neptune's Embrace","Divine Barrier","Purify","Radiant Pulse","Life Exchange","Sanctuary","Divine Ascension","Lazarus"],
+  Summoner: ["Lashing","Soul Bind","Essence Sap","Beastmaster","Beast Empowerment","Usurper","Offering","Leviathan","Abyssal-touch","Profane Lord"],
+};;
+
 function _buildCombatant(d, uid) {
   // Firestore rejects undefined — every field must have a concrete fallback
+  const resolvedName = d.name || d.charName || d.displayName || '';
   return {
     uid:       uid       || '',
-    name:      d.name    || d.charName || 'Unknown',
-    avatarUrl: d.avatarUrl || '',
+    name:      resolvedName || 'Fighter',
+    // NPCs store their image as `avatar`; player chars store it as `avatarUrl`
+    avatarUrl: d.avatarUrl || d.avatar || '',
     charClass: d.charClass || 'Warrior',
     rank:      d.rank      || 'Wanderer',
     level:     Number(d.level)  || 1,
@@ -1208,6 +1410,8 @@ function _buildCombatant(d, uid) {
     dex:       Number(d.dex ?? 8),
     int:       Number(d.int ?? 8),
     def:       Number(d.def ?? 5),
+    // Carry stances so acceptNpcDuelChallenge stance fallback works correctly
+    stances:   d.stances || [],
   };
 }
 function _buildFallbackCombatant(uid, name) {

@@ -17,6 +17,7 @@ let _uid            = null;
 let _charData       = null;
 let _chatTab        = null;
 let _chatLocationId = null;
+let _isDeity        = false;  // latched true once a deity logs in
 
 // Live listener unsub for the open trade modal
 let _tradeUnsub     = null;
@@ -63,11 +64,24 @@ async function _writeNpcDoc(npcId, locationId, fields) {
   }
 }
 
+// ── NPC helpers (mirror duel.js) ─────────────────
+function _npcLocId(chatTab, chatLocationId) {
+  if (chatTab === 'general' || (!chatLocationId && !chatTab)) return 'global';
+  return chatLocationId || '';
+}
+function _findNpcInCache(npcId) {
+  const locationCache = window._deityNpcs       || [];
+  const generalCache  = window._dchatGeneralNpcs || [];
+  return locationCache.find(n => n.id === npcId) || generalCache.find(n => n.id === npcId) || null;
+}
+
 // ── Init ───────────────────────────────────────────
 export function initTradeSystem(uid, charData) {
   _uid      = uid;
   _charData = charData;
+  if (charData?.isDeity) _isDeity = true;
   _listenForIncomingTradeRequests();
+  if (_isDeity) _listenForNpcTrades();
 }
 
 export function updateTradeCharData(charData) {
@@ -207,7 +221,8 @@ export async function cancelTrade(tradeId) {
   if (!snap.exists()) return;
   const trade = snap.data();
 
-  const isParticipant = trade.initiatorId === uid || trade.targetId === uid;
+  const isParticipant = trade.initiatorId === uid || trade.targetId === uid ||
+    (trade.targetId?.startsWith('npc_') && (_isDeity || (window._charData?.isDeity)));
   if (!isParticipant && !window._charData?.isDeity) {
     window.showToast?.('Not your trade.', 'error'); return;
   }
@@ -220,7 +235,7 @@ export async function cancelTrade(tradeId) {
 
   const tab   = trade.chatTab        || _chatTab        || 'rp';
   const locId = trade.chatLocationId || _chatLocationId || '';
-  await _postSystemMsg(tab, locId, `❌ ${cancellerName} cancelled the trade.`);
+  await _postSystemMsg(tab, locId, `❌ ${cancellerName} cancelled the trade.`, 'cancelled');
   // Live mountTradeCard onSnapshot handles updating the card to cancelled state
 
   _closeTradeModal();
@@ -537,7 +552,7 @@ async function _executeTrade(tradeId, trade, confirmingUid) {
   const initSummary = _buildTradeSummary(trade.initiatorItems, trade.initiatorGold);
   const targSummary = _buildTradeSummary(trade.targetItems,    trade.targetGold);
   await _postSystemMsg(tab, locId,
-    `🤝 Trade complete! ${trade.initiatorName} gave ${initSummary} — ${trade.targetName} gave ${targSummary}.`);
+    `🤝 Trade complete! ${trade.initiatorName} gave ${initSummary} — ${trade.targetName} gave ${targSummary}.`, 'complete');
 
   // Apply this client's own inventory update immediately (don't wait for onSnapshot)
   const uid = _getUid();
@@ -662,37 +677,139 @@ async function _patchTradeCard(tradeId, tab, locId, snapshot) {
   });
 }
 
-async function _postSystemMsg(tab, locId, text) {
+async function _postSystemMsg(tab, locId, text, subType = '') {
   const ref = _msgRef(tab, locId);
   if (!ref) return;
-  await addDoc(ref, {
+  const payload = {
     uid:      'system',
     charName: '🔄 TRADE',
     isSystem: true,
+    systemType: 'trade',
     text,
     timestamp: serverTimestamp(),
-  });
+  };
+  if (subType) payload.tradeSubType = subType;
+  await addDoc(ref, payload);
 }
 
 // ── Listen for incoming trade requests ────────────
+let _tradeRequestListenerUid   = null;
+let _tradeRequestListenerUnsub = null;
 function _listenForIncomingTradeRequests() {
   const uid = _getUid();
   if (!uid) return;
-  onSnapshot(
+  // Guard: only one listener per uid — prevents stacking if initTradeSystem
+  // is called multiple times (e.g. deity re-seeding charData).
+  if (_tradeRequestListenerUid === uid && _tradeRequestListenerUnsub) return;
+  if (_tradeRequestListenerUnsub) { _tradeRequestListenerUnsub(); _tradeRequestListenerUnsub = null; }
+  _tradeRequestListenerUid = uid;
+
+  const listenStartMs = Date.now();
+  _tradeRequestListenerUnsub = onSnapshot(
     collection(db, 'trades'),
-    // We use a broad listener and filter client-side to avoid needing
-    // a composite index. Only fires for new 'pending' trades targeting this uid.
     (snap) => {
       snap.docChanges().forEach(ch => {
-        if (ch.type === 'added') {
-          const d = ch.doc.data();
-          if (d.targetId === uid && d.status === 'pending') {
-            _showTradeToast(ch.doc.id, d.initiatorName);
-          }
-        }
+        if (ch.type !== 'added') return;
+        const d = ch.doc.data();
+        if (d.targetId !== uid || d.status !== 'pending') return;
+        // Skip historical docs replayed on init (stale pending trades).
+        const createdMs = d.createdAt?.toMillis?.() ?? null;
+        if (createdMs !== null && createdMs < listenStartMs - 5000) return;
+        _showTradeToast(ch.doc.id, d.initiatorName);
       });
     }
   );
+}
+
+// ── Listen for trades targeting any of this deity's NPCs ──────────────────
+// Mirrors duel.js _listenForNpcChallenges. Called from initTradeSystem when
+// charData.isDeity is true. targetId = "npc_<npcId>" in these trade docs.
+let _npcTradeListenerUnsub = null;
+function _listenForNpcTrades() {
+  if (_npcTradeListenerUnsub) { _npcTradeListenerUnsub(); _npcTradeListenerUnsub = null; }
+  const listenStartMs = Date.now();
+  _npcTradeListenerUnsub = onSnapshot(
+    collection(db, 'trades'),
+    (snap) => {
+      snap.docChanges().forEach(ch => {
+        if (ch.type !== 'added') return;
+        const d = ch.doc.data();
+        if (!d.targetId?.startsWith('npc_') || d.status !== 'pending') return;
+        const createdMs = d.createdAt?.toMillis?.() ?? null;
+        if (createdMs !== null && createdMs < listenStartMs - 5000) return;
+        _showNpcTradeToast(ch.doc.id, d.initiatorName, d.targetName, d.targetId);
+      });
+    }
+  );
+}
+
+function _showNpcTradeToast(tradeId, initiatorName, npcName, npcUid) {
+  const toastId = `trade-npc-toast-${tradeId}`;
+  document.getElementById(toastId)?.remove();
+  const t = document.createElement('div');
+  t.id        = toastId;
+  t.className = 'trade-request-toast';
+  t.innerHTML = `
+    <div class="trt-glow"></div>
+    <div class="trt-icon">🔄</div>
+    <div class="trt-body">
+      <div class="trt-title">NPC TRADE REQUEST</div>
+      <div class="trt-msg"><b>${initiatorName}</b> wants to trade with <b>${npcName}</b>!</div>
+      <div class="trt-hint">Accept or decline on behalf of the NPC</div>
+      <div class="trt-btns">
+        <button class="trade-btn trade-btn-accept"  onclick="window.acceptNpcTrade('${tradeId}','${npcUid}')">✅ ACCEPT</button>
+        <button class="trade-btn trade-btn-decline" onclick="window.declineTradeRequest('${tradeId}');document.getElementById('${toastId}')?.remove()">✕ DECLINE</button>
+      </div>
+    </div>
+    <button class="trt-close" onclick="this.closest('.trade-request-toast').remove()">✕</button>`;
+  document.body.appendChild(t);
+  requestAnimationFrame(() => requestAnimationFrame(() => t.classList.add('visible')));
+}
+
+// ── Accept a trade on behalf of an NPC (deity only) ───────────────────────
+export async function acceptNpcTrade(tradeId, npcUid) {
+  const uid      = _getUid();
+  const charData = _getCharData();
+  if (!uid || !charData?.isDeity) {
+    window.showToast?.('Only a deity can accept on behalf of an NPC.', 'error'); return;
+  }
+
+  const tradeRef = doc(db, 'trades', tradeId);
+  const snap     = await getDocFromServer(tradeRef);
+  if (!snap.exists()) { window.showToast?.('Trade not found.', 'error'); return; }
+  const trade = snap.data();
+
+  if (trade.status !== 'pending')            { window.showToast?.('Trade already handled.', 'error'); return; }
+  if (!trade.targetId?.startsWith('npc_'))   { window.showToast?.('Target is not an NPC.', 'error'); return; }
+
+  const resolvedNpcId = (npcUid || trade.targetId).replace('npc_', '');
+  // Resolve NPC location from cache or trade context
+  let npcData = _findNpcInCache(resolvedNpcId);
+  if (!npcData) {
+    try {
+      const fetchLocId = _npcLocId(trade.chatTab, trade.chatLocationId || _chatLocationId || '');
+      const npcSnap    = await getDoc(doc(db, 'npcs', fetchLocId, 'list', resolvedNpcId));
+      if (npcSnap.exists()) npcData = { id: resolvedNpcId, ...npcSnap.data() };
+    } catch (e) { console.warn('[Trade] acceptNpcTrade: could not fetch NPC', e); }
+  }
+  const npcLocId = npcData?.locationId || _npcLocId(trade.chatTab, trade.chatLocationId || _chatLocationId || '');
+
+  // Stamp the NPC's identity onto the trade doc and mark active so both sides can add items
+  await updateDoc(tradeRef, {
+    status:        'active',
+    targetNpcId:   resolvedNpcId,
+    targetNpcLoc:  npcLocId,
+  });
+
+  // Remove the toast
+  document.getElementById(`trade-npc-toast-${tradeId}`)?.remove();
+
+  // Set active NPC identity so the trade modal shows the NPC's name/items
+  window._activeSpeakAsNpcId = resolvedNpcId;
+  window._activeSpeakAsLocId = npcLocId;
+
+  _openTradeModal(tradeId);
+  window.showToast?.(`🔄 Trade accepted for ${trade.targetName}! Add items and confirm.`, '');
 }
 
 function _showTradeToast(tradeId, initiatorName) {
@@ -801,7 +918,9 @@ function _closeTradeModal() {
 function _renderTradeModal(trade, tradeId) {
   const uid = _getUid();
   const isInitiator  = trade.initiatorId === uid;
-  const isTarget     = trade.targetId    === uid;
+  // isTarget is true if: real uid match, OR deity is controlling the target NPC
+  const isTarget     = trade.targetId === uid ||
+    (trade.targetId?.startsWith('npc_') && (_isDeity || _getCharData()?.isDeity));
   const isParticipant = isInitiator || isTarget;
   const isSpectator  = !isParticipant;
 
@@ -1040,7 +1159,8 @@ window._pickTradeItem = function(itemName) {
 export function renderTradeCard(trade, tradeId, el) {
   if (!el || !trade) return;
   const uid = _getUid();
-  const isParticipant = trade.initiatorId === uid || trade.targetId === uid;
+  const isParticipant = trade.initiatorId === uid || trade.targetId === uid ||
+    (trade.targetId?.startsWith('npc_') && (_isDeity || (window._charData?.isDeity)));
 
   const statusLabel = {
     pending:   '⏳ Pending',
@@ -1092,6 +1212,7 @@ export function renderTradeCard(trade, tradeId, el) {
 
 // ── Global bindings ────────────────────────────────
 window.initTradeSystem      = initTradeSystem;
+window.acceptNpcTrade        = (id, npcUid) => acceptNpcTrade(id, npcUid).catch(e => window.showToast?.(e.message, 'error'));
 window.updateTradeContext   = updateTradeContext;
 window.initiateTrade        = initiateTrade;
 window.acceptTradeRequest   = async (id) => acceptTradeRequest(id).catch(e => window.showToast?.(e.message, 'error'));

@@ -1028,7 +1028,7 @@ window._renderDuelOrTradeCard = function(msg) {
           <span class="trade-card-status">${(msg.status||'').toUpperCase()}</span>
         </div>
         <div class="trade-card-body" style="padding:8px 14px;font-size:0.82rem;color:#c8bea8">${(msg.text||'').replace(/</g,'&lt;')}</div>
-        ${tradeId ? `<div class="trade-card-footer"><button class="trade-card-open-btn" onclick="window.openTradeModal?.('${tradeId}')">Open Trade</button></div>` : ''}
+        ${tradeId ? `<div class="trade-card-footer"><button class="trade-card-open-btn" onclick="window._openTradeModal?.('${tradeId}')">Open Trade</button></div>` : ''}
       </div>
     </div>`;
   }
@@ -1284,6 +1284,7 @@ function renderWorshippers(list) {
         <div class="worshipper-stat"><span class="worshipper-stat-label">HP</span><span class="worshipper-stat-value">${w.hp||100}/${w.hpMax||100}</span></div>
       </div>
       <div class="worshipper-actions">
+        <button class="deity-mini-btn" onclick="window._quickBestow('${w.uid}','${(w.name||"").replace(/'/g,"\\'")}')">✦ Bestow</button>
         <button class="deity-mini-btn" onclick="window._quickFaith('${w.uid}','${(w.name||"").replace(/'/g,"\\'")}')">✨ Faith</button>
       </div>
     </div>`).join("");
@@ -1291,6 +1292,15 @@ function renderWorshippers(list) {
   window._quickVision = (uid, name) => _openModalForWorshipper("vision", uid, name);
   window._quickBestow = (uid, name) => _openModalForWorshipper("bestow", uid, name);
   window._quickFaith  = (uid, name) => _openModalForWorshipper("faith",  uid, name);
+}
+
+function _populateBestowPanelSelect() {
+  const sel = document.getElementById("bestow-panel-target");
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = `<option value="">Choose a worshipper...</option>` +
+    _worshippers.map(w => `<option value="${w.uid}">${w.name}</option>`).join("");
+  if (prev) sel.value = prev;
 }
 
 // Show modal pre-filled for a specific worshipper (from card buttons)
@@ -1416,6 +1426,7 @@ function onDeityPanelSwitch(name) {
   if (name === "npcs")        initDeityNpcPanel();
   if (name === "chat")        initDeityChat();
   if (name === "raids")       initDeityRaids();
+  if (name === "bestow")      _populateBestowPanelSelect();
 }
 
 // ═══════════════════════════════════════════════════
@@ -2673,6 +2684,145 @@ function initDeityNpcPanel() {
   });
 }
 
+// ── NPC Manager tab switching ─────────────────────────────────────────────
+let _currentNpcTab = "location";
+
+window._switchNpcTab = function(tab) {
+  _currentNpcTab = tab;
+  ["all","general","location"].forEach(t => {
+    document.getElementById(`npc-tab-${t}`)?.classList.toggle("active", t === tab);
+  });
+  document.getElementById("npc-location-controls").style.display = tab === "location" ? "" : "none";
+  document.getElementById("npc-general-controls").style.display  = tab === "general"  ? "" : "none";
+  document.getElementById("npc-all-controls").style.display      = tab === "all"      ? "" : "none";
+  document.getElementById("deity-npc-list").style.display         = tab === "location" ? "" : "none";
+  document.getElementById("deity-npc-general-list").style.display = tab === "general"  ? "" : "none";
+  document.getElementById("deity-npc-all-list").style.display     = tab === "all"      ? "" : "none";
+  if (tab === "general") loadDeityGeneralNpcs();
+  if (tab === "all")     loadDeityAllNpcs();
+};
+
+// ── NPC edit cache — stores full NPC objects keyed by id so Edit works on
+//    any tab (not just Location tab where _deityNpcs is populated) ─────────
+const _npcEditCache = {};
+
+// ── Shared card renderer ──────────────────────────────────────────────────
+function npcCardHTML(npc) {
+  const av = npc.avatar?.startsWith("http")
+    ? `<img src="${npc.avatar}" style="width:100%;height:100%;object-fit:cover;border-radius:50%"/>`
+    : `<span style="font-size:1.4rem">${npc.avatar||"🧙"}</span>`;
+  const autoCount = npc.autoResponses?.length || 0;
+  const invCount  = npc.inventory?.length || 0;
+  const rankLvl   = npc.rank ? `${npc.rank} Lv.${npc.level||1}` : "";
+  const classTag  = npc.charClass ? `${npc.charClass}` : "";
+  const skillList = (npc.skills||[]).length ? (npc.skills||[]).join(", ") : "";
+  _npcEditCache[npc.id] = npc; // cache so Edit works from any tab
+  return `
+  <div class="deity-npc-card">
+    <div class="deity-npc-avatar">${av}</div>
+    <div class="deity-npc-info">
+      <div class="deity-npc-name">${npc.name}</div>
+      <div class="deity-npc-desc">${npc.description||"—"}</div>
+      ${rankLvl  ? `<div class="deity-npc-meta npc-rank-badge">⚔️ ${rankLvl}${classTag ? ` · ${classTag}` : ""}</div>` : ""}
+      ${skillList ? `<div class="deity-npc-meta" style="color:var(--gold-dim);font-size:0.7rem">🔮 ${skillList}</div>` : ""}
+      <div class="deity-npc-meta">${autoCount} auto-response${autoCount!==1?"s":""}${invCount ? ` · 🎒 ${invCount} item${invCount!==1?"s":""}` : ""}</div>
+    </div>
+    <div class="deity-npc-actions">
+      <button class="deity-mini-btn" onclick="window._openDeityNpcForm('${npc.id}')">✏️ Edit</button>
+      <button class="deity-mini-btn" onclick="window._npcSpeakAs('${npc.id}','${(npc.name||"").replace(/'/g,"\\'")}')">🗣️ Speak</button>
+      <button class="deity-mini-btn" onclick="window._openNpcBestowModal('${npc.id}','${(npc.name||"").replace(/'/g,"\\'")}')">🎒 Bestow</button>
+      <button class="deity-mini-btn danger" onclick="window._deleteDeityNpc('${npc.id}','${npc.locationId||""}')">🗑️</button>
+    </div>
+  </div>`;
+}
+
+// ── Load General (global) NPCs — strict: only this deity's ───────────────
+async function loadDeityGeneralNpcs() {
+  const listEl = document.getElementById("deity-npc-general-list");
+  if (!listEl) return;
+  listEl.innerHTML = `<p style="color:var(--text-dim);font-style:italic">Loading general NPCs…</p>`;
+  try {
+    const snap = await getDocs(collection(db, "npcs", "global", "list"));
+    const npcs = snap.docs
+      .map(d => ({ id: d.id, locationId: "global", ...d.data() }))
+      .filter(n => n.deityUid === _uid);
+    if (!npcs.length) {
+      listEl.innerHTML = `
+        <p style="color:var(--text-dim);font-style:italic;font-size:0.85rem;margin-bottom:12px">No general NPCs yet.</p>
+        <button class="btn-primary" onclick="window._openDeityNpcForm(null, 'global')">+ Create First General NPC</button>`;
+      return;
+    }
+    listEl.innerHTML = `<div class="deity-npc-grid">${npcs.map(npcCardHTML).join("")}</div>`;
+  } catch(e) {
+    listEl.innerHTML = `<p style="color:var(--text-dim)">Failed to load general NPCs.</p>`;
+  }
+}
+
+// ── Load ALL NPCs across every location — strict: only this deity's ───────
+async function loadDeityAllNpcs() {
+  const listEl = document.getElementById("deity-npc-all-list");
+  if (!listEl) return;
+  listEl.innerHTML = `<p style="color:var(--text-dim);font-style:italic">Loading all NPCs…</p>`;
+  try {
+    const allLocationIds = [
+      "global",
+      ...[
+        ...LOCATIONS_BY_TYPE.northern_safe,
+        ...LOCATIONS_BY_TYPE.western_safe,
+        ...LOCATIONS_BY_TYPE.northern_resource,
+        ...LOCATIONS_BY_TYPE.western_resource,
+        ...LOCATIONS_BY_TYPE.northern_special,
+        ...LOCATIONS_BY_TYPE.western_special,
+        ...LOCATIONS_BY_TYPE.northern_monster,
+        ...LOCATIONS_BY_TYPE.western_monster,
+        ...(LOCATIONS_BY_TYPE.eastern_safe      || []),
+        ...(LOCATIONS_BY_TYPE.eastern_resource  || []),
+        ...(LOCATIONS_BY_TYPE.eastern_special   || []),
+        ...(LOCATIONS_BY_TYPE.eastern_monster   || []),
+        ...(LOCATIONS_BY_TYPE.southern_safe     || []),
+        ...(LOCATIONS_BY_TYPE.southern_resource || []),
+        ...(LOCATIONS_BY_TYPE.southern_special  || []),
+        ...(LOCATIONS_BY_TYPE.southern_monster  || []),
+      ].map(l => l.toLowerCase().replace(/[^a-z0-9]/g, "-"))
+    ];
+    const snaps = await Promise.all(
+      allLocationIds.map(locId =>
+        getDocs(collection(db, "npcs", locId, "list"))
+          .then(s => s.docs.map(d => ({ id: d.id, locationId: locId, ...d.data() })))
+          .catch(() => [])
+      )
+    );
+    const all = snaps.flat()
+      .filter(n => n.deityUid === _uid);
+    if (!all.length) {
+      listEl.innerHTML = `<p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">No NPCs found yet.</p>`;
+      return;
+    }
+    // Group by location
+    const byLoc = {};
+    all.forEach(npc => { (byLoc[npc.locationId] = byLoc[npc.locationId] || []).push(npc); });
+    listEl.innerHTML = "";
+    Object.entries(byLoc).forEach(([locId, npcs]) => {
+      const readableLabel = locId === "global"
+        ? "🌍 General Chat"
+        : "📍 " + locId.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      const section = document.createElement("div");
+      section.style.cssText = "margin-bottom:22px";
+      section.innerHTML = `
+        <div style="font-family:var(--ff-display);font-size:0.75rem;letter-spacing:0.1em;color:var(--gold-dim);text-transform:uppercase;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">
+          ${readableLabel} <span style="color:var(--text-dim);font-weight:400">(${npcs.length})</span>
+        </div>`;
+      const grid = document.createElement("div");
+      grid.className = "deity-npc-grid";
+      grid.innerHTML = npcs.map(npcCardHTML).join("");
+      section.appendChild(grid);
+      listEl.appendChild(section);
+    });
+  } catch(e) {
+    listEl.innerHTML = `<p style="color:var(--text-dim)">Failed to load all NPCs.</p>`;
+  }
+}
+
 async function loadDeityNpcs(locationId) {
   if (!locationId) return;
   _currentNpcLocation = locationId;
@@ -2681,7 +2831,9 @@ async function loadDeityNpcs(locationId) {
 
   try {
     const snap = await getDocs(collection(db, "npcs", locationId, "list"));
-    _deityNpcs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    _deityNpcs = snap.docs.map(d => ({ id: d.id, locationId, ...d.data() }));
+    window._deityNpcs = _deityNpcs;  // expose for duel.js NPC lookups
+    _deityNpcs.forEach(n => { _npcEditCache[n.id] = n; }); // populate edit cache
     renderDeityNpcs();
   } catch(e) {
     if (listEl) listEl.innerHTML = `<p style="color:var(--text-dim)">Failed to load NPCs.</p>`;
@@ -2691,61 +2843,36 @@ async function loadDeityNpcs(locationId) {
 function renderDeityNpcs() {
   const listEl = document.getElementById("deity-npc-list");
   if (!listEl) return;
-
   if (!_deityNpcs.length) {
     listEl.innerHTML = `
       <p style="color:var(--text-dim);font-style:italic;font-size:0.85rem;margin-bottom:12px">No NPCs in this location yet.</p>
       <button class="btn-primary" onclick="window._openDeityNpcForm(null)">+ Create First NPC</button>`;
     return;
   }
-
-  listEl.innerHTML = `<div class="deity-npc-grid">${_deityNpcs.map(npc => {
-    const av = npc.avatar?.startsWith("http")
-      ? `<img src="${npc.avatar}" style="width:100%;height:100%;object-fit:cover;border-radius:50%"/>`
-      : `<span style="font-size:1.4rem">${npc.avatar||"🧙"}</span>`;
-    const autoCount = npc.autoResponses?.length || 0;
-    const invCount  = npc.inventory?.length || 0;
-    const rankLvl   = npc.rank ? `${npc.rank} Lv.${npc.level||1}` : "";
-    const classTag  = npc.charClass ? `${npc.charClass}` : "";
-    const skillList = (npc.skills||[]).length ? (npc.skills||[]).join(", ") : "";
-    return `
-    <div class="deity-npc-card">
-      <div class="deity-npc-avatar">${av}</div>
-      <div class="deity-npc-info">
-        <div class="deity-npc-name">${npc.name}</div>
-        <div class="deity-npc-desc">${npc.description||"—"}</div>
-        ${rankLvl  ? `<div class="deity-npc-meta npc-rank-badge">⚔️ ${rankLvl}${classTag ? ` · ${classTag}` : ""}</div>` : ""}
-        ${skillList ? `<div class="deity-npc-meta" style="color:var(--gold-dim);font-size:0.7rem">🔮 ${skillList}</div>` : ""}
-        <div class="deity-npc-meta">${autoCount} auto-response${autoCount!==1?"s":""}${invCount ? ` · 🎒 ${invCount} item${invCount!==1?"s":""}` : ""}</div>
-      </div>
-      <div class="deity-npc-actions">
-        <button class="deity-mini-btn" onclick="window._openDeityNpcForm('${npc.id}')">✏️ Edit</button>
-        <button class="deity-mini-btn" onclick="window._npcSpeakAs('${npc.id}','${(npc.name||"").replace(/'/g,"\\'")}')" >🗣️ Speak</button>
-        <button class="deity-mini-btn" onclick="window._openNpcBestowModal('${npc.id}','${(npc.name||"").replace(/'/g,"\\'")}')" >🎒 Bestow</button>
-        <button class="deity-mini-btn danger" onclick="window._deleteDeityNpc('${npc.id}')">🗑️</button>
-      </div>
-    </div>`;
-  }).join("")}</div>`;
-
-  // Speak as NPC from NPC manager panel
-  window._npcSpeakAs = (npcId, npcName) => {
-    // Switch to chat panel, pre-select this NPC
-    switchDeityPanel("chat");
-    setTimeout(() => {
-      const sel = document.getElementById("deity-chat-as");
-      if (sel) sel.value = `npc_${npcId}`;
-    }, 300);
-  };
-
-  window._deleteDeityNpc = async id => {
-    if (!_currentNpcLocation) return;
-    try {
-      await deleteDoc(doc(db, "npcs", _currentNpcLocation, "list", id));
-      window.showToast("NPC deleted.", "success");
-      loadDeityNpcs(_currentNpcLocation);
-    } catch(e) { window.showToast("Failed to delete.", "error"); }
-  };
+  listEl.innerHTML = `<div class="deity-npc-grid">${_deityNpcs.map(npcCardHTML).join("")}</div>`;
 }
+
+// Speak as NPC — hoisted outside render so it isn't redefined every load
+window._npcSpeakAs = (npcId, npcName) => {
+  switchDeityPanel("chat");
+  setTimeout(() => {
+    const sel = document.getElementById("deity-chat-as");
+    if (sel) sel.value = `npc_${npcId}`;
+  }, 300);
+};
+
+window._deleteDeityNpc = async (id, locationId) => {
+  const locId = locationId || _currentNpcLocation;
+  if (!locId) return;
+  try {
+    await deleteDoc(doc(db, "npcs", locId, "list", id));
+    delete _npcEditCache[id];
+    window.showToast("NPC deleted.", "success");
+    if (_currentNpcTab === "all")          loadDeityAllNpcs();
+    else if (_currentNpcTab === "general") loadDeityGeneralNpcs();
+    else                                   loadDeityNpcs(locId);
+  } catch(e) { window.showToast("Failed to delete.", "error"); }
+};
 
 // ── NPC Bestow Modal ─────────────────────────────────────────────────────────
 window._openNpcBestowModal = function(npcId, npcName) {
@@ -3094,8 +3221,9 @@ function getNpcAvailableSkills(charClass, rank) {
   return tiers.flatMap(t => tree[t] || []);
 }
 
-function openDeityNpcForm(npcId) {
-  const existing = npcId ? (_deityNpcs.find(n => n.id === npcId) || {}) : {};
+function openDeityNpcForm(npcId, forceLocation) {
+  // Check _npcEditCache first so Edit works from any tab, not just Location tab
+  const existing = npcId ? (_npcEditCache[npcId] || _deityNpcs.find(n => n.id === npcId) || {}) : {};
   const isEdit   = !!npcId;
 
   document.getElementById("deity-npc-form-modal")?.remove();
@@ -3105,7 +3233,8 @@ function openDeityNpcForm(npcId) {
   modal.style.display = "flex";
 
   // Location dropdown options (safe zones, resource, special only)
-  let locationOptions = '<option value="global">🌍 Global (General Chat)</option>';
+  const _resolvedLoc = forceLocation || existing.locationId || _currentNpcLocation;
+  let locationOptions = `<option value="global" ${_resolvedLoc === 'global' ? 'selected' : ''}>🌍 Global (General Chat)</option>`;
   const npcManagerLocations = [
     ...LOCATIONS_BY_TYPE.northern_safe,
     ...LOCATIONS_BY_TYPE.western_safe,
@@ -3116,7 +3245,7 @@ function openDeityNpcForm(npcId) {
   ];
   npcManagerLocations.forEach(loc => {
     const val = loc.toLowerCase().replace(/[^a-z0-9]/g, "-");
-    const selected = (existing.locationId || _currentNpcLocation) === val ? 'selected' : '';
+    const selected = _resolvedLoc === val ? 'selected' : '';
     locationOptions += `<option value="${val}" ${selected}>${loc}</option>`;
   });
 
@@ -3381,7 +3510,7 @@ function openDeityNpcForm(npcId) {
     const stances = (stanceName || stanceSkills.length)
       ? [{ name: stanceName || (charClass ? `${charClass} Style` : 'Combat Stance'), skills: stanceSkills }]
       : (existing.stances || []);
-    const data = { name, avatar: avatar||"🧙", description: desc||"", autoResponses, locationId, updatedAt: serverTimestamp(),
+    const data = { name, avatar: avatar||"🧙", description: desc||"", autoResponses, locationId, deityUid: _uid, updatedAt: serverTimestamp(),
       ...(rank      ? { rank, level } : {}),
       ...(charClass ? { charClass }   : {}),
       skills,
@@ -4716,9 +4845,11 @@ function _resolveDeityChatIdentity() {
   window._charData = { ...base, isDeity: true };
   // window._uid MUST stay as the real Firebase auth UID — never set it to an NPC id
   window._uid = _uid;
-  // Re-seed duel/trade systems with real UID + display charData
+  // Re-seed duel/trade systems with real UID + display charData.
+  // For trade: use updateTradeCharData (not initTradeSystem) to avoid stacking
+  // duplicate Firestore listeners — initTradeSystem is called once at login.
   window.initDuelSystem?.(window._uid, window._charData);
-  window.initTradeSystem?.(window._uid, window._charData);
+  window.updateTradeCharData?.(window._charData);
 }
 
 window._dchatTradePlayer = function() {
