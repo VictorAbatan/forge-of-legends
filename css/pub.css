@@ -108,32 +108,75 @@
   background: var(--ink2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 12px 18px;
+  padding: 16px 18px;
   text-align: center;
-  cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
-  min-width: 140px;
+  min-width: 200px;
+  max-width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
-.pub-gate-loc-card:hover {
+.pub-gate-loc-card.pub-gate-loc-ready {
   border-color: var(--gold-dim);
   background: rgba(201,168,76,0.04);
 }
-.pub-gate-loc-card .loc-name {
+.pub-gate-loc-top .loc-name {
   font-family: var(--font-display);
-  font-size: 0.82rem;
+  font-size: 0.9rem;
   color: var(--gold);
   margin-bottom: 2px;
 }
-.pub-gate-loc-card .loc-cont {
+.pub-gate-loc-top .loc-cont {
   font-size: 0.7rem;
   color: var(--text-dim);
   font-style: italic;
-  margin-bottom: 6px;
 }
-.pub-gate-loc-card .loc-cost {
+.pub-gate-status {
   font-family: var(--font-mono);
-  font-size: 0.6rem;
-  color: var(--ash-light);
+  font-size: 0.58rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border-radius: 8px;
+}
+.pub-gate-status.ready  { background: rgba(78,200,120,0.1);  color: #4ec878; border: 1px solid rgba(78,200,120,0.25); }
+.pub-gate-status.near   { background: rgba(201,168,76,0.1);  color: var(--gold-dim); border: 1px solid rgba(201,168,76,0.2); }
+.pub-gate-status.far    { background: rgba(128,128,128,0.08); color: var(--ash); border: 1px solid var(--border); }
+.pub-gate-hint {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  font-style: italic;
+  line-height: 1.5;
+}
+.pub-gate-action-btn {
+  width: 100%;
+  padding: 9px 14px;
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.15s;
+  background: linear-gradient(135deg, var(--gold-dim), var(--gold));
+  color: #1a1208;
+  border: none;
+  box-shadow: 0 2px 10px rgba(201,168,76,0.18);
+}
+.pub-gate-action-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 18px rgba(201,168,76,0.3);
+}
+.pub-gate-action-btn.secondary {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  box-shadow: none;
+}
+.pub-gate-action-btn.secondary:hover {
+  border-color: var(--border-bright);
+  color: var(--text);
+  transform: none;
 }
 
 /* ── Tables grid ───────────────────────────────────────────── */

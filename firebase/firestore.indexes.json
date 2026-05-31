@@ -1,0 +1,23 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "pubGames",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "gameType",    "order": "ASCENDING" },
+        { "fieldPath": "status",      "order": "ASCENDING" },
+        { "fieldPath": "pubLocation", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "pubGames",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status",      "order": "ASCENDING" },
+        { "fieldPath": "pubLocation", "order": "ASCENDING" },
+        { "fieldPath": "completedAt", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

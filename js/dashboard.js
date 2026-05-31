@@ -12084,6 +12084,10 @@ window._onPanelSwitch = function(name) {
   if (name === 'activity') renderActivityFeed();
   if (name === 'companion') window.renderCompanionPanel?.();
   if (name === 'worlddev') renderWorldDevPanel();
+  if (name === 'pub') {
+    window.updatePubCharData?.(_charData);
+    window.renderPubPanel?.();
+  }
   // Apply highlights when player opens RP Chat; clean up when they leave
   if (name === 'chat' || name === 'rp' || name === 'rpchat') {
     setTimeout(window._observeChatMentions, 200);

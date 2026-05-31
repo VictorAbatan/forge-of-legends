@@ -414,6 +414,11 @@ function _openTT(el, e) {
         setTimeout(() => window._autoSelectZoneByName?.(btn.dataset.zone), 80);
       } else if (action === "temple") {
         window._openTemplePanel?.();
+      } else if (action === "travel-pub") {
+        const d = btn.dataset;
+        window.openTravelModal?.(d.dest, d.continent, 10, 60);
+      } else if (action === "enter-pub") {
+        window._openPubPanel?.();
       }
     });
   });
@@ -901,25 +906,50 @@ function renderCapital(cid) {
 
     // Pub pin
     if(cont.pubPin) {
+      // Determine state
+      const pubData     = window.PUB_LOCATIONS
+        ? Object.values(window.PUB_LOCATIONS).find(p => p.location.toLowerCase() === cont.capitalId?.toLowerCase()) || null
+        : null;
+      const travelId    = pubData?.travelId  || `The Pub — ${cont.capital||cont.name}`;
+      const pubContinent= pubData?.continent || cont.label.split("·")[0].trim();
+      const atPub       = pubData
+        ? (window._charData?.kingdom||window._charData?.location||"").toLowerCase().includes(pubData.label.toLowerCase())
+        : false;
+      const atCapital   = here; // here = _isAtCapital(cid)
+
+      // Dot style
+      const pubDot = atPub
+        ? "background:#4fc870;box-shadow:0 0 0 4px rgba(79,200,112,0.3),0 0 16px rgba(79,200,112,0.8);animation:lmap-pulse-player 1.8s infinite"
+        : atCapital
+          ? "background:#c9784c;box-shadow:0 0 0 3px rgba(201,120,76,0.3),0 0 10px rgba(201,120,76,0.5)"
+          : "background:#5a3a20;box-shadow:0 0 0 2px rgba(90,58,32,0.3),0 0 6px rgba(90,58,32,0.3);opacity:0.5";
+
+      const tooltipBody = atPub
+        ? `<div class="lmap-wpin-tt-here">✓ You are inside the pub</div>
+           <button class="lmap-wpin-travel-btn" data-action="enter-pub" style="background:rgba(79,200,112,0.15);border-color:rgba(79,200,112,0.5);color:#4fc870;margin-top:6px;">🍺 ENTER PUB →</button>`
+        : atCapital
+          ? `<div style="font-size:10px;color:#aaa;margin-bottom:6px;">10 🪙 · 1 min to travel inside</div>
+             <button class="lmap-wpin-travel-btn" data-action="travel-pub" data-dest="${travelId}" data-continent="${pubContinent}" style="background:rgba(201,120,76,0.15);border-color:rgba(201,120,76,0.5);color:#c9784c;">TRAVEL — 10🪙 · 1m</button>`
+          : `<div style="font-size:10px;color:#777;margin-top:4px;">Travel to ${cont.capital||cont.name} first.</div>`;
+
       const pubEl = document.createElement("div");
       pubEl.className = "lmap-loc-pin";
       pubEl.style.cssText = `position:absolute;left:${cont.pubPin.x}%;top:${cont.pubPin.y}%;transform:translate(-50%,-50%);pointer-events:all;overflow:visible;`;
-      const pubDot = here
-        ? "background:#c9784c;box-shadow:0 0 0 4px rgba(201,120,76,0.3),0 0 16px rgba(201,120,76,0.8);animation:lmap-pulse-player 1.8s infinite"
-        : "background:#8b5030;box-shadow:0 0 0 3px rgba(139,80,48,0.3),0 0 10px rgba(201,120,76,0.4)";
       pubEl.innerHTML =
         `<div class="lmap-loc-pin-dot" style="${pubDot};width:12px;height:12px;border-radius:50%;cursor:pointer;"></div>` +
-        `<div class="lmap-loc-pin-label" style="color:#c9784c;pointer-events:none;">🍺 Pub</div>` +
+        `<div class="lmap-loc-pin-label" style="color:${atPub?'#4fc870':'#c9784c'};pointer-events:none;">🍺 Pub</div>` +
         `<div class="lmap-wpin-tooltip">` +
           `<div class="lmap-wpin-tt-name">🍺 The Pub</div>` +
-          `<div style="font-size:10px;color:#aaa;margin:4px 0;">Games · Gambling · Glory</div>` +
-          (here
-            ? `<div class="lmap-wpin-tt-here">✓ You are here — enter anytime</div>` +
-              `<button class="lmap-wpin-travel-btn" data-action="pub" style="background:rgba(201,120,76,0.15);border-color:rgba(201,120,76,0.5);color:#c9784c;margin-top:6px;">🍺 ENTER PUB →</button>`
-            : `<div style="font-size:10px;color:#777;margin-top:6px;">Travel to ${cont.capital||cont.name} first.</div>`) +
+          tooltipBody +
         `</div>`;
+
       pubEl.querySelector(".lmap-loc-pin-dot").addEventListener("click", e=>{ e.stopPropagation(); _openTT(pubEl, e); });
-      pubEl.querySelector('[data-action="pub"]')?.addEventListener("click", e=>{ e.stopPropagation(); _closeTT(); window._openPubPanel?.(); });
+      pubEl.querySelector('[data-action="enter-pub"]')?.addEventListener("click", e=>{ e.stopPropagation(); _closeTT(); window._openPubPanel?.(); });
+      pubEl.querySelector('[data-action="travel-pub"]')?.addEventListener("click", e=>{
+        e.stopPropagation(); _closeTT();
+        const d = e.currentTarget.dataset;
+        window.openTravelModal?.(d.dest, d.continent, 10, 60);
+      });
       pinsEl.appendChild(pubEl);
     }
   }
@@ -984,6 +1014,21 @@ function renderSettlement(sid, cid) {
 function _resolveDestination(destName) {
   if (!destName) return null;
   const d = destName.toLowerCase();
+
+  // Pub locations — resolve to their parent capital so the capital map re-renders
+  if (window.PUB_LOCATIONS) {
+    for (const p of Object.values(window.PUB_LOCATIONS)) {
+      if (d.includes(p.label.toLowerCase())) {
+        // Find which continent this pub belongs to
+        for (const [cid, cont] of Object.entries(CONTINENTS)) {
+          if (cont.capitalId && p.location.toLowerCase().includes(cont.capitalId.toLowerCase())) {
+            return { type:"capital", cid };
+          }
+        }
+      }
+    }
+  }
+
   for (const [cid, cont] of Object.entries(CONTINENTS)) {
     // Capital
     if (cont.capitalId && (d.includes(cont.capitalId) || d === cont.capital?.toLowerCase())) return { type:"continent", cid };
@@ -1010,6 +1055,7 @@ export function initLayeredMap() {
     _mapBreadcrumbs = [{id:"world", label:"World Map"}];
     if (dest.type === "settlement") { _mapBreadcrumbs.push({id:dest.cid, label:CONTINENTS[dest.cid].name}); renderSettlement(dest.sid, dest.cid); }
     else if (dest.type === "wildlands") { _mapBreadcrumbs.push({id:dest.cid, label:CONTINENTS[dest.cid].name}); renderWildlands(dest.cid); }
+    else if (dest.type === "capital") { _mapBreadcrumbs.push({id:dest.cid, label:CONTINENTS[dest.cid].name}); renderCapital(dest.cid); }
     else renderContinent(dest.cid);
   } else {
     renderWorldMap();
@@ -1023,6 +1069,7 @@ window._onTravelArrival = function(destName) {
   _mapBreadcrumbs = [{id:"world", label:"World Map"}];
   if (dest.type === "settlement") { _mapBreadcrumbs.push({id:dest.cid, label:CONTINENTS[dest.cid].name}); renderSettlement(dest.sid, dest.cid); }
   else if (dest.type === "wildlands") { _mapBreadcrumbs.push({id:dest.cid, label:CONTINENTS[dest.cid].name}); renderWildlands(dest.cid); }
+  else if (dest.type === "capital") { _mapBreadcrumbs.push({id:dest.cid, label:CONTINENTS[dest.cid].name}); renderCapital(dest.cid); }
   else renderContinent(dest.cid);
 };
 

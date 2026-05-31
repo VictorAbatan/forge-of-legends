@@ -19,7 +19,7 @@ import { db } from "../firebase/firebase.js";
 import {
   doc, getDoc, addDoc, updateDoc, deleteDoc, onSnapshot,
   collection, query, where, orderBy, limit,
-  serverTimestamp, getDocs
+  serverTimestamp, getDocs, runTransaction
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 // ── Module state ───────────────────────────────────────────────
@@ -28,22 +28,59 @@ let _charData = null;
 let _activeGameUnsub = null;
 let _activeGameId    = null;
 let _resultsUnsub    = null;
+let _lobbyGamesUnsub = null; // real-time LIVE badge listener
+let _awardedGameIds  = new Set(); // prevents double-awarding on re-render
 
 // ── Location constants ─────────────────────────────────────────
 // Pub exists in each continent's capital city.
 const PUB_LOCATIONS = {
-  northern: { location: "Frostspire",          label: "The Frosty Flagon",    continent: "Northern Continent" },
-  western:  { location: "Solmere",             label: "The Sunken Cask",      continent: "Western Continent"  },
+  northern: {
+    location:    "Frostspire",
+    travelId:    "The Frosty Flagon — Frostspire",
+    label:       "The Frosty Flagon",
+    continent:   "Northern Continent",
+    continentId: "frostveil",           // matches CONTINENTS key in map.js
+    capitalDest: "Frostspire — Gladys Kingdom",
+    capitalCost: 100, capitalTime: 300, // intercontinental travel
+  },
+  western: {
+    location:    "Solmere",
+    travelId:    "The Sunken Cask — Solmere",
+    label:       "The Sunken Cask",
+    continent:   "Western Continent",
+    continentId: "verdantis",
+    capitalDest: "Solmere — Elaria Kingdom",
+    capitalCost: 100, capitalTime: 300,
+  },
 };
 
-// Helper: is the player currently at a pub location?
+// ── Location helpers ───────────────────────────────────────────
 function _isAtPub() {
   const loc = (_charData?.kingdom || _charData?.location || "").toLowerCase();
-  return Object.values(PUB_LOCATIONS).some(p => loc.includes(p.location.toLowerCase()));
+  return Object.values(PUB_LOCATIONS).some(p => loc.includes(p.label.toLowerCase()));
+}
+function _isAtCapitalOf(p) {
+  const loc = (_charData?.kingdom || _charData?.location || "").toLowerCase();
+  return loc.includes(p.location.toLowerCase()) && !loc.includes(p.label.toLowerCase());
+}
+function _isInContinentOf(p) {
+  // Use the stored continent string first — most reliable
+  const stored = (_charData?.continent || _charData?.travelContinent || "").toLowerCase();
+  if (stored && p.continent.toLowerCase().split(" ")[0]) {
+    // e.g. "western continent" includes "western"
+    if (stored.includes(p.continent.toLowerCase().split(" ")[0])) return true;
+  }
+  // Fallback: check location keywords (covers old/edge-case accounts)
+  const loc = (_charData?.kingdom || _charData?.location || "").toLowerCase();
+  const KEYWORDS = {
+    frostveil: ["frostspire","whitecrest","icerun","paleglow","mistveil","frostfang","sheen lake","misty hollow","dark cathedral","wisteria","silver lake","hobbit cave","arctic willow","dream river","suldan mine","shrine of secrets","aurora basin","forgotten estuary"],
+    verdantis: ["solmere","sunpetal","basil","riverend","verdance","whispering forest","golden plains","element valley","defiled sanctum","asahi valley","moss stream","argent grotto","golden river","shiny cavern","purgatory","temple of verdict","heart garden","valley of overflowing"],
+  };
+  return (KEYWORDS[p.continentId] || []).some(kw => loc.includes(kw));
 }
 function _getCurrentPub() {
   const loc = (_charData?.kingdom || _charData?.location || "").toLowerCase();
-  return Object.values(PUB_LOCATIONS).find(p => loc.includes(p.location.toLowerCase())) || null;
+  return Object.values(PUB_LOCATIONS).find(p => loc.includes(p.label.toLowerCase())) || null;
 }
 
 // ── Barkeep dialogue lines (rotates) ──────────────────────────
@@ -149,7 +186,7 @@ window.renderPubPanel = function() {
   const panel = document.getElementById('panel-pub');
   if (!panel) return;
 
-  // Gate: must be at a pub location
+  // Gate: must be at a pub location (travelled inside the pub)
   if (!_isAtPub()) {
     _renderPubGate(panel);
     return;
@@ -161,29 +198,63 @@ window.renderPubPanel = function() {
 
 // ── Gate view ─────────────────────────────────────────────────
 function _renderPubGate(panel) {
+  const cards = Object.values(PUB_LOCATIONS).map(p => {
+    const atCapital   = _isAtCapitalOf(p);
+    const inContinent = _isInContinentOf(p);
+
+    let statusHtml, actionHtml;
+
+    if (atCapital) {
+      // Best case — at the right capital, one short trip away
+      statusHtml = `<div class="pub-gate-status ready">✓ You are in ${p.location}</div>`;
+      actionHtml = `<button class="pub-gate-action-btn" onclick="window._pubTravelTo('${p.travelId}','${p.continent}')">
+        ENTER PUB — 10 💰 · 1 min
+      </button>`;
+    } else if (inContinent) {
+      // Same continent, not at capital yet
+      statusHtml = `<div class="pub-gate-status near">📍 You are in the ${p.continent}</div>`;
+      actionHtml = `<div class="pub-gate-hint">Travel to ${p.location} first, then visit the pub.</div>
+        <button class="pub-gate-action-btn secondary" onclick="window.openTravelModal?.('${p.capitalDest}','${p.continent}',${p.capitalCost},${p.capitalTime})">
+          GO TO ${p.location.toUpperCase()} — ${p.capitalCost} 💰 · 5m
+        </button>`;
+    } else {
+      // Different continent entirely
+      statusHtml = `<div class="pub-gate-status far">🌍 ${p.continent}</div>`;
+      actionHtml = `<div class="pub-gate-hint">Travel to the ${p.continent} first, then find ${p.location}.</div>
+        <button class="pub-gate-action-btn secondary" onclick="window.openTravelModal?.('${p.capitalDest}','${p.continent}',${p.capitalCost},${p.capitalTime})">
+          TRAVEL THERE — ${p.capitalCost} 💰 · 5m
+        </button>`;
+    }
+
+    return `
+      <div class="pub-gate-loc-card${atCapital ? ' pub-gate-loc-ready' : ''}">
+        <div class="pub-gate-loc-top">
+          <div class="loc-name">${p.label}</div>
+          <div class="loc-cont">${p.continent} · ${p.location}</div>
+        </div>
+        ${statusHtml}
+        ${actionHtml}
+      </div>`;
+  }).join('');
+
   panel.innerHTML = `
     <div class="pub-gate">
       <div class="pub-gate-icon">🍺</div>
       <div class="pub-gate-title">THE GOLDEN FLAGON</div>
       <div class="pub-gate-desc">
         The pub is only open to those who've made the journey.
-        Travel to one of the capital cities to find your nearest tavern.
+        Find your nearest tavern in a capital city.
       </div>
-      <div class="pub-gate-locations">
-        ${Object.values(PUB_LOCATIONS).map(p => `
-          <div class="pub-gate-loc-card" onclick="window._pubTravelTo('${p.location}','${p.continent}')">
-            <div class="loc-name">${p.location}</div>
-            <div class="loc-cont">${p.continent}</div>
-            <div class="loc-cost">10 💰 · ~1 min</div>
-          </div>`).join('')}
-      </div>
+      <div class="pub-gate-locations">${cards}</div>
     </div>`;
 }
 
-// ── Travel shortcut ───────────────────────────────────────────
-window._pubTravelTo = function(dest, continent) {
-  if (typeof window._startTravel === 'function') {
-    window._startTravel({ dest, continent, cost: 10, seconds: 60 });
+// ── Travel shortcut (from map pin → openTravelModal) ─────────
+window._pubTravelTo = function(travelId, continent) {
+  if (typeof window.openTravelModal === 'function') {
+    window.openTravelModal(travelId, continent, 10, 60);
+  } else if (typeof window._startTravel === 'function') {
+    window._startTravel({ dest: travelId, continent, cost: 10, seconds: 60 });
     if (typeof window.switchPanel === 'function') window.switchPanel('map');
   } else {
     window.showToast?.('Open the World Map to travel.', '');
@@ -249,9 +320,11 @@ function _renderPubMain(panel, pub) {
 // ── Recent results listener ────────────────────────────────────
 function _listenForRecentResults() {
   if (_resultsUnsub) { _resultsUnsub(); _resultsUnsub = null; }
+  const pubLocation = _getCurrentPub()?.location || 'unknown';
   const q = query(
     collection(db, 'pubGames'),
     where('status', '==', 'complete'),
+    where('pubLocation', '==', pubLocation),
     orderBy('completedAt', 'desc'),
     limit(8)
   );
@@ -283,17 +356,37 @@ function _timeAgo(date) {
   return `${Math.floor(s/3600)}h ago`;
 }
 
-// ── Check active games (show LIVE badge) ──────────────────────
-async function _checkLiveGames() {
-  try {
-    const q = query(collection(db, 'pubGames'), where('status', '==', 'open'), limit(10));
-    const snap = await getDocs(q);
+// ── Watch active games in real-time (show/hide LIVE badge instantly) ──
+function _checkLiveGames() {
+  if (_lobbyGamesUnsub) { _lobbyGamesUnsub(); _lobbyGamesUnsub = null; }
+
+  const pub = _getCurrentPub();
+  if (!pub) return;
+
+  // Match by pubLocation — uses existing index (status ASC, pubLocation ASC)
+  const q = query(
+    collection(db, 'pubGames'),
+    where('status',      '==', 'open'),
+    where('pubLocation', '==', pub.location),
+    limit(10)
+  );
+
+  _lobbyGamesUnsub = onSnapshot(q, snap => {
+    // Reset all badge states first
+    document.querySelectorAll('.pub-table-status').forEach(el => {
+      const card = el.closest('.pub-table-card');
+      if (card && !card.classList.contains('locked')) {
+        el.textContent = 'OPEN';
+        el.classList.remove('active-game');
+      }
+    });
+    // Stamp LIVE on each open game
     snap.docs.forEach(d => {
       const g = d.data();
       const card = document.querySelector(`.pub-table-card[onclick*="${g.gameType}"] .pub-table-status`);
       if (card) { card.textContent = 'LIVE'; card.classList.add('active-game'); }
     });
-  } catch(_) {}
+  }, () => {});
 }
 
 // ── Open a game ───────────────────────────────────────────────
@@ -308,20 +401,23 @@ window._openPubGame = function(gameId) {
   const container = document.getElementById('pub-game-container');
   container.innerHTML = '';
 
-  if (gameId === 'tavern-dice')  _buildTavernDiceView(container);
+  if (gameId === 'tavern-dice')  { _buildTavernDiceView(container); _tdWatchOpenTable(); }
   else if (gameId === 'house-mode')   _buildHouseModeView(container);
-  else if (gameId === 'highest-roll') _buildHighestRollView(container);
+  else if (gameId === 'highest-roll') { _buildHighestRollView(container); _hrWatchOpenTable(); }
   else                                _buildComingSoonView(container, game);
 };
 
 // ── Back to lobby ─────────────────────────────────────────────
 function _backToLobby() {
   if (_activeGameUnsub) { _activeGameUnsub(); _activeGameUnsub = null; }
+  if (_tdTableUnsub)    { _tdTableUnsub();    _tdTableUnsub = null; }
+  if (_hrTableUnsub)    { _hrTableUnsub();    _hrTableUnsub = null; }
   _activeGameId = null;
   const container = document.getElementById('pub-game-container');
   if (container) container.innerHTML = '';
   const lobby = document.getElementById('pub-lobby');
   if (lobby) lobby.style.display = '';
+  _checkLiveGames();
 }
 window._pubBackToLobby = _backToLobby;
 
@@ -365,7 +461,8 @@ function _buildTavernDiceView(container) {
         <div class="pub-status-bar" id="td-status">Choose your number and bet to join a game.</div>
 
         <div class="pub-action-row">
-          <button class="pub-btn-roll" id="td-join-btn" onclick="window._tdJoinOrCreate()">🎲 Join / Start Game</button>
+          <button class="pub-btn-roll" id="td-create-btn" onclick="window._tdCreate()">🎲 Open Table</button>
+          <button class="pub-btn-roll" id="td-join-btn" onclick="window._tdJoin()" style="display:none">🚪 Join Table</button>
           <button class="pub-btn-secondary" id="td-roll-btn" style="display:none" onclick="window._tdCallRoll()">Roll the Dice!</button>
           <button class="pub-btn-secondary" id="td-leave-btn" style="display:none" onclick="window._tdLeaveGame()">Leave Table</button>
         </div>
@@ -401,55 +498,88 @@ window._tdPickNumber = function(n) {
   document.querySelectorAll('.pub-num-btn').forEach(b => b.classList.toggle('selected', +b.dataset.n === n));
 };
 
-window._tdJoinOrCreate = async function() {
+// ── Live table watcher — dims Create btn, shows Join btn in real-time ──
+let _tdTableUnsub = null;
+function _tdWatchOpenTable() {
+  if (_tdTableUnsub) { _tdTableUnsub(); _tdTableUnsub = null; }
+  const pub = _getCurrentPub();
+  if (!pub) return;
+  const q = query(
+    collection(db,'pubGames'),
+    where('gameType',    '==', 'tavern-dice'),
+    where('status',      '==', 'open'),
+    where('pubLocation', '==', pub.location),
+    limit(1)
+  );
+  _tdTableUnsub = onSnapshot(q, snap => {
+    const createBtn = document.getElementById('td-create-btn');
+    const joinBtn   = document.getElementById('td-join-btn');
+    if (!createBtn) return; // view not mounted
+    const hasOpenTable = !snap.empty;
+    const amSeated     = snap.docs.some(d => d.data().players?.some(p => p.uid === (_uid || window._uid)));
+    if (amSeated) {
+      // Already in a game — handled by _tdSubscribeGame; don't touch buttons here
+      return;
+    }
+    if (hasOpenTable) {
+      createBtn.disabled = true;
+      createBtn.style.opacity = '0.4';
+      createBtn.title = 'A table is already open — join it!';
+      joinBtn.style.display = '';
+    } else {
+      createBtn.disabled = false;
+      createBtn.style.opacity = '';
+      createBtn.title = '';
+      joinBtn.style.display = 'none';
+    }
+  }, () => {});
+}
+
+window._tdCreate = async function() {
   _uid      = _uid || window._uid;
   _charData = _charData || window._charData;
   if (!_uid || !_charData) { window.showToast?.('Not logged in.', 'error'); return; }
-
   if (_tdPickedNumber === null) { window.showToast?.('Pick a number first!', ''); return; }
-
   const bet = parseInt(document.getElementById('td-bet-input').value) || 100;
   if (bet < 1)                     { window.showToast?.('Enter a valid bet.', ''); return; }
   if ((_charData.gold || 0) < bet) { window.showToast?.(`Not enough gold. You have ${_charData.gold||0}.`, 'error'); return; }
 
-  const btn = document.getElementById('td-join-btn');
+  const btn = document.getElementById('td-create-btn');
   btn.disabled = true;
 
-  try {
-    // Check for an open game to join
-    const q = query(collection(db,'pubGames'), where('gameType','==','tavern-dice'), where('status','==','open'), limit(1));
-    const snap = await getDocs(q);
+  const pub = _getCurrentPub();
+  const pubLocation = pub?.location || 'unknown';
 
-    if (!snap.empty) {
-      // Join existing game
-      const gameDoc = snap.docs[0];
-      const game    = gameDoc.data();
-      const taken   = game.players.map(p => p.pick);
-      if (taken.includes(_tdPickedNumber)) {
-        window.showToast?.('That number is taken! Pick another.', 'error');
-        btn.disabled = false;
-        return;
-      }
-      if (game.players.length >= MAX_TAVERN_DICE_PLAYERS) {
-        window.showToast?.('Table is full! Start a new game.', '');
-        btn.disabled = false;
-        return;
-      }
-      const newPlayer = { uid: _uid, name: _charData.name || 'Unknown', pick: _tdPickedNumber, bet };
-      await updateDoc(doc(db,'pubGames',gameDoc.id), {
-        players: [...game.players, newPlayer],
-        pot: (game.pot || 0) + bet,
-      });
-      // Deduct gold
-      await _deductGold(bet);
-      _activeGameId = gameDoc.id;
-      window.showToast?.(`Joined the table! You picked ${_tdPickedNumber}.`, 'success');
-    } else {
-      // Create new game
-      const newGame = {
+  try {
+    // Guard: block if a table already exists (race condition safety)
+    const existing = await getDocs(query(
+      collection(db,'pubGames'),
+      where('gameType','==','tavern-dice'),
+      where('status','==','open'),
+      where('pubLocation','==',pubLocation),
+      limit(1)
+    ));
+    if (!existing.empty) {
+      window.showToast?.('A table is already open — join it instead!', '');
+      btn.disabled = false;
+      return;
+    }
+    const newRef = doc(collection(db,'pubGames'));
+    await runTransaction(db, async tx => {
+      // Double-check inside transaction
+      const recheck = await getDocs(query(
+        collection(db,'pubGames'),
+        where('gameType','==','tavern-dice'),
+        where('status','==','open'),
+        where('pubLocation','==',pubLocation),
+        limit(1)
+      ));
+      if (!recheck.empty) throw new Error('table_exists');
+      tx.set(newRef, {
         gameType:    'tavern-dice',
         status:      'open',
         hostUid:     _uid,
+        pubLocation,
         players:     [{ uid: _uid, name: _charData.name || 'Unknown', pick: _tdPickedNumber, bet }],
         pot:         bet,
         rollResult:  null,
@@ -458,17 +588,70 @@ window._tdJoinOrCreate = async function() {
         prize:       0,
         createdAt:   serverTimestamp(),
         completedAt: null,
-      };
-      const ref = await addDoc(collection(db,'pubGames'), newGame);
-      await _deductGold(bet);
-      _activeGameId = ref.id;
-      window.showToast?.(`Table opened! You picked ${_tdPickedNumber}. Share with friends!`, 'success');
-    }
-
+      });
+    });
+    await _deductGold(bet);
+    _activeGameId = newRef.id;
+    window.showToast?.(`Table opened! You picked ${_tdPickedNumber}. Waiting for others...`, 'success');
     _tdSubscribeGame(_activeGameId);
   } catch(e) {
-    console.warn('[Pub] tdJoinOrCreate error:', e);
-    window.showToast?.('Failed to join. Try again.', 'error');
+    if (e.message === 'table_exists') {
+      window.showToast?.('Someone just opened a table — join it!', '');
+    } else {
+      console.warn('[Pub] tdCreate error:', e);
+      window.showToast?.('Failed to open table. Try again.', 'error');
+    }
+    btn.disabled = false;
+  }
+};
+
+window._tdJoin = async function() {
+  _uid      = _uid || window._uid;
+  _charData = _charData || window._charData;
+  if (!_uid || !_charData) { window.showToast?.('Not logged in.', 'error'); return; }
+  if (_tdPickedNumber === null) { window.showToast?.('Pick a number first!', ''); return; }
+  const bet = parseInt(document.getElementById('td-bet-input').value) || 100;
+  if (bet < 1)                     { window.showToast?.('Enter a valid bet.', ''); return; }
+  if ((_charData.gold || 0) < bet) { window.showToast?.(`Not enough gold. You have ${_charData.gold||0}.`, 'error'); return; }
+
+  const btn = document.getElementById('td-join-btn');
+  btn.disabled = true;
+  const pub = _getCurrentPub();
+  const pubLocation = pub?.location || 'unknown';
+
+  try {
+    const probe = await getDocs(query(
+      collection(db,'pubGames'),
+      where('gameType','==','tavern-dice'),
+      where('status','==','open'),
+      where('pubLocation','==',pubLocation),
+      limit(1)
+    ));
+    if (probe.empty) {
+      window.showToast?.('No open table found. Open one yourself!', '');
+      btn.disabled = false;
+      return;
+    }
+    const gameRef = doc(db,'pubGames', probe.docs[0].id);
+    await runTransaction(db, async tx => {
+      const snap = await tx.get(gameRef);
+      if (!snap.exists() || snap.data().status !== 'open') throw new Error('game_gone');
+      const game = snap.data();
+      if (game.players.some(p => p.uid === _uid))            throw new Error('already_seated');
+      if (game.players.some(p => p.pick === _tdPickedNumber)) throw new Error('number_taken');
+      if (game.players.length >= MAX_TAVERN_DICE_PLAYERS)    throw new Error('table_full');
+      tx.update(gameRef, {
+        players: [...game.players, { uid: _uid, name: _charData.name || 'Unknown', pick: _tdPickedNumber, bet }],
+        pot:     (game.pot || 0) + bet,
+      });
+      _activeGameId = snap.id;
+    });
+    await _deductGold(bet);
+    window.showToast?.(`Joined the table! You picked ${_tdPickedNumber}.`, 'success');
+    _tdSubscribeGame(_activeGameId);
+  } catch(e) {
+    const msgs = { game_gone:'Table closed — try opening a new one.', already_seated:'Already seated!', number_taken:'That number is taken! Pick another.', table_full:'Table is full!' };
+    window.showToast?.(msgs[e.message] || 'Failed to join. Try again.', 'error');
     btn.disabled = false;
   }
 };
@@ -486,9 +669,10 @@ function _tdRenderGameState(game, gameId) {
   const potSub   = document.getElementById('td-pot-sub');
   const seatsEl  = document.getElementById('td-seats');
   const statusEl = document.getElementById('td-status');
-  const joinBtn  = document.getElementById('td-join-btn');
-  const rollBtn  = document.getElementById('td-roll-btn');
-  const leaveBtn = document.getElementById('td-leave-btn');
+  const joinBtn     = document.getElementById('td-join-btn');
+  const createBtn   = document.getElementById('td-create-btn');
+  const rollBtn     = document.getElementById('td-roll-btn');
+  const leaveBtn    = document.getElementById('td-leave-btn');
   if (!potEl) return;
 
   const isHost    = game.hostUid === _uid;
@@ -515,7 +699,11 @@ function _tdRenderGameState(game, gameId) {
   });
 
   if (game.status === 'open') {
-    if (joinBtn)  joinBtn.style.display  = amPlaying ? 'none' : '';
+    // Once seated, hide both entry buttons; watcher handles them for non-seated players
+    if (amPlaying) {
+      if (createBtn) { createBtn.style.display = 'none'; }
+      if (joinBtn)   { joinBtn.style.display   = 'none'; }
+    }
     if (rollBtn)  rollBtn.style.display  = (isHost && amPlaying && game.players.length >= 2) ? '' : 'none';
     if (leaveBtn) leaveBtn.style.display = amPlaying ? '' : 'none';
     if (statusEl) statusEl.textContent   = amPlaying
@@ -525,17 +713,19 @@ function _tdRenderGameState(game, gameId) {
   }
 
   if (game.status === 'rolling') {
-    if (joinBtn)  joinBtn.style.display  = 'none';
-    if (rollBtn)  rollBtn.style.display  = 'none';
-    if (leaveBtn) leaveBtn.style.display = 'none';
+    if (createBtn) createBtn.style.display = 'none';
+    if (joinBtn)   joinBtn.style.display   = 'none';
+    if (rollBtn)   rollBtn.style.display   = 'none';
+    if (leaveBtn)  leaveBtn.style.display  = 'none';
     _tdAnimateDice(null);
     if (statusEl) { statusEl.textContent = '🎲 Rolling...'; statusEl.className = 'pub-status-bar roll'; }
   }
 
   if (game.status === 'complete') {
-    if (joinBtn)  joinBtn.style.display  = 'none';
-    if (rollBtn)  rollBtn.style.display  = 'none';
-    if (leaveBtn) leaveBtn.style.display = 'none';
+    if (createBtn) createBtn.style.display = 'none';
+    if (joinBtn)   joinBtn.style.display   = 'none';
+    if (rollBtn)   rollBtn.style.display   = 'none';
+    if (leaveBtn)  leaveBtn.style.display  = 'none';
     _tdAnimateDice(game.rollResult);
 
     // Highlight winning number
@@ -551,7 +741,14 @@ function _tdRenderGameState(game, gameId) {
       statusEl.className = `pub-status-bar ${didWin ? 'win' : 'loss'}`;
     }
 
-    if (didWin) _spawnCoinRain();
+    if (didWin) {
+      _spawnCoinRain();
+      // Log activity once — gold already awarded in _tdExecuteRoll
+      if (!_awardedGameIds.has(gameId)) {
+        _awardedGameIds.add(gameId);
+        window.logActivity?.('🎲', `<b>Pub Win!</b> Tavern Dice — Won <b>${game.prize}</b> 💰.`, '#4ec878');
+      }
+    }
 
     // Show result overlay
     if (amPlaying) {
@@ -582,7 +779,6 @@ window._tdCallRoll = async function() {
 };
 
 async function _tdExecuteRoll(gameId) {
-  const snap = await getDocs(query(collection(db,'pubGames'), limit(1))); // force fresh read
   const gameSnap = await getDoc(doc(db,'pubGames',gameId));
   if (!gameSnap.exists()) return;
   const game = gameSnap.data();
@@ -601,8 +797,9 @@ async function _tdExecuteRoll(gameId) {
     });
   }
 
-  const prize = game.pot;
+  const prize = game.pot; // full pot — losers' bets already deducted at join time
 
+  // Mark game complete
   await updateDoc(doc(db,'pubGames',gameId), {
     status:      'complete',
     rollResult:  roll,
@@ -612,7 +809,8 @@ async function _tdExecuteRoll(gameId) {
     completedAt: serverTimestamp(),
   });
 
-  // Award coins to winner via Firestore
+  // Award full pot to winner exactly once, here in the host's execute roll
+  // Using a transaction so concurrent onSnapshot handlers can't double-award
   await _awardGold(winner.uid, prize);
 }
 
@@ -781,11 +979,11 @@ window._hmRoll = async function() {
       if (statusEl) { statusEl.textContent = `🎉 You matched! Rowan pays out ${prize} 💰!`; statusEl.className = 'pub-status-bar win'; }
       _spawnCoinRain();
       _showResultOverlay(true, playerRoll, 'You', prize, prize);
-      logActivity?.('🎲', `<b>Pub Win!</b> Against the House — Rolled <b>${playerRoll}</b>, won <b>${prize}</b> 💰.`, '#4ec878');
+      window.logActivity?.('🎲', `<b>Pub Win!</b> Against the House — Rolled <b>${playerRoll}</b>, won <b>${prize}</b> 💰.`, '#4ec878');
     } else {
       if (statusEl) { statusEl.textContent = `You picked ${_hmPicked}, rolled ${playerRoll}. Rowan keeps your ${bet} 💰.`; statusEl.className = 'pub-status-bar loss'; }
       _showResultOverlay(false, playerRoll, 'Rowan', bet, 0);
-      logActivity?.('🎲', `<b>Pub Loss.</b> Against the House — Rolled <b>${playerRoll}</b>, lost <b>${bet}</b> 💰.`, '#e05555');
+      window.logActivity?.('🎲', `<b>Pub Loss.</b> Against the House — Rolled <b>${playerRoll}</b>, lost <b>${bet}</b> 💰.`, '#e05555');
     }
 
     // Log to Firestore results
@@ -838,7 +1036,8 @@ function _buildHighestRollView(container) {
         <div class="pub-status-bar" id="hr-status">Set your bet and join the table.</div>
 
         <div class="pub-action-row">
-          <button class="pub-btn-roll" id="hr-join-btn" onclick="window._hrJoinOrCreate()">⚔️ Join / Start Game</button>
+          <button class="pub-btn-roll" id="hr-create-btn" onclick="window._hrCreate()">⚔️ Open Table</button>
+          <button class="pub-btn-roll" id="hr-join-btn" onclick="window._hrJoin()" style="display:none">🚪 Join Table</button>
           <button class="pub-btn-secondary" id="hr-roll-btn" style="display:none" onclick="window._hrCallRoll()">Roll for Everyone!</button>
           <button class="pub-btn-secondary" id="hr-leave-btn" style="display:none" onclick="window._hrLeaveGame()">Leave Table</button>
         </div>
@@ -865,38 +1064,80 @@ window._hrSetBet = function(v) {
   document.querySelectorAll('#game-highest-roll .pub-bet-preset').forEach(b => b.classList.toggle('active', +b.textContent === v));
 };
 
-window._hrJoinOrCreate = async function() {
+// ── Live table watcher for Highest Roll ──
+let _hrTableUnsub = null;
+function _hrWatchOpenTable() {
+  if (_hrTableUnsub) { _hrTableUnsub(); _hrTableUnsub = null; }
+  const pub = _getCurrentPub();
+  if (!pub) return;
+  const q = query(
+    collection(db,'pubGames'),
+    where('gameType',    '==', 'highest-roll'),
+    where('status',      '==', 'open'),
+    where('pubLocation', '==', pub.location),
+    limit(1)
+  );
+  _hrTableUnsub = onSnapshot(q, snap => {
+    const createBtn = document.getElementById('hr-create-btn');
+    const joinBtn   = document.getElementById('hr-join-btn');
+    if (!createBtn) return;
+    const amSeated = snap.docs.some(d => d.data().players?.some(p => p.uid === (_uid || window._uid)));
+    if (amSeated) return;
+    if (!snap.empty) {
+      createBtn.disabled = true;
+      createBtn.style.opacity = '0.4';
+      createBtn.title = 'A table is already open — join it!';
+      joinBtn.style.display = '';
+    } else {
+      createBtn.disabled = false;
+      createBtn.style.opacity = '';
+      createBtn.title = '';
+      joinBtn.style.display = 'none';
+    }
+  }, () => {});
+}
+
+window._hrCreate = async function() {
   _uid      = _uid || window._uid;
   _charData = _charData || window._charData;
   if (!_uid || !_charData) { window.showToast?.('Not logged in.', 'error'); return; }
-
   const bet = parseInt(document.getElementById('hr-bet-input').value) || 100;
   if (bet < 1)                     { window.showToast?.('Enter a valid bet.', ''); return; }
   if ((_charData.gold || 0) < bet) { window.showToast?.(`Not enough gold.`, 'error'); return; }
 
-  const btn = document.getElementById('hr-join-btn');
+  const btn = document.getElementById('hr-create-btn');
   btn.disabled = true;
+  const pub = _getCurrentPub();
+  const pubLocation = pub?.location || 'unknown';
 
   try {
-    const q = query(collection(db,'pubGames'), where('gameType','==','highest-roll'), where('status','==','open'), limit(1));
-    const snap = await getDocs(q);
-
-    if (!snap.empty) {
-      const gameDoc = snap.docs[0];
-      const game    = gameDoc.data();
-      if (game.players.some(p => p.uid === _uid)) { window.showToast?.('Already seated!', ''); btn.disabled = false; return; }
-      await updateDoc(doc(db,'pubGames',gameDoc.id), {
-        players: [...game.players, { uid: _uid, name: _charData.name || 'Unknown', bet, roll: null }],
-        pot:     (game.pot || 0) + bet,
-      });
-      await _deductGold(bet);
-      _activeGameId = gameDoc.id;
-      window.showToast?.('Joined the table! Host will roll when ready.', 'success');
-    } else {
-      const ref = await addDoc(collection(db,'pubGames'), {
+    const existing = await getDocs(query(
+      collection(db,'pubGames'),
+      where('gameType','==','highest-roll'),
+      where('status','==','open'),
+      where('pubLocation','==',pubLocation),
+      limit(1)
+    ));
+    if (!existing.empty) {
+      window.showToast?.('A table is already open — join it instead!', '');
+      btn.disabled = false;
+      return;
+    }
+    const newRef = doc(collection(db,'pubGames'));
+    await runTransaction(db, async tx => {
+      const recheck = await getDocs(query(
+        collection(db,'pubGames'),
+        where('gameType','==','highest-roll'),
+        where('status','==','open'),
+        where('pubLocation','==',pubLocation),
+        limit(1)
+      ));
+      if (!recheck.empty) throw new Error('table_exists');
+      tx.set(newRef, {
         gameType:    'highest-roll',
         status:      'open',
         hostUid:     _uid,
+        pubLocation,
         players:     [{ uid: _uid, name: _charData.name || 'Unknown', bet, roll: null }],
         pot:         bet,
         rollResult:  null,
@@ -906,14 +1147,67 @@ window._hrJoinOrCreate = async function() {
         createdAt:   serverTimestamp(),
         completedAt: null,
       });
-      await _deductGold(bet);
-      _activeGameId = ref.id;
-      window.showToast?.('Table opened! Invite others and roll when ready.', 'success');
-    }
+    });
+    await _deductGold(bet);
+    _activeGameId = newRef.id;
+    window.showToast?.('Table opened! Invite others and roll when ready.', 'success');
     _hrSubscribeGame(_activeGameId);
   } catch(e) {
-    console.warn('[Pub] hrJoinOrCreate error:', e);
-    window.showToast?.('Failed to join. Try again.', 'error');
+    if (e.message === 'table_exists') {
+      window.showToast?.('Someone just opened a table — join it!', '');
+    } else {
+      console.warn('[Pub] hrCreate error:', e);
+      window.showToast?.('Failed to open table. Try again.', 'error');
+    }
+    btn.disabled = false;
+  }
+};
+
+window._hrJoin = async function() {
+  _uid      = _uid || window._uid;
+  _charData = _charData || window._charData;
+  if (!_uid || !_charData) { window.showToast?.('Not logged in.', 'error'); return; }
+  const bet = parseInt(document.getElementById('hr-bet-input').value) || 100;
+  if (bet < 1)                     { window.showToast?.('Enter a valid bet.', ''); return; }
+  if ((_charData.gold || 0) < bet) { window.showToast?.(`Not enough gold.`, 'error'); return; }
+
+  const btn = document.getElementById('hr-join-btn');
+  btn.disabled = true;
+  const pub = _getCurrentPub();
+  const pubLocation = pub?.location || 'unknown';
+
+  try {
+    const probe = await getDocs(query(
+      collection(db,'pubGames'),
+      where('gameType','==','highest-roll'),
+      where('status','==','open'),
+      where('pubLocation','==',pubLocation),
+      limit(1)
+    ));
+    if (probe.empty) {
+      window.showToast?.('No open table found. Open one yourself!', '');
+      btn.disabled = false;
+      return;
+    }
+    const gameRef = doc(db,'pubGames', probe.docs[0].id);
+    await runTransaction(db, async tx => {
+      const snap = await tx.get(gameRef);
+      if (!snap.exists() || snap.data().status !== 'open') throw new Error('game_gone');
+      const game = snap.data();
+      if (game.players.some(p => p.uid === _uid))         throw new Error('already_seated');
+      if (game.players.length >= 10)                       throw new Error('table_full');
+      tx.update(gameRef, {
+        players: [...game.players, { uid: _uid, name: _charData.name || 'Unknown', bet, roll: null }],
+        pot:     (game.pot || 0) + bet,
+      });
+      _activeGameId = snap.id;
+    });
+    await _deductGold(bet);
+    window.showToast?.('Joined the table! Host will roll when ready.', 'success');
+    _hrSubscribeGame(_activeGameId);
+  } catch(e) {
+    const msgs = { game_gone:'Table closed — try opening a new one.', already_seated:'Already seated!', table_full:'Table is full!' };
+    window.showToast?.(msgs[e.message] || 'Failed to join. Try again.', 'error');
     btn.disabled = false;
   }
 };
@@ -931,9 +1225,10 @@ function _hrRenderGameState(game, gameId) {
   const potSub   = document.getElementById('hr-pot-sub');
   const seatsEl  = document.getElementById('hr-seats');
   const statusEl = document.getElementById('hr-status');
-  const joinBtn  = document.getElementById('hr-join-btn');
-  const rollBtn  = document.getElementById('hr-roll-btn');
-  const leaveBtn = document.getElementById('hr-leave-btn');
+  const joinBtn   = document.getElementById('hr-join-btn');
+  const createBtn = document.getElementById('hr-create-btn');
+  const rollBtn   = document.getElementById('hr-roll-btn');
+  const leaveBtn  = document.getElementById('hr-leave-btn');
   if (!potEl) return;
 
   const isHost    = game.hostUid === _uid;
@@ -952,7 +1247,10 @@ function _hrRenderGameState(game, gameId) {
   }
 
   if (game.status === 'open') {
-    if (joinBtn)  joinBtn.style.display  = amPlaying ? 'none' : '';
+    if (amPlaying) {
+      if (createBtn) createBtn.style.display = 'none';
+      if (joinBtn)   joinBtn.style.display   = 'none';
+    }
     if (rollBtn)  rollBtn.style.display  = (isHost && amPlaying && game.players.length >= 2) ? '' : 'none';
     if (leaveBtn) leaveBtn.style.display = amPlaying ? '' : 'none';
     if (statusEl) statusEl.textContent   = amPlaying
@@ -962,18 +1260,20 @@ function _hrRenderGameState(game, gameId) {
   }
 
   if (game.status === 'rolling') {
-    if (joinBtn)  joinBtn.style.display  = 'none';
-    if (rollBtn)  rollBtn.style.display  = 'none';
-    if (leaveBtn) leaveBtn.style.display = 'none';
+    if (createBtn) createBtn.style.display = 'none';
+    if (joinBtn)   joinBtn.style.display   = 'none';
+    if (rollBtn)   rollBtn.style.display   = 'none';
+    if (leaveBtn)  leaveBtn.style.display  = 'none';
     const face = document.getElementById('hr-dice-face');
     if (face) { face.textContent = '🎲'; face.classList.remove('rolling','result-flash'); void face.offsetWidth; face.classList.add('rolling'); }
     if (statusEl) { statusEl.textContent = '🎲 Rolling for everyone...'; statusEl.className = 'pub-status-bar roll'; }
   }
 
   if (game.status === 'complete') {
-    if (joinBtn)  joinBtn.style.display  = 'none';
-    if (rollBtn)  rollBtn.style.display  = 'none';
-    if (leaveBtn) leaveBtn.style.display = 'none';
+    if (createBtn) createBtn.style.display = 'none';
+    if (joinBtn)   joinBtn.style.display   = 'none';
+    if (rollBtn)   rollBtn.style.display   = 'none';
+    if (leaveBtn)  leaveBtn.style.display  = 'none';
     const face = document.getElementById('hr-dice-face');
     if (face) { face.classList.remove('rolling','result-flash'); face.textContent = game.rollResult; void face.offsetWidth; face.classList.add('result-flash'); }
 
@@ -984,7 +1284,14 @@ function _hrRenderGameState(game, gameId) {
         : `${game.winnerName} rolled ${game.rollResult} and wins ${game.prize} 💰!`;
       statusEl.className = `pub-status-bar ${didWin ? 'win' : 'loss'}`;
     }
-    if (didWin) _spawnCoinRain();
+    if (didWin) {
+      _spawnCoinRain();
+      // Log activity once — gold already awarded in _hrExecuteRoll
+      if (!_awardedGameIds.has(gameId)) {
+        _awardedGameIds.add(gameId);
+        window.logActivity?.('🎲', `<b>Pub Win!</b> Highest Roll — Rolled <b>${game.rollResult}</b>, won <b>${game.prize}</b> 💰.`, '#4ec878');
+      }
+    }
     if (amPlaying) setTimeout(() => _showResultOverlay(didWin, game.rollResult, game.winnerName, game.prize, didWin ? game.prize : 0), 800);
     setTimeout(() => { if (_activeGameUnsub) { _activeGameUnsub(); _activeGameUnsub = null; } _activeGameId = null; }, 5000);
   }
@@ -1020,6 +1327,7 @@ async function _hrExecuteRoll(gameId) {
     prize:       game.pot,
     completedAt: serverTimestamp(),
   });
+  // Award full pot to winner exactly once, here in the host's execute roll
   await _awardGold(winner.uid, game.pot);
 }
 
