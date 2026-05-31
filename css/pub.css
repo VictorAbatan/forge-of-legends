@@ -515,10 +515,25 @@
   cursor: pointer;
   transition: all 0.13s;
 }
-.pub-bet-preset:hover, .pub-bet-preset.active {
+.pub-bet-preset:hover:not(:disabled):not(.disabled),
+.pub-bet-preset.active:not(:disabled):not(.disabled) {
   border-color: var(--gold-dim);
   color: var(--gold);
   background: rgba(201,168,76,0.08);
+}
+.pub-bet-preset.active.disabled,
+.pub-bet-preset.active:disabled {
+  border-color: var(--gold-dim);
+  color: var(--gold);
+  background: rgba(201,168,76,0.08);
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.pub-bet-preset:disabled:not(.active),
+.pub-bet-preset.disabled:not(.active) {
+  opacity: 0.22;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 .pub-bet-input {
   width: 80px;

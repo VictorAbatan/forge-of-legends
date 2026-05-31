@@ -5,7 +5,7 @@ import {
 import {
   doc, getDoc, setDoc, updateDoc, addDoc, deleteDoc,
   collection, query, where, orderBy, limit, limitToLast,
-  onSnapshot, serverTimestamp, getDocs, increment,
+  onSnapshot, serverTimestamp, getDocs, increment, runTransaction,
   arrayUnion, arrayRemove
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
@@ -11095,13 +11095,14 @@ window.doPvpTurn = async function(action, skillName) {
       try {
         const myRef  = doc(db, 'characters', _uid);
         const oppRef = doc(db, 'characters', opp.uid);
-        const [mySnap, oppSnap] = await Promise.all([getDoc(myRef), getDoc(oppRef)]);
-        if (mySnap.exists() && oppSnap.exists()) {
-          await updateDoc(myRef,  { gold: (mySnap.data().gold||0) + wager });
-          await updateDoc(oppRef, { gold: Math.max(0,(oppSnap.data().gold||0) - wager) });
-          _charData.gold = (mySnap.data().gold||0) + wager;
-          set('stat-gold', _charData.gold); set('s-gold', _charData.gold);
-        }
+        // Atomic: winner gains wager, loser loses wager.
+        // increment() applies the delta server-side so concurrent writes cannot interleave.
+        await runTransaction(db, async tx => {
+          tx.update(myRef,  { gold: increment(+wager) });
+          tx.update(oppRef, { gold: increment(-wager) });
+        });
+        _charData.gold = (_charData.gold || 0) + wager;
+        set('stat-gold', _charData.gold); set('s-gold', _charData.gold);
       } catch(e) { console.warn('PVP wager:', e); }
     }
   }

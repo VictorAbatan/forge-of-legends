@@ -4,10 +4,11 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── IMPORTS (only once, at the very top) ──
-const { onCall, HttpsError } = require("firebase-functions/v2/https");
-const { onSchedule }         = require("firebase-functions/v2/scheduler");
-const { getFirestore, FieldValue } = require("firebase-admin/firestore");
-const { initializeApp }      = require("firebase-admin/app");
+const { onCall, HttpsError }        = require("firebase-functions/v2/https");
+const { onSchedule }                = require("firebase-functions/v2/scheduler");
+const { onDocumentUpdated }         = require("firebase-functions/v2/firestore");
+const { getFirestore, FieldValue }  = require("firebase-admin/firestore");
+const { initializeApp }             = require("firebase-admin/app");
 
 initializeApp();
 const db = getFirestore();
@@ -1160,4 +1161,225 @@ exports.buyListing = onCall(CALL_OPTS, async (request) => {
 // ═══════════════════════════════════════════════════════════════
 //  AUTO-ARCHIVE WORLD EVENTS (onCreate trigger)
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  PUB GAMES — Server-side gold settlement
+// ═══════════════════════════════════════════════════════════════
+
+const PUB_REGION = "europe-west1";
+
+// ── settlePubGame ─────────────────────────────────────────────
+//  Firestore trigger: fires when a pubGames doc transitions to
+//  status === 'complete'. Awards the full pot to the winner.
+//  Runs as admin — bypasses all security rules.
+exports.settlePubGame = onDocumentUpdated(
+  { document: "pubGames/{gameId}", region: PUB_REGION },
+  async (event) => {
+    const before = event.data.before.data();
+    const after  = event.data.after.data();
+
+    // Only act on the transition to 'complete', and only once
+    if (before.status === "complete" || after.status !== "complete") return;
+
+    const { winnerUid, pot, goldSettled } = after;
+    if (!winnerUid || !pot || goldSettled) return;
+
+    await db.runTransaction(async (tx) => {
+      const gameRef  = event.data.after.ref;
+      const gameSnap = await tx.get(gameRef);
+      // Guard against double-settlement
+      if (gameSnap.data()?.goldSettled) return;
+
+      const winnerRef = db.collection("characters").doc(winnerUid);
+      tx.update(winnerRef, { gold: FieldValue.increment(pot) });
+      tx.update(gameRef,   { goldSettled: true });
+    });
+
+    console.log("[PubGames] Settled " + event.params.gameId + ": awarded " + pot + " gold to " + winnerUid);
+  }
+);
+
+// ── createPubGame ─────────────────────────────────────────────
+//  Callable: host creates a table and their bet is deducted
+//  atomically — no client-side gold write needed.
+exports.createPubGame = onCall(CALL_OPTS, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Must be logged in.");
+
+  const { gameType, pick: playerPick, bet, pubLocation, playerName } = request.data;
+  if (!gameType || !bet || bet < 1 || !pubLocation)
+    throw new HttpsError("invalid-argument", "Missing required fields.");
+
+  const charRef = db.collection("characters").doc(uid);
+
+  return await db.runTransaction(async (tx) => {
+    const charSnap = await tx.get(charRef);
+    if (!charSnap.exists) throw new HttpsError("not-found", "Character not found.");
+    const char = charSnap.data();
+    if ((char.gold || 0) < bet)
+      throw new HttpsError("failed-precondition", "Not enough gold. You have " + (char.gold || 0) + ".");
+
+    // Block if a table is already open at this pub for this game type
+    const openSnap = await db.collection("pubGames")
+      .where("gameType",    "==", gameType)
+      .where("status",      "==", "open")
+      .where("pubLocation", "==", pubLocation)
+      .limit(1)
+      .get();
+    if (!openSnap.empty)
+      throw new HttpsError("already-exists", "A table is already open — join it instead!");
+
+    const gameRef    = db.collection("pubGames").doc();
+    const playerEntry = gameType === "tavern-dice"
+      ? { uid, name: playerName || char.name, pick: playerPick, bet }
+      : { uid, name: playerName || char.name, bet, roll: null };
+
+    tx.set(gameRef, {
+      gameType,
+      status:      "open",
+      hostUid:     uid,
+      pubLocation,
+      tableStake:  bet,
+      players:     [playerEntry],
+      pot:         bet,
+      rollResult:  null,
+      winnerUid:   null,
+      winnerName:  null,
+      prize:       0,
+      goldSettled: false,
+      createdAt:   FieldValue.serverTimestamp(),
+      completedAt: null,
+    });
+    tx.update(charRef, { gold: FieldValue.increment(-bet) });
+
+    return { success: true, gameId: gameRef.id, tableStake: bet };
+  });
+});
+
+// ── joinPubGame ───────────────────────────────────────────────
+//  Callable: player joins an existing open table. Enforces the
+//  table stake, deducts their gold, and adds them atomically.
+exports.joinPubGame = onCall(CALL_OPTS, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Must be logged in.");
+
+  const { gameId, pick: playerPick, playerName } = request.data;
+  if (!gameId) throw new HttpsError("invalid-argument", "Missing gameId.");
+
+  const gameRef = db.collection("pubGames").doc(gameId);
+  const charRef = db.collection("characters").doc(uid);
+
+  return await db.runTransaction(async (tx) => {
+    const [gameSnap, charSnap] = await Promise.all([tx.get(gameRef), tx.get(charRef)]);
+
+    if (!gameSnap.exists) throw new HttpsError("not-found", "Game not found.");
+    if (!charSnap.exists) throw new HttpsError("not-found", "Character not found.");
+
+    const game = gameSnap.data();
+    const char = charSnap.data();
+
+    if (game.status !== "open")
+      throw new HttpsError("failed-precondition", "Table is no longer open.");
+
+    const bet = game.tableStake || game.players?.[0]?.bet || 100;
+
+    if ((char.gold || 0) < bet)
+      throw new HttpsError("failed-precondition", "Not enough gold for this table's stake (" + bet + ").");
+    if (game.players.some(p => p.uid === uid))
+      throw new HttpsError("already-exists", "Already seated at this table.");
+    if (game.gameType === "tavern-dice" && game.players.some(p => p.pick === playerPick))
+      throw new HttpsError("failed-precondition", "That number is already taken.");
+    if (game.players.length >= 10)
+      throw new HttpsError("failed-precondition", "Table is full.");
+
+    const playerEntry = game.gameType === "tavern-dice"
+      ? { uid, name: playerName || char.name, pick: playerPick, bet }
+      : { uid, name: playerName || char.name, bet, roll: null };
+
+    tx.update(gameRef, {
+      players: FieldValue.arrayUnion(playerEntry),
+      pot:     FieldValue.increment(bet),
+    });
+    tx.update(charRef, { gold: FieldValue.increment(-bet) });
+
+    return { success: true, gameId, bet, tableStake: bet };
+  });
+});
+
+// ── rollPubGame ───────────────────────────────────────────────
+//  Callable: host triggers the dice roll for tavern-dice or
+//  highest-roll. Computes result server-side and writes ALL
+//  outcome fields (winnerUid, winnerName, prize, goldSettled)
+//  as admin — bypassing the client-write restriction on those
+//  fields in Firestore rules.  Gold is then awarded by the
+//  settlePubGame onDocumentUpdated trigger.
+exports.rollPubGame = onCall(CALL_OPTS, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Must be logged in.");
+
+  const { gameId } = request.data;
+  if (!gameId) throw new HttpsError("invalid-argument", "Missing gameId.");
+
+  const gameRef = db.collection("pubGames").doc(gameId);
+
+  return await db.runTransaction(async (tx) => {
+    const gameSnap = await tx.get(gameRef);
+    if (!gameSnap.exists) throw new HttpsError("not-found", "Game not found.");
+
+    const game = gameSnap.data();
+
+    if (game.hostUid !== uid)
+      throw new HttpsError("permission-denied", "Only the host can roll.");
+    if (game.status !== "open")
+      throw new HttpsError("failed-precondition", "Game is not in an open state.");
+    if (!game.players || game.players.length < 2)
+      throw new HttpsError("failed-precondition", "Need at least 2 players to roll.");
+
+    // ── Transition to rolling ─────────────────────────────────
+    // We skip the intermediate 'rolling' status here and go
+    // straight to computing + writing 'complete' atomically.
+    // The client already shows a rolling animation from the
+    // status update written below.
+
+    let rollResult, winner, players;
+
+    if (game.gameType === "tavern-dice") {
+      rollResult = Math.floor(Math.random() * 20) + 1;
+      players    = game.players;
+      // Exact match first, then closest
+      winner = players.find(p => p.pick === rollResult);
+      if (!winner) {
+        let minDiff = Infinity;
+        players.forEach(p => {
+          const diff = Math.abs(p.pick - rollResult);
+          if (diff < minDiff) { minDiff = diff; winner = p; }
+        });
+      }
+    } else if (game.gameType === "highest-roll") {
+      players    = game.players.map(p => ({ ...p, roll: Math.floor(Math.random() * 20) + 1 }));
+      rollResult = Math.max(...players.map(p => p.roll));
+      winner     = players.find(p => p.roll === rollResult);
+    } else {
+      throw new HttpsError("invalid-argument", "Unknown game type: " + game.gameType);
+    }
+
+    const prize = game.pot;
+
+    const update = {
+      status:      "complete",
+      rollResult,
+      winnerUid:   winner.uid,
+      winnerName:  winner.name,
+      prize,
+      goldSettled: false,   // settlePubGame trigger will flip this and award gold
+      completedAt: FieldValue.serverTimestamp(),
+    };
+    if (game.gameType === "highest-roll") {
+      update.players = players;  // include individual roll results
+    }
+
+    tx.update(gameRef, update);
+    return { success: true, rollResult, winnerUid: winner.uid, winnerName: winner.name, prize };
+  });
+});
+
 exports.autoArchiveWorldEvents = require('./autoArchiveWorldEvents').autoArchiveWorldEvents;

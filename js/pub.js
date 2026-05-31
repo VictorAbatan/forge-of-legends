@@ -19,8 +19,15 @@ import { db } from "../firebase/firebase.js";
 import {
   doc, getDoc, addDoc, updateDoc, deleteDoc, onSnapshot,
   collection, query, where, orderBy, limit,
-  serverTimestamp, getDocs, runTransaction
+  serverTimestamp, getDocs, runTransaction, increment
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
+import { getApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+
+const _functions     = getFunctions(getApp(), "europe-west1");
+const _fnCreateGame  = httpsCallable(_functions, "createPubGame");
+const _fnJoinGame    = httpsCallable(_functions, "joinPubGame");
+const _fnRollGame    = httpsCallable(_functions, "rollPubGame");
 
 // ── Module state ───────────────────────────────────────────────
 let _uid      = null;
@@ -498,6 +505,54 @@ window._tdPickNumber = function(n) {
   document.querySelectorAll('.pub-num-btn').forEach(b => b.classList.toggle('selected', +b.dataset.n === n));
 };
 
+// ── Bet locking helpers ──────────────────────────────────────────────────
+// Called when a table is already open: forces the bet input and presets
+// to the host's amount so joiners can't accidentally stake a different sum.
+function _tdLockBetToHost(amount) {
+  const input = document.getElementById('td-bet-input');
+  if (!input) return;
+  input.value    = amount;
+  input.disabled = true;
+  input.title    = `Stake is fixed at ${amount} 💰 (set by the host)`;
+  document.querySelectorAll('.pub-bet-preset').forEach(b => {
+    const isMatch = +b.textContent === amount;
+    b.classList.toggle('active',   isMatch);
+    b.classList.toggle('disabled', !isMatch);
+    b.disabled      = true;
+    b._savedOnclick = b.onclick;  // stash so unlock can restore it
+    b.onclick       = null;       // kill click entirely while locked
+    b.title         = isMatch
+      ? `Table stake: ${amount} 💰`
+      : `Stake is fixed at ${amount} 💰`;
+  });
+  // Show a note under the bet row if not already there
+  const betRow = input.closest('.pub-bet-row');
+  if (betRow && !betRow.querySelector('.pub-bet-locked-note')) {
+    const note = document.createElement('div');
+    note.className   = 'pub-bet-locked-note';
+    note.style.cssText = 'font-size:0.75rem;color:var(--gold-dim);margin-top:4px;font-style:italic';
+    note.textContent = `Stake fixed at ${amount} 💰 — set by the host`;
+    betRow.appendChild(note);
+  }
+}
+
+function _tdUnlockBet() {
+  const input = document.getElementById('td-bet-input');
+  if (!input) return;
+  input.disabled = false;
+  input.title    = '';
+  document.querySelectorAll('.pub-bet-preset').forEach(b => {
+    b.classList.remove('disabled');
+    b.disabled = false;
+    b.title    = '';
+    if (b._savedOnclick !== undefined) {
+      b.onclick       = b._savedOnclick;
+      b._savedOnclick = undefined;
+    }
+  });
+  document.querySelector('.pub-bet-locked-note')?.remove();
+}
+
 // ── Live table watcher — dims Create btn, shows Join btn in real-time ──
 let _tdTableUnsub = null;
 function _tdWatchOpenTable() {
@@ -522,15 +577,20 @@ function _tdWatchOpenTable() {
       return;
     }
     if (hasOpenTable) {
+      const hostBet = snap.docs[0].data().tableStake || snap.docs[0].data().players?.[0]?.bet || 100;
       createBtn.disabled = true;
       createBtn.style.opacity = '0.4';
       createBtn.title = 'A table is already open — join it!';
       joinBtn.style.display = '';
+      // Lock the bet row to the host's stake amount
+      _tdLockBetToHost(hostBet);
     } else {
       createBtn.disabled = false;
       createBtn.style.opacity = '';
       createBtn.title = '';
       joinBtn.style.display = 'none';
+      // Restore free bet selection when no table is open
+      _tdUnlockBet();
     }
   }, () => {});
 }
@@ -541,66 +601,40 @@ window._tdCreate = async function() {
   if (!_uid || !_charData) { window.showToast?.('Not logged in.', 'error'); return; }
   if (_tdPickedNumber === null) { window.showToast?.('Pick a number first!', ''); return; }
   const bet = parseInt(document.getElementById('td-bet-input').value) || 100;
-  if (bet < 1)                     { window.showToast?.('Enter a valid bet.', ''); return; }
-  if ((_charData.gold || 0) < bet) { window.showToast?.(`Not enough gold. You have ${_charData.gold||0}.`, 'error'); return; }
+  if (bet < 1) { window.showToast?.('Enter a valid bet.', ''); return; }
 
   const btn = document.getElementById('td-create-btn');
   btn.disabled = true;
 
-  const pub = _getCurrentPub();
-  const pubLocation = pub?.location || 'unknown';
+  const statusEl = document.getElementById('td-status');
+  if (statusEl) { statusEl.textContent = '⏳ Opening table...'; statusEl.className = 'pub-status-bar roll'; }
 
+  const pub = _getCurrentPub();
   try {
-    // Guard: block if a table already exists (race condition safety)
-    const existing = await getDocs(query(
-      collection(db,'pubGames'),
-      where('gameType','==','tavern-dice'),
-      where('status','==','open'),
-      where('pubLocation','==',pubLocation),
-      limit(1)
-    ));
-    if (!existing.empty) {
-      window.showToast?.('A table is already open — join it instead!', '');
-      btn.disabled = false;
-      return;
-    }
-    const newRef = doc(collection(db,'pubGames'));
-    await runTransaction(db, async tx => {
-      // Double-check inside transaction
-      const recheck = await getDocs(query(
-        collection(db,'pubGames'),
-        where('gameType','==','tavern-dice'),
-        where('status','==','open'),
-        where('pubLocation','==',pubLocation),
-        limit(1)
-      ));
-      if (!recheck.empty) throw new Error('table_exists');
-      tx.set(newRef, {
-        gameType:    'tavern-dice',
-        status:      'open',
-        hostUid:     _uid,
-        pubLocation,
-        players:     [{ uid: _uid, name: _charData.name || 'Unknown', pick: _tdPickedNumber, bet }],
-        pot:         bet,
-        rollResult:  null,
-        winnerUid:   null,
-        winnerName:  null,
-        prize:       0,
-        createdAt:   serverTimestamp(),
-        completedAt: null,
-      });
+    const result = await _fnCreateGame({
+      gameType:    'tavern-dice',
+      pick:        _tdPickedNumber,
+      bet,
+      pubLocation: pub?.location || 'unknown',
+      playerName:  _charData.name || 'Unknown',
     });
-    await _deductGold(bet);
-    _activeGameId = newRef.id;
+    _activeGameId = result.data.gameId;
+    // Reflect server deduction locally
+    const newGold = Math.max(0, (_charData.gold || 0) - bet);
+    if (_charData)        _charData.gold = newGold;
+    if (window._charData) window._charData.gold = newGold;
+    document.getElementById('stat-gold') && (document.getElementById('stat-gold').textContent = newGold);
+    document.getElementById('s-gold')    && (document.getElementById('s-gold').textContent    = newGold);
     window.showToast?.(`Table opened! You picked ${_tdPickedNumber}. Waiting for others...`, 'success');
     _tdSubscribeGame(_activeGameId);
   } catch(e) {
-    if (e.message === 'table_exists') {
-      window.showToast?.('Someone just opened a table — join it!', '');
-    } else {
-      console.warn('[Pub] tdCreate error:', e);
-      window.showToast?.('Failed to open table. Try again.', 'error');
-    }
+    const code = e?.code || '';
+    const msg  = e?.message || e?.details || '';
+    if (code === 'already-exists' || msg.includes('already open'))
+      window.showToast?.('A table is already open — join it instead!', '');
+    else if (msg.includes('enough gold'))
+      window.showToast?.(msg, 'error');
+    else { console.warn('[Pub] tdCreate error:', e); window.showToast?.('Failed to open table. Try again.', 'error'); }
     btn.disabled = false;
   }
 };
@@ -610,48 +644,65 @@ window._tdJoin = async function() {
   _charData = _charData || window._charData;
   if (!_uid || !_charData) { window.showToast?.('Not logged in.', 'error'); return; }
   if (_tdPickedNumber === null) { window.showToast?.('Pick a number first!', ''); return; }
-  const bet = parseInt(document.getElementById('td-bet-input').value) || 100;
-  if (bet < 1)                     { window.showToast?.('Enter a valid bet.', ''); return; }
-  if ((_charData.gold || 0) < bet) { window.showToast?.(`Not enough gold. You have ${_charData.gold||0}.`, 'error'); return; }
 
   const btn = document.getElementById('td-join-btn');
   btn.disabled = true;
-  const pub = _getCurrentPub();
-  const pubLocation = pub?.location || 'unknown';
+
+  const statusEl = document.getElementById('td-status');
+  if (statusEl) { statusEl.textContent = '⏳ Joining table...'; statusEl.className = 'pub-status-bar roll'; }
+
+  // Get the game id from the current watcher snapshot (fastest path)
+  let gameId = null;
+  const pub  = _getCurrentPub();
+  const probe = await getDocs(query(
+    collection(db,'pubGames'),
+    where('gameType',   '==','tavern-dice'),
+    where('status',     '==','open'),
+    where('pubLocation','==', pub?.location || 'unknown'),
+    limit(1)
+  ));
+  if (!probe.empty) gameId = probe.docs[0].id;
+
+  if (!gameId) {
+    window.showToast?.('No open table found. Open one yourself!', '');
+    btn.disabled = false;
+    return;
+  }
+
+  // Enforce the host's bet — lock UI in case it wasn't already locked
+  const hostBet = probe.docs[0].data().tableStake || probe.docs[0].data().players?.[0]?.bet || 100;
+  _tdLockBetToHost(hostBet);
 
   try {
-    const probe = await getDocs(query(
-      collection(db,'pubGames'),
-      where('gameType','==','tavern-dice'),
-      where('status','==','open'),
-      where('pubLocation','==',pubLocation),
-      limit(1)
-    ));
-    if (probe.empty) {
-      window.showToast?.('No open table found. Open one yourself!', '');
-      btn.disabled = false;
-      return;
-    }
-    const gameRef = doc(db,'pubGames', probe.docs[0].id);
-    await runTransaction(db, async tx => {
-      const snap = await tx.get(gameRef);
-      if (!snap.exists() || snap.data().status !== 'open') throw new Error('game_gone');
-      const game = snap.data();
-      if (game.players.some(p => p.uid === _uid))            throw new Error('already_seated');
-      if (game.players.some(p => p.pick === _tdPickedNumber)) throw new Error('number_taken');
-      if (game.players.length >= MAX_TAVERN_DICE_PLAYERS)    throw new Error('table_full');
-      tx.update(gameRef, {
-        players: [...game.players, { uid: _uid, name: _charData.name || 'Unknown', pick: _tdPickedNumber, bet }],
-        pot:     (game.pot || 0) + bet,
-      });
-      _activeGameId = snap.id;
+    const result = await _fnJoinGame({
+      gameId,
+      pick:       _tdPickedNumber,
+      playerName: _charData.name || 'Unknown',
     });
-    await _deductGold(bet);
-    window.showToast?.(`Joined the table! You picked ${_tdPickedNumber}.`, 'success');
+    _activeGameId = gameId;
+    const bet     = result.data.bet;
+    // Reflect server deduction locally
+    const newGold = Math.max(0, (_charData.gold || 0) - bet);
+    if (_charData)        _charData.gold = newGold;
+    if (window._charData) window._charData.gold = newGold;
+    document.getElementById('stat-gold') && (document.getElementById('stat-gold').textContent = newGold);
+    document.getElementById('s-gold')    && (document.getElementById('s-gold').textContent    = newGold);
+    window.showToast?.(`Joined the table! Stake: ${bet} 💰. You picked ${_tdPickedNumber}.`, 'success');
     _tdSubscribeGame(_activeGameId);
   } catch(e) {
-    const msgs = { game_gone:'Table closed — try opening a new one.', already_seated:'Already seated!', number_taken:'That number is taken! Pick another.', table_full:'Table is full!' };
-    window.showToast?.(msgs[e.message] || 'Failed to join. Try again.', 'error');
+    const code = e?.code || '';
+    const msg  = e?.message || e?.details || '';
+    if (code === 'already-exists' || msg.includes('Already seated'))
+      window.showToast?.('Already seated!', '');
+    else if (msg.includes('number is already taken'))
+      window.showToast?.('That number is taken! Pick another.', 'error');
+    else if (msg.includes('enough gold'))
+      window.showToast?.(msg, 'error');
+    else if (msg.includes('full'))
+      window.showToast?.('Table is full!', '');
+    else if (msg.includes('no longer open') || msg.includes('not-found'))
+      window.showToast?.('Table closed — try opening a new one.', '');
+    else { console.warn('[Pub] tdJoin error:', e); window.showToast?.('Failed to join. Try again.', 'error'); }
     btn.disabled = false;
   }
 };
@@ -743,16 +794,20 @@ function _tdRenderGameState(game, gameId) {
 
     if (didWin) {
       _spawnCoinRain();
-      // Log activity once — gold already awarded in _tdExecuteRoll
+      // Log activity once — gold awarded by settlePubGame cloud function
       if (!_awardedGameIds.has(gameId)) {
         _awardedGameIds.add(gameId);
         window.logActivity?.('🎲', `<b>Pub Win!</b> Tavern Dice — Won <b>${game.prize}</b> 💰.`, '#4ec878');
       }
     }
 
+    // Verify cloud settlement landed (check console for results)
+    if (amPlaying) _pubDebugSettlement(gameId, game.winnerUid, game.prize, _uid);
+
     // Show result overlay
     if (amPlaying) {
-      setTimeout(() => _showResultOverlay(didWin, game.rollResult, game.winnerName, game.prize, didWin ? game.prize : 0), 800);
+      const myBet = game.players.find(p => p.uid === _uid)?.bet || 0;
+      setTimeout(() => _showResultOverlay(didWin, game.rollResult, game.winnerName, game.prize, didWin ? game.prize : myBet), 800);
     }
 
     // Clean up sub after 5s
@@ -768,51 +823,20 @@ window._tdCallRoll = async function() {
   const rollBtn = document.getElementById('td-roll-btn');
   if (rollBtn) rollBtn.disabled = true;
 
+  _tdAnimateDice(null);
+  const statusEl = document.getElementById('td-status');
+  if (statusEl) { statusEl.textContent = '🎲 Rolling...'; statusEl.className = 'pub-status-bar roll'; }
+
   try {
-    await updateDoc(doc(db,'pubGames',_activeGameId), { status: 'rolling' });
-    // Small delay for animation, then compute result
-    setTimeout(() => _tdExecuteRoll(_activeGameId), 1800);
+    await _fnRollGame({ gameId: _activeGameId });
   } catch(e) {
     console.warn('[Pub] callRoll error:', e);
+    window.showToast?.('Roll failed. Try again.', 'error');
     if (rollBtn) rollBtn.disabled = false;
   }
 };
 
-async function _tdExecuteRoll(gameId) {
-  const gameSnap = await getDoc(doc(db,'pubGames',gameId));
-  if (!gameSnap.exists()) return;
-  const game = gameSnap.data();
-  if (game.status !== 'rolling') return;
-
-  const roll    = Math.floor(Math.random() * 20) + 1;
-  const players = game.players;
-
-  // Find winner: exact match first, then closest
-  let winner = players.find(p => p.pick === roll);
-  if (!winner) {
-    let minDiff = Infinity;
-    players.forEach(p => {
-      const diff = Math.abs(p.pick - roll);
-      if (diff < minDiff) { minDiff = diff; winner = p; }
-    });
-  }
-
-  const prize = game.pot; // full pot — losers' bets already deducted at join time
-
-  // Mark game complete
-  await updateDoc(doc(db,'pubGames',gameId), {
-    status:      'complete',
-    rollResult:  roll,
-    winnerUid:   winner.uid,
-    winnerName:  winner.name,
-    prize,
-    completedAt: serverTimestamp(),
-  });
-
-  // Award full pot to winner exactly once, here in the host's execute roll
-  // Using a transaction so concurrent onSnapshot handlers can't double-award
-  await _awardGold(winner.uid, prize);
-}
+// Roll execution handled server-side by rollPubGame cloud function
 
 window._tdLeaveGame = async function() {
   if (!_activeGameId || !_uid) return;
@@ -1064,6 +1088,51 @@ window._hrSetBet = function(v) {
   document.querySelectorAll('#game-highest-roll .pub-bet-preset').forEach(b => b.classList.toggle('active', +b.textContent === v));
 };
 
+// ── Bet locking helpers for Highest Roll ─────────────────────────────────────
+// Mirrors _tdLockBetToHost / _tdUnlockBet — locks the bet row to the
+// host's stake so joiners can't accidentally enter a different amount.
+function _hrLockBetToHost(amount) {
+  const input = document.getElementById('hr-bet-input');
+  if (!input) return;
+  input.value    = amount;
+  input.disabled = true;
+  input.title    = `Stake is fixed at ${amount} 💰 (set by the host)`;
+  document.querySelectorAll('#game-highest-roll .pub-bet-preset').forEach(b => {
+    const isMatch = +b.textContent === amount;
+    b.classList.toggle('active',   isMatch);
+    b.classList.toggle('disabled', !isMatch);
+    b.disabled      = true;
+    b._savedOnclick = b.onclick;
+    b.onclick       = null;
+    b.title         = isMatch ? `Table stake: ${amount} 💰` : `Stake is fixed at ${amount} 💰`;
+  });
+  const betRow = input.closest('.pub-bet-row');
+  if (betRow && !betRow.querySelector('.pub-bet-locked-note')) {
+    const note = document.createElement('div');
+    note.className   = 'pub-bet-locked-note';
+    note.style.cssText = 'font-size:0.75rem;color:var(--gold-dim);margin-top:4px;font-style:italic';
+    note.textContent = `Stake fixed at ${amount} 💰 — set by the host`;
+    betRow.appendChild(note);
+  }
+}
+
+function _hrUnlockBet() {
+  const input = document.getElementById('hr-bet-input');
+  if (!input) return;
+  input.disabled = false;
+  input.title    = '';
+  document.querySelectorAll('#game-highest-roll .pub-bet-preset').forEach(b => {
+    b.classList.remove('disabled');
+    b.disabled = false;
+    b.title    = '';
+    if (b._savedOnclick !== undefined) {
+      b.onclick       = b._savedOnclick;
+      b._savedOnclick = undefined;
+    }
+  });
+  document.querySelector('#game-highest-roll .pub-bet-locked-note')?.remove();
+}
+
 // ── Live table watcher for Highest Roll ──
 let _hrTableUnsub = null;
 function _hrWatchOpenTable() {
@@ -1084,15 +1153,18 @@ function _hrWatchOpenTable() {
     const amSeated = snap.docs.some(d => d.data().players?.some(p => p.uid === (_uid || window._uid)));
     if (amSeated) return;
     if (!snap.empty) {
+      const hostBet = snap.docs[0].data().tableStake || snap.docs[0].data().players?.[0]?.bet || 100;
       createBtn.disabled = true;
       createBtn.style.opacity = '0.4';
       createBtn.title = 'A table is already open — join it!';
       joinBtn.style.display = '';
+      _hrLockBetToHost(hostBet);
     } else {
       createBtn.disabled = false;
       createBtn.style.opacity = '';
       createBtn.title = '';
       joinBtn.style.display = 'none';
+      _hrUnlockBet();
     }
   }, () => {});
 }
@@ -1102,63 +1174,38 @@ window._hrCreate = async function() {
   _charData = _charData || window._charData;
   if (!_uid || !_charData) { window.showToast?.('Not logged in.', 'error'); return; }
   const bet = parseInt(document.getElementById('hr-bet-input').value) || 100;
-  if (bet < 1)                     { window.showToast?.('Enter a valid bet.', ''); return; }
-  if ((_charData.gold || 0) < bet) { window.showToast?.(`Not enough gold.`, 'error'); return; }
+  if (bet < 1) { window.showToast?.('Enter a valid bet.', ''); return; }
 
   const btn = document.getElementById('hr-create-btn');
   btn.disabled = true;
-  const pub = _getCurrentPub();
-  const pubLocation = pub?.location || 'unknown';
 
+  const statusEl = document.getElementById('hr-status');
+  if (statusEl) { statusEl.textContent = '⏳ Opening table...'; statusEl.className = 'pub-status-bar roll'; }
+
+  const pub = _getCurrentPub();
   try {
-    const existing = await getDocs(query(
-      collection(db,'pubGames'),
-      where('gameType','==','highest-roll'),
-      where('status','==','open'),
-      where('pubLocation','==',pubLocation),
-      limit(1)
-    ));
-    if (!existing.empty) {
-      window.showToast?.('A table is already open — join it instead!', '');
-      btn.disabled = false;
-      return;
-    }
-    const newRef = doc(collection(db,'pubGames'));
-    await runTransaction(db, async tx => {
-      const recheck = await getDocs(query(
-        collection(db,'pubGames'),
-        where('gameType','==','highest-roll'),
-        where('status','==','open'),
-        where('pubLocation','==',pubLocation),
-        limit(1)
-      ));
-      if (!recheck.empty) throw new Error('table_exists');
-      tx.set(newRef, {
-        gameType:    'highest-roll',
-        status:      'open',
-        hostUid:     _uid,
-        pubLocation,
-        players:     [{ uid: _uid, name: _charData.name || 'Unknown', bet, roll: null }],
-        pot:         bet,
-        rollResult:  null,
-        winnerUid:   null,
-        winnerName:  null,
-        prize:       0,
-        createdAt:   serverTimestamp(),
-        completedAt: null,
-      });
+    const result = await _fnCreateGame({
+      gameType:    'highest-roll',
+      bet,
+      pubLocation: pub?.location || 'unknown',
+      playerName:  _charData.name || 'Unknown',
     });
-    await _deductGold(bet);
-    _activeGameId = newRef.id;
+    _activeGameId = result.data.gameId;
+    const newGold = Math.max(0, (_charData.gold || 0) - bet);
+    if (_charData)        _charData.gold = newGold;
+    if (window._charData) window._charData.gold = newGold;
+    document.getElementById('stat-gold') && (document.getElementById('stat-gold').textContent = newGold);
+    document.getElementById('s-gold')    && (document.getElementById('s-gold').textContent    = newGold);
     window.showToast?.('Table opened! Invite others and roll when ready.', 'success');
     _hrSubscribeGame(_activeGameId);
   } catch(e) {
-    if (e.message === 'table_exists') {
-      window.showToast?.('Someone just opened a table — join it!', '');
-    } else {
-      console.warn('[Pub] hrCreate error:', e);
-      window.showToast?.('Failed to open table. Try again.', 'error');
-    }
+    const code = e?.code || '';
+    const msg  = e?.message || e?.details || '';
+    if (code === 'already-exists' || msg.includes('already open'))
+      window.showToast?.('A table is already open — join it instead!', '');
+    else if (msg.includes('enough gold'))
+      window.showToast?.(msg, 'error');
+    else { console.warn('[Pub] hrCreate error:', e); window.showToast?.('Failed to open table. Try again.', 'error'); }
     btn.disabled = false;
   }
 };
@@ -1167,47 +1214,57 @@ window._hrJoin = async function() {
   _uid      = _uid || window._uid;
   _charData = _charData || window._charData;
   if (!_uid || !_charData) { window.showToast?.('Not logged in.', 'error'); return; }
-  const bet = parseInt(document.getElementById('hr-bet-input').value) || 100;
-  if (bet < 1)                     { window.showToast?.('Enter a valid bet.', ''); return; }
-  if ((_charData.gold || 0) < bet) { window.showToast?.(`Not enough gold.`, 'error'); return; }
 
   const btn = document.getElementById('hr-join-btn');
   btn.disabled = true;
-  const pub = _getCurrentPub();
-  const pubLocation = pub?.location || 'unknown';
+
+  const statusEl = document.getElementById('hr-status');
+  if (statusEl) { statusEl.textContent = '⏳ Joining table...'; statusEl.className = 'pub-status-bar roll'; }
+
+  const pub   = _getCurrentPub();
+  const probe = await getDocs(query(
+    collection(db,'pubGames'),
+    where('gameType',   '==','highest-roll'),
+    where('status',     '==','open'),
+    where('pubLocation','==', pub?.location || 'unknown'),
+    limit(1)
+  ));
+  if (probe.empty) {
+    window.showToast?.('No open table found. Open one yourself!', '');
+    btn.disabled = false;
+    return;
+  }
+  const gameId  = probe.docs[0].id;
+  // Enforce the host's bet — lock UI in case it wasn't already locked
+  const hostBet = probe.docs[0].data().tableStake || probe.docs[0].data().players?.[0]?.bet || 100;
+  _hrLockBetToHost(hostBet);
 
   try {
-    const probe = await getDocs(query(
-      collection(db,'pubGames'),
-      where('gameType','==','highest-roll'),
-      where('status','==','open'),
-      where('pubLocation','==',pubLocation),
-      limit(1)
-    ));
-    if (probe.empty) {
-      window.showToast?.('No open table found. Open one yourself!', '');
-      btn.disabled = false;
-      return;
-    }
-    const gameRef = doc(db,'pubGames', probe.docs[0].id);
-    await runTransaction(db, async tx => {
-      const snap = await tx.get(gameRef);
-      if (!snap.exists() || snap.data().status !== 'open') throw new Error('game_gone');
-      const game = snap.data();
-      if (game.players.some(p => p.uid === _uid))         throw new Error('already_seated');
-      if (game.players.length >= 10)                       throw new Error('table_full');
-      tx.update(gameRef, {
-        players: [...game.players, { uid: _uid, name: _charData.name || 'Unknown', bet, roll: null }],
-        pot:     (game.pot || 0) + bet,
-      });
-      _activeGameId = snap.id;
+    const result = await _fnJoinGame({
+      gameId,
+      playerName: _charData.name || 'Unknown',
     });
-    await _deductGold(bet);
-    window.showToast?.('Joined the table! Host will roll when ready.', 'success');
+    _activeGameId = gameId;
+    const bet     = result.data.bet;
+    const newGold = Math.max(0, (_charData.gold || 0) - bet);
+    if (_charData)        _charData.gold = newGold;
+    if (window._charData) window._charData.gold = newGold;
+    document.getElementById('stat-gold') && (document.getElementById('stat-gold').textContent = newGold);
+    document.getElementById('s-gold')    && (document.getElementById('s-gold').textContent    = newGold);
+    window.showToast?.(`Joined the table! Stake: ${bet} 💰.`, 'success');
     _hrSubscribeGame(_activeGameId);
   } catch(e) {
-    const msgs = { game_gone:'Table closed — try opening a new one.', already_seated:'Already seated!', table_full:'Table is full!' };
-    window.showToast?.(msgs[e.message] || 'Failed to join. Try again.', 'error');
+    const code = e?.code || '';
+    const msg  = e?.message || e?.details || '';
+    if (code === 'already-exists' || msg.includes('Already seated'))
+      window.showToast?.('Already seated!', '');
+    else if (msg.includes('enough gold'))
+      window.showToast?.(msg, 'error');
+    else if (msg.includes('full'))
+      window.showToast?.('Table is full!', '');
+    else if (msg.includes('no longer open') || msg.includes('not-found'))
+      window.showToast?.('Table closed — try opening a new one.', '');
+    else { console.warn('[Pub] hrJoin error:', e); window.showToast?.('Failed to join. Try again.', 'error'); }
     btn.disabled = false;
   }
 };
@@ -1286,13 +1343,18 @@ function _hrRenderGameState(game, gameId) {
     }
     if (didWin) {
       _spawnCoinRain();
-      // Log activity once — gold already awarded in _hrExecuteRoll
+      // Log activity once — gold awarded by settlePubGame cloud function
       if (!_awardedGameIds.has(gameId)) {
         _awardedGameIds.add(gameId);
         window.logActivity?.('🎲', `<b>Pub Win!</b> Highest Roll — Rolled <b>${game.rollResult}</b>, won <b>${game.prize}</b> 💰.`, '#4ec878');
       }
     }
-    if (amPlaying) setTimeout(() => _showResultOverlay(didWin, game.rollResult, game.winnerName, game.prize, didWin ? game.prize : 0), 800);
+    // Verify cloud settlement landed (check console for results)
+    if (amPlaying) _pubDebugSettlement(gameId, game.winnerUid, game.prize, _uid);
+    if (amPlaying) {
+      const myBet = game.players.find(p => p.uid === _uid)?.bet || 0;
+      setTimeout(() => _showResultOverlay(didWin, game.rollResult, game.winnerName, game.prize, didWin ? game.prize : myBet), 800);
+    }
     setTimeout(() => { if (_activeGameUnsub) { _activeGameUnsub(); _activeGameUnsub = null; } _activeGameId = null; }, 5000);
   }
 }
@@ -1301,35 +1363,22 @@ window._hrCallRoll = async function() {
   if (!_activeGameId) return;
   const btn = document.getElementById('hr-roll-btn');
   if (btn) btn.disabled = true;
+
+  const face = document.getElementById('hr-dice-face');
+  if (face) { face.textContent = '🎲'; face.classList.remove('rolling','result-flash'); void face.offsetWidth; face.classList.add('rolling'); }
+  const statusEl = document.getElementById('hr-status');
+  if (statusEl) { statusEl.textContent = '🎲 Rolling for everyone...'; statusEl.className = 'pub-status-bar roll'; }
+
   try {
-    await updateDoc(doc(db,'pubGames',_activeGameId), { status: 'rolling' });
-    setTimeout(() => _hrExecuteRoll(_activeGameId), 1800);
-  } catch(e) { if (btn) btn.disabled = false; }
+    await _fnRollGame({ gameId: _activeGameId });
+  } catch(e) {
+    console.warn('[Pub] hrCallRoll error:', e);
+    window.showToast?.('Roll failed. Try again.', 'error');
+    if (btn) btn.disabled = false;
+  }
 };
 
-async function _hrExecuteRoll(gameId) {
-  const snap = await getDoc(doc(db,'pubGames',gameId));
-  if (!snap.exists()) return;
-  const game = snap.data();
-  if (game.status !== 'rolling') return;
-
-  const rolls   = game.players.map(p => ({ ...p, roll: Math.floor(Math.random()*20)+1 }));
-  const maxRoll = Math.max(...rolls.map(r => r.roll));
-  // Tie-break: first in array if multiple share top roll
-  const winner  = rolls.find(r => r.roll === maxRoll);
-
-  await updateDoc(doc(db,'pubGames',gameId), {
-    status:      'complete',
-    players:     rolls,
-    rollResult:  maxRoll,
-    winnerUid:   winner.uid,
-    winnerName:  winner.name,
-    prize:       game.pot,
-    completedAt: serverTimestamp(),
-  });
-  // Award full pot to winner exactly once, here in the host's execute roll
-  await _awardGold(winner.uid, game.pot);
-}
+// Roll execution handled server-side by rollPubGame cloud function
 
 window._hrLeaveGame = async function() {
   if (!_activeGameId || !_uid) return;
@@ -1365,8 +1414,90 @@ function _buildComingSoonView(container, game) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  RESULT OVERLAY
+//  SETTLEMENT DEBUG
+//  Called when a multiplayer game reaches 'complete'.
+//  Guarded by _debuggedGameIds so it only runs ONCE per game —
+//  the onSnapshot fires twice (once on complete, again when
+//  goldSettled flips), and the second call would see Δ+0 and
+//  falsely report a mismatch.
 // ═══════════════════════════════════════════════════════════════
+const _debuggedGameIds = new Set();
+
+async function _pubDebugSettlement(gameId, expectedWinnerUid, pot, myUid) {
+  if (_debuggedGameIds.has(gameId)) return; // already running for this game
+  _debuggedGameIds.add(gameId);
+
+  const label = `[PubDebug][${gameId.slice(0,8)}]`;
+  console.group(`${label} Settlement check — pot: ${pot}g, winner: ${expectedWinnerUid.slice(0,8)}`);
+  console.log(`${label} status=complete seen by client at`, new Date().toISOString());
+
+  let goldBefore = null;
+  try {
+    const snap = await getDoc(doc(db, 'characters', expectedWinnerUid));
+    goldBefore = snap.data()?.gold ?? null;
+    console.log(`${label} Winner gold RIGHT NOW (pre-settlement): ${goldBefore}`);
+  } catch(e) {
+    console.warn(`${label} Could not read winner gold pre-settlement:`, e.message);
+  }
+
+  // 3s check — trigger should have fired by now
+  setTimeout(async () => {
+    try {
+      const [gameSnap, charSnap] = await Promise.all([
+        getDoc(doc(db, 'pubGames', gameId)),
+        getDoc(doc(db, 'characters', expectedWinnerUid)),
+      ]);
+      const settled   = gameSnap.data()?.goldSettled;
+      const goldAfter = charSnap.data()?.gold ?? null;
+      const gained    = goldBefore !== null && goldAfter !== null ? goldAfter - goldBefore : '?';
+
+      console.group(`${label} 3s check`);
+      console.log(`goldSettled: ${settled}  →  ${settled ? '✅ trigger fired' : '❌ trigger NOT fired yet'}`);
+      console.log(`Winner gold: ${goldBefore} → ${goldAfter}  (Δ ${gained >= 0 ? '+' : ''}${gained})`);
+      if (settled && gained === pot) {
+        console.log(`%c✅ SETTLEMENT OK — winner received full pot (${pot}g)`, 'color:green;font-weight:bold');
+      } else if (settled && gained !== pot) {
+        console.warn(`⚠️ Trigger fired but gold delta (${gained}) ≠ pot (${pot}). Possible race overwrite still present.`);
+      } else {
+        console.warn(`⏳ Trigger hasn't fired yet — will recheck at 8s`);
+      }
+      if (myUid && myUid !== expectedWinnerUid) {
+        const mySnap = await getDoc(doc(db, 'characters', myUid));
+        console.log(`My gold (loser): ${mySnap.data()?.gold}`);
+      }
+      console.groupEnd();
+    } catch(e) { console.warn(`${label} 3s check error:`, e.message); }
+  }, 3000);
+
+  // 8s check — final verdict
+  setTimeout(async () => {
+    try {
+      const [gameSnap, charSnap] = await Promise.all([
+        getDoc(doc(db, 'pubGames', gameId)),
+        getDoc(doc(db, 'characters', expectedWinnerUid)),
+      ]);
+      const settled   = gameSnap.data()?.goldSettled;
+      const goldFinal = charSnap.data()?.gold ?? null;
+      const gained    = goldBefore !== null && goldFinal !== null ? goldFinal - goldBefore : '?';
+
+      console.group(`${label} 8s final check`);
+      console.log(`goldSettled: ${settled}`);
+      console.log(`Winner gold: ${goldBefore} → ${goldFinal}  (Δ ${gained >= 0 ? '+' : ''}${gained})`);
+      if (!settled) {
+        console.error(`%c❌ settlePubGame trigger NEVER fired. Check Firebase Functions are deployed and active.`, 'color:red;font-weight:bold');
+      } else if (gained === pot) {
+        console.log(`%c✅ CONFIRMED — full pot settled correctly`, 'color:green;font-weight:bold');
+      } else {
+        console.error(`%c❌ Gold mismatch after 8s: winner gained ${gained}g but pot was ${pot}g.`, 'color:red;font-weight:bold');
+      }
+      console.groupEnd();
+    } catch(e) { console.warn(`${label} 8s check error:`, e.message); }
+
+    console.groupEnd(); // close outer group
+  }, 8000);
+}
+
+
 function _showResultOverlay(won, roll, winnerName, prize, myPrize) {
   document.getElementById('pub-result-overlay')?.remove();
   const el = document.createElement('div');
@@ -1382,7 +1513,7 @@ function _showResultOverlay(won, roll, winnerName, prize, myPrize) {
           : `<strong>${winnerName}</strong> wins with ${roll}!`}
       </div>
       <div class="pub-result-coins ${won ? '' : 'loss-coins'}">
-        ${won ? `+${myPrize} 💰` : `-${prize} 💰`}
+        ${won ? `+${myPrize} 💰` : `-${myPrize} 💰`}
       </div>
       <button class="pub-btn-roll" onclick="document.getElementById('pub-result-overlay').remove()">
         Close
@@ -1417,34 +1548,27 @@ function _spawnCoinRain() {
 async function _deductGold(amount) {
   _uid      = _uid || window._uid;
   _charData = _charData || window._charData;
-  if (!_uid) return;
+  if (!_uid || amount <= 0) return;
   try {
+    await updateDoc(doc(db, 'characters', _uid), { gold: increment(-amount) });
     const newGold = Math.max(0, (_charData?.gold || 0) - amount);
-    await updateDoc(doc(db, 'characters', _uid), { gold: newGold });
-    if (_charData)       { _charData.gold = newGold; }
-    if (window._charData){ window._charData.gold = newGold; }
-    // Update HUD
-    document.getElementById('stat-gold')?.textContent !== undefined &&
-      (document.getElementById('stat-gold').textContent = newGold);
-    document.getElementById('s-gold')?.textContent !== undefined &&
-      (document.getElementById('s-gold').textContent = newGold);
+    if (_charData)        { _charData.gold = newGold; }
+    if (window._charData) { window._charData.gold = newGold; }
+    document.getElementById('stat-gold') && (document.getElementById('stat-gold').textContent = newGold);
+    document.getElementById('s-gold')    && (document.getElementById('s-gold').textContent    = newGold);
   } catch(e) { console.warn('[Pub] _deductGold error:', e); }
 }
 
 async function _awardGold(uid, amount) {
   if (!uid || amount <= 0) return;
   try {
-    const charRef  = doc(db, 'characters', uid);
-    const charSnap = await getDoc(charRef);
-    if (!charSnap.exists()) return;
-    const current = charSnap.data().gold || 0;
-    await updateDoc(charRef, { gold: current + amount });
-    // If winner is this client, update local state too
+    await updateDoc(doc(db, 'characters', uid), { gold: increment(amount) });
     if (uid === (_uid || window._uid)) {
-      if (_charData)        { _charData.gold = current + amount; }
-      if (window._charData) { window._charData.gold = current + amount; }
-      document.getElementById('stat-gold') && (document.getElementById('stat-gold').textContent = current + amount);
-      document.getElementById('s-gold')    && (document.getElementById('s-gold').textContent    = current + amount);
+      const newGold = (_charData?.gold || 0) + amount;
+      if (_charData)        { _charData.gold = newGold; }
+      if (window._charData) { window._charData.gold = newGold; }
+      document.getElementById('stat-gold') && (document.getElementById('stat-gold').textContent = newGold);
+      document.getElementById('s-gold')    && (document.getElementById('s-gold').textContent    = newGold);
     }
   } catch(e) { console.warn('[Pub] _awardGold error:', e); }
 }
