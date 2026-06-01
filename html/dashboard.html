@@ -1545,6 +1545,15 @@ button,
     document.body.style.overflow = '';
   }
 
+  // ── Panel history (back gesture / back button) ───────────────
+  // Pushes a history entry on every panel switch so the mobile back
+  // gesture and hardware back button step through panels instead of
+  // leaving the app and landing on the login page.
+  let _switchingFromPop = false;
+
+  // Seed the very first entry so there's always a valid base state.
+  history.replaceState({ panel: 'home' }, '', '#home');
+
   function switchPanel(name) {
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav-item[data-panel]').forEach(n => n.classList.remove('active'));
@@ -1559,7 +1568,23 @@ button,
     if (name === 'pub')     window.renderPubPanel?.();
     window._onPanelSwitch?.(name);
     closeNav();
+
+    // Register this navigation in browser history unless we're already
+    // handling a popstate (which would cause an infinite push loop).
+    if (!_switchingFromPop && history.state?.panel !== name) {
+      history.pushState({ panel: name }, '', '#' + name);
+    }
   }
+
+  // Back gesture / hardware back button — navigate to the previous panel
+  // instead of letting the browser leave the page entirely.
+  window.addEventListener('popstate', function(e) {
+    const panel = e.state?.panel;
+    _switchingFromPop = true;
+    switchPanel(panel || 'home');
+    if (!panel) history.replaceState({ panel: 'home' }, '', '#home');
+    _switchingFromPop = false;
+  });
 
   // ── Fullscreen map ────────────────────────────────────────
   function openMapFullscreen() {

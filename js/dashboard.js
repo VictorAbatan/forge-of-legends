@@ -4266,6 +4266,9 @@ let _presenceUnsub = null;
 
 // ── Chat background images keyed by locationId slug ──────────────────────────
 const CHAT_LOCATION_BG = {
+  // Pub locations — use the capital city map images
+  "the-frosty-flagon":   "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrostpire-capital.jpeg?alt=media&token=ac9bbbac-90b6-4f61-9935-7f50007926dd",
+  "the-sunken-cask":     "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fsolmere-capital.jpeg?alt=media&token=2d5cd553-bb6e-48cb-a8ea-3a584581d049",
   // Northern Continent — safe zones
   "frostspire":          "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrostspire.jpeg?alt=media&token=02a9f440-6dc2-4d30-b6dd-3393c156e6ca",
   "whitecrest":          "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Fwhitecrest_village.jpeg?alt=media&token=8dd42296-a946-481d-b26f-f4cac2b7d66c",
