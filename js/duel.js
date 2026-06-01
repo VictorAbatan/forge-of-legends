@@ -307,6 +307,46 @@ export async function acceptDuelChallenge(duelId) {
 
 // ── Decline ────────────────────────────────────────
 
+export async function declineDuelChallenge(duelId) {
+  const uid      = _getUid();
+  const charData = _getCharData();
+  if (!uid) { window.showToast?.('Not logged in.', 'error'); return; }
+
+  const duelRef = doc(db, 'chatDuels', duelId);
+  const snap    = await getDoc(duelRef);
+  if (!snap.exists()) { window.showToast?.('Duel not found.', 'error'); return; }
+  const duel = snap.data();
+
+  if (duel.status !== 'pending') { window.showToast?.('Duel already handled.', 'error'); return; }
+
+  const tab   = duel.chatTab        || _chatTab        || 'rp';
+  const locId = duel.chatLocationId || _chatLocationId || '';
+
+  await updateDoc(duelRef, { status: 'declined' });
+
+  await _postEventBubble(tab, locId, duelId,
+    `❌ <b>${duel.targetName}</b> declined the duel challenge from <b>${duel.challengerName}</b>.`, '❌');
+
+  if (duel.messageId) {
+    await _patchDuelCard(duel.messageId, tab, locId,
+      { ...duel, status: 'declined' }, `❌ ${duel.targetName} declined the duel.`);
+  }
+
+  if (!duel.challengerId?.startsWith('npc_')) {
+    addDoc(collection(db, 'notifications'), {
+      uid:       duel.challengerId,
+      type:      'duel-challenge-declined',
+      title:     '❌ Duel Declined',
+      message:   `${duel.targetName} declined your duel challenge.`,
+      duelId,   read: false,   createdAt: serverTimestamp(),
+      fromUid:   uid,   fromName:  charData?.name || duel.targetName || '',
+    }).catch(e => console.warn('[Duel] decline notif failed:', e));
+  }
+
+  window.showToast?.('Duel declined.', '');
+  document.getElementById('duel-challenge-toast')?.remove();
+}
+
 // ── Take a turn ────────────────────────────────────
 export async function doDuelTurn(duelId, action, extraArg) {
   const uid = _getUid();
@@ -353,6 +393,30 @@ export async function doDuelTurn(duelId, action, extraArg) {
   let myHp    = actingAsNpc ? duel.targetHp      : (isChallenger ? duel.challengerHp    : duel.targetHp);
   let oppHp   = actingAsNpc ? duel.challengerHp  : (isChallenger ? duel.targetHp        : duel.challengerHp);
   let myMana  = actingAsNpc ? duel.targetMana    : (isChallenger ? duel.challengerMana  : duel.targetMana);
+
+  // Per-player status state (stun, dot, buffs, shield)
+  const myStateKey  = actingAsNpc ? 'targetState'     : (isChallenger ? 'challengerState' : 'targetState');
+  const oppStateKey = actingAsNpc ? 'challengerState' : (isChallenger ? 'targetState'     : 'challengerState');
+  let myState  = duel[myStateKey]  || {};
+  let oppState = duel[oppStateKey] || {};
+  let oppStateUpd = {};
+  let myStateUpd  = {};
+
+  // If I am stunned this turn, skip my action and pass the turn back
+  if (myState.stunned) {
+    myState = { ...myState, stunned: false };
+    const stunNextUid  = actingAsNpc ? duel.challengerId   : (isChallenger ? duel.targetId    : duel.challengerId);
+    const stunNextName = actingAsNpc ? duel.challengerName : (isChallenger ? duel.targetName  : duel.challengerName);
+    const stunRound    = actingAsNpc ? duel.round + 1      : (isChallenger ? duel.round       : duel.round + 1);
+    const _tab2   = duel.chatTab        || _chatTab        || 'rp';
+    const _locId2 = duel.chatLocationId || _chatLocationId || '';
+    await updateDoc(duelRef, { round: stunRound, currentTurnUid: stunNextUid, [myStateKey]: myState });
+    await _postEventBubble(_tab2, _locId2, duelId,
+      `💫 <b>${meDisplayName}</b> is stunned and loses their turn!`, '💫');
+    await _postEventBubble(_tab2, _locId2, duelId,
+      `🔔 Round ${stunRound} — <b>${stunNextName}</b>'s turn!`, '🔔');
+    return;
+  }
 
   // Safe display names — fall back to duel doc names so Firestore IDs never leak.
   // When actingAsNpc: me=NPC(target), opp=player(challenger) — always use targetName/challengerName directly.
@@ -433,7 +497,8 @@ export async function doDuelTurn(duelId, action, extraArg) {
     } else if (sk.type === 'stun') {
       dmg = Math.max(1, Math.round(_calcDamage(me, opp) * (sk.mult || 1.0)));
       oppHp = Math.max(0, oppHp - dmg);
-      eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — stunning for <span class="duel-dmg">${dmg}</span> damage!`;
+      oppStateUpd.stunned = true;
+      eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — <span class="duel-dmg">${dmg}</span> dmg + <b>${oppDisplayName} is STUNNED</b> and loses next turn!`;
     } else if (sk.type === 'multihit') {
       const hits = sk.hits || 2;
       for (let h = 0; h < hits; h++) {
@@ -455,9 +520,19 @@ export async function doDuelTurn(duelId, action, extraArg) {
     eventIcon = '✨';
   }
 
-  const nextUid  = actingAsNpc ? duel.challengerId   : (isChallenger ? duel.targetId    : duel.challengerId);
-  const nextName = actingAsNpc ? duel.challengerName : (isChallenger ? duel.targetName  : duel.challengerName);
-  const newRound = actingAsNpc ? duel.round + 1      : (isChallenger ? duel.round       : duel.round + 1);
+  // Merge state updates
+  myState  = { ...myState,  ...myStateUpd };
+  oppState = { ...oppState, ...oppStateUpd };
+
+  const normalNextUid  = actingAsNpc ? duel.challengerId   : (isChallenger ? duel.targetId    : duel.challengerId);
+  const normalNextName = actingAsNpc ? duel.challengerName : (isChallenger ? duel.targetName  : duel.challengerName);
+
+  // If we just stunned the opponent, keep the turn with the current player
+  const justStunned = oppStateUpd.stunned === true;
+  const nextUid  = justStunned ? duel.currentTurnUid : normalNextUid;
+  const nextName = justStunned ? meDisplayName       : normalNextName;
+  const newRound = justStunned ? duel.round
+    : (actingAsNpc ? duel.round + 1 : (isChallenger ? duel.round : duel.round + 1));
 
   const isDuelOver = oppHp <= 0;
 
@@ -472,6 +547,8 @@ export async function doDuelTurn(duelId, action, extraArg) {
     [myHpKey]:   myHp,
     [myManaKey]: myMana,
     [oppHpKey]:  oppHp,
+    [myStateKey]:  myState,
+    [oppStateKey]: oppState,
     ...(isDuelOver ? { status: 'complete', winnerId: actingAsNpc ? duel.targetId : uid, winnerName: meDisplayName, loserName: oppDisplayName } : {}),
   };
 

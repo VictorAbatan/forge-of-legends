@@ -620,15 +620,26 @@ function renderContinent(cid) {
             </div>`).join("")}`:""}
         </div>
         <div class="lmap-sidebar-footer">
-          ${!here?`<button class="lmap-travel-btn" id="lmap-main-travel">TRAVEL HERE — ${cont.travelCost}🪙 · ${_ft(cont.travelTime)}</button>`
-                 :`<div class="lmap-here-text">✓ YOU ARE HERE</div>`}
+          ${!here
+            ? (() => {
+                const sameContinent = _isInContinent(cid);
+                const cost = sameContinent ? 20 : cont.travelCost;
+                const time = sameContinent ? 60 : cont.travelTime;
+                return `<button class="lmap-travel-btn" id="lmap-main-travel">TRAVEL HERE — ${cost}🪙 · ${_ft(time)}</button>`;
+              })()
+            : `<div class="lmap-here-text">✓ YOU ARE HERE</div>`}
         </div>
       </div>
     </div>`;
 
   _setupBC(c);
   _initZoomPan(document.getElementById("lmap-img-side"), document.getElementById("lmap-zoom-wrap"));
-  c.querySelector("#lmap-main-travel")?.addEventListener("click",()=>window.openTravelModal?.(cont.capital||cont.name,cont.label.split("·")[0].trim(),cont.travelCost,cont.travelTime));
+  c.querySelector("#lmap-main-travel")?.addEventListener("click",()=>{
+    const sameContinent = _isInContinent(cid);
+    const cost = sameContinent ? 20 : cont.travelCost;
+    const time = sameContinent ? 60 : cont.travelTime;
+    window.openTravelModal?.(cont.capital||cont.name,cont.label.split("·")[0].trim(),cost,time);
+  });
   c.querySelector(".lmap-img-side")?.addEventListener("click",_closeTT);
 
   const imgEl=document.getElementById("lmap-loc-img");
@@ -876,15 +887,25 @@ function renderCapital(cid) {
         </div>
         <div class="lmap-sidebar-footer">
           ${!here
-            ?`<button class="lmap-travel-btn" id="lmap-capital-travel">TRAVEL HERE — ${cont.travelCost}🪙 · ${_ft(cont.travelTime)}</button>`
-            :`<div class="lmap-here-text">✓ YOU ARE HERE</div>`}
+            ? (() => {
+                const sameContinent = _isInContinent(cid);
+                const cost = sameContinent ? 20 : cont.travelCost;
+                const time = sameContinent ? 60 : cont.travelTime;
+                return `<button class="lmap-travel-btn" id="lmap-capital-travel">TRAVEL HERE — ${cost}🪙 · ${_ft(time)}</button>`;
+              })()
+            : `<div class="lmap-here-text">✓ YOU ARE HERE</div>`}
         </div>
       </div>
     </div>`;
 
   _setupBC(c);
   _initZoomPan(document.getElementById("lmap-img-side"), document.getElementById("lmap-zoom-wrap"));
-  c.querySelector("#lmap-capital-travel")?.addEventListener("click",()=>window.openTravelModal?.(cont.capital||cont.name,cont.label.split("·")[0].trim(),cont.travelCost,cont.travelTime));
+  c.querySelector("#lmap-capital-travel")?.addEventListener("click",()=>{
+    const sameContinent = _isInContinent(cid);
+    const cost = sameContinent ? 20 : cont.travelCost;
+    const time = sameContinent ? 60 : cont.travelTime;
+    window.openTravelModal?.(cont.capital||cont.name,cont.label.split("·")[0].trim(),cost,time);
+  });
 
   const _capImg    = document.getElementById("lmap-loc-img");
   const _capWrap   = document.getElementById("lmap-zoom-wrap");

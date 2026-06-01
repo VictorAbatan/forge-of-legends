@@ -505,6 +505,16 @@ button,
             <!-- Rendered by _renderEquipPanel(c) in dashboard.js -->
             <div id="equip-panel" class="equip-panel"></div>
             <!-- EQUIP MODAL -->
+            <!-- Equip stat-boost overlay -->
+            <div class="equip-boost-overlay" id="equip-boost-overlay" style="display:none">
+              <div class="equip-boost-box">
+                <div class="equip-boost-title" id="equip-boost-title">⚔️ Equipped!</div>
+                <div class="equip-boost-name" id="equip-boost-name"></div>
+                <div class="equip-boost-stats" id="equip-boost-stats"></div>
+                <button class="btn-primary" style="margin-top:16px;width:100%" onclick="document.getElementById('equip-boost-overlay').style.display='none'">Got it</button>
+              </div>
+            </div>
+
             <div class="equip-modal" id="equip-modal" style="display:none">
               <div class="equip-modal-box">
                 <div class="equip-modal-title" id="equip-modal-title">Equip Item</div>
@@ -2047,7 +2057,14 @@ button,
     if (delta > 0 && window._statPoints <= 0) { window.showToast('No stat points remaining.','error'); return; }
     window._pendingStats[stat] = next;
     window._statPoints -= delta;
-    document.getElementById('a-' + stat).textContent = next;
+    // Preserve gear bonus span if present
+    const _statEl = document.getElementById('a-' + stat);
+    const _bonusSpan = _statEl ? _statEl.querySelector('.stat-equip-bonus') : null;
+    if (_bonusSpan) {
+      _statEl.innerHTML = next + ' ' + _bonusSpan.outerHTML;
+    } else if (_statEl) {
+      _statEl.textContent = next;
+    }
     document.getElementById('s-points').textContent  = window._statPoints;
     document.getElementById('stat-points').textContent = window._statPoints;
     const changed = Object.keys(window._pendingStats).some(k => window._pendingStats[k] !== window._baseStats[k]);

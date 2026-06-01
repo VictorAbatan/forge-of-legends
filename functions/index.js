@@ -552,7 +552,7 @@ exports.battleTurn = onCall(CALL_OPTS, async (request) => {
 
   if (playerHp <= 0) {
     const halfInv     = (char.inventory||[]).slice(0, Math.floor((char.inventory||[]).length / 2));
-    const resurrectAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const resurrectAt = new Date(Date.now() + 5 * 60 * 60 * 1000);
     await Promise.all([
       db.collection("battles").doc(uid).update({ status:"defeat" }),
       db.collection("characters").doc(uid).update({ hp:0, mana:playerMana, inventory:halfInv, resurrectAt, isDead:true }),
@@ -622,7 +622,7 @@ exports.autoBattle = onCall(CALL_OPTS, async (request) => {
     return { status:"victory", log, updates, drops, expGain, leveledUp };
   } else if (status === "defeat") {
     const halfInv     = (char.inventory||[]).slice(0, Math.floor((char.inventory||[]).length/2));
-    const resurrectAt = new Date(Date.now() + 24*60*60*1000);
+    const resurrectAt = new Date(Date.now() + 5*60*60*1000);
     updates.hp          = 0;
     updates.inventory   = halfInv;
     updates.resurrectAt = resurrectAt;
@@ -1204,6 +1204,58 @@ exports.settlePubGame = onDocumentUpdated(
 // ── createPubGame ─────────────────────────────────────────────
 //  Callable: host creates a table and their bet is deducted
 //  atomically — no client-side gold write needed.
+// ── cancelStalePubGames ──────────────────────────────────────
+//  Runs every minute. Cancels any pub game table that has been
+//  open/lobby for 3+ minutes with only the host seated (no one joined).
+//  Regular games refund the host's original bet. DH lobby tables are
+//  simply deleted (gold is deducted per-round at deal, not on create).
+exports.cancelStalePubGames = onSchedule({
+  schedule: "every 1 minutes",
+  timeZone: "Europe/London",
+  region:   "europe-west1",
+}, async () => {
+  const cutoff = new Date(Date.now() - 3 * 60 * 1000); // 3 minutes ago
+
+  const snap = await db.collection("pubGames")
+    .where("status", "in", ["open", "lobby"])
+    .where("createdAt", "<", cutoff)
+    .get();
+
+  if (snap.empty) return;
+
+  const batch = db.batch();
+  const refunds = []; // { uid, amount } for regular games
+
+  snap.forEach(docSnap => {
+    const game = docSnap.data();
+    // Only cancel if still just the host (no one joined)
+    if (!game.players || game.players.length !== 1) return;
+
+    batch.delete(docSnap.ref);
+
+    // Refund host bet for regular games (gold was deducted on createPubGame)
+    if (game.gameType !== "devils-hand" && game.hostUid && game.tableStake > 0) {
+      refunds.push({ uid: game.hostUid, amount: game.tableStake });
+    }
+  });
+
+  await batch.commit();
+
+  // Refund gold for regular game hosts
+  for (const { uid, amount } of refunds) {
+    try {
+      await db.collection("characters").doc(uid).update({
+        gold: FieldValue.increment(amount),
+      });
+      console.log(`[cancelStalePubGames] Refunded ${amount} gold to ${uid}`);
+    } catch (e) {
+      console.warn(`[cancelStalePubGames] Failed to refund ${uid}:`, e.message);
+    }
+  }
+
+  console.log(`[cancelStalePubGames] Cancelled ${snap.size} stale table(s).`);
+});
+
 exports.createPubGame = onCall(CALL_OPTS, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Must be logged in.");

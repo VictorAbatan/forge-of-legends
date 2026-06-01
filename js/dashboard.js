@@ -981,7 +981,7 @@ const EQUIP_WEAPON_STATS = {
   // C-GRADE
   "Silver Greatsword":{str:25,dex:8}, "Arcane Staff":{int:28,dex:10}, "Composite Bow":{dex:26,str:9},
   "Assassin Daggers":{dex:27,int:8}, "Mystic Blade":{str:24,int:11}, "Spellknife":{dex:23,int:12},
-  "Dagon Bow":{dex:25,str:9}, "Bronze Cleaver":{str:28,dex:7}, "Dark Rod":{int:29,str:6},
+  "Dagon Bow":{dex:25,str:9}, "Bronze Cleaver":{str:28,dex:7}, "Dark Rod":{int:29,str:6}, "War Maul":{str:30,dex:5},
   // B-GRADE
   "Myth-Blade":{str:48,dex:15}, "High-Scepter":{int:50,str:14}, "Draconic Bow":{dex:47,str:16},
   "Shadow-Strike":{dex:46,int:18}, "Warbreaker":{str:52,dex:10}, "Mystic Jian":{str:45,int:20},
@@ -1076,7 +1076,7 @@ const ALL_WEAPON_NAMES = [
   // D-GRADE
   "Obsidian Greatsword","Silver Wand","Longbow","Twin Daggers","Warhammer","Arc Rod","Bronze Blade","Hunter Bow","Spiked Mace","Mystic Knife",
   // C-GRADE
-  "Silver Greatsword","Arcane Staff","Composite Bow","Assassin Daggers","Mystic Blade","Warhammer","Spellknife","Dagon Bow","Bronze Cleaver","Dark Rod",
+  "Silver Greatsword","Arcane Staff","Composite Bow","Assassin Daggers","Mystic Blade","War Maul","Spellknife","Dagon Bow","Bronze Cleaver","Dark Rod",
   // B-GRADE
   "Myth-Blade","High-Scepter","Draconic Bow","Shadow-Strike","Warbreaker","Mystic Jian","Phantom Longbow","Spellhammer","Venom Daggers","Ancient Wand",
   // A-GRADE
@@ -1092,7 +1092,7 @@ const ALL_ARMOR_NAMES = [
   // C-GRADE
   "Shining Armor","Bronze Cuirass","Jagged Chainmail","Bone Fortress","Obsidian Vest","Reptilian Scale","Shadow Cloak","Golden Cape","Warlord Hide","Arcane Shell",
   // B-GRADE
-  "Void-Spell Armor","Golden Scales","Night Cloak","Spirit-Ward","Paladin’s Mantle","Draconic Robe","Titanic Hide","Golden Warplate","Mythic Cuirass","Quintessence Mantle",
+  "Void-Spell Armor","Golden Scales","Night Cloak","Spirit-Ward","Paladin's Mantle","Draconic Robe","Titanic Hide","Golden Warplate","Mythic Cuirass","Quintessence Mantle",
   // A-GRADE
   "Heart Hide","Destroyer Mantle","Chaos-garb","Devastator Armor","Tectonic-Mail","Elemental Shroud","Colossal Veil","Realm-Bound Tunic","Serpentine-Robe","Vasto-Shell",
   // S-GRADE
@@ -1132,7 +1132,7 @@ function _renderEquipPanel(charData) {
     let enchantLevel = 0, invGrade = '';
     if (baseName) {
       const matches = inv
-        .filter(i => (i.name || '').replace(/\s*\+\d+$/, '') === baseName && (i.type === 'equipment' || i.type === slotType))
+        .filter(i => (i.name || '').replace(/\s*\+\d+$/, '') === baseName)
         .sort((a, b) => (b.enchantLevel || 0) - (a.enchantLevel || 0));
       if (matches.length) { enchantLevel = matches[0].enchantLevel || 0; invGrade = matches[0].grade || ''; }
     }
@@ -1168,7 +1168,10 @@ function _renderEquipPanel(charData) {
             <div class="equip-item-nameline">${displayName}${gradeBadge}${enchantBadge}</div>
             ${statsHtml ? `<div class="equip-item-stats">${statsHtml}</div>` : ''}
           </div>
-          <button class="equip-item-change-btn" onclick="openEquipModal('${slotType}')">Change</button>
+          <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+            <button class="equip-item-change-btn" onclick="openEquipModal('${slotType}')">Change</button>
+            ${!isEmpty ? `<button class="equip-item-unequip-btn" onclick="unequipSlot('${slotType}')">Remove</button>` : ''}
+          </div>
         </div>
       </div>`;
   }
@@ -1192,12 +1195,26 @@ window.openEquipModal = function(type) {
   // Use getItemType (keyword-based, works on enchanted names like "Iron Dagger +2")
   // then cross-check the correct slot via ALL_WEAPON_NAMES / ALL_ARMOR_NAMES on base name.
   const inv = window._allInvItems || [];
-  const nameList = type === 'weapon' ? ALL_WEAPON_NAMES : ALL_ARMOR_NAMES;
-  const filtered = inv.filter(i => {
+  const nameList     = type === 'weapon' ? ALL_WEAPON_NAMES : ALL_ARMOR_NAMES;
+  const currentEquip = (window._charData?.equipment?.[type] || '').replace(/\s*\+\d+$/, '').trim();
+  // Filter valid slot items, exclude currently equipped
+  const rawFiltered = inv.filter(i => {
     if (getItemType(i.name) !== 'equipment') return false;
     const base = (i.name || '').replace(/\s*\+\d+$/, '').trim();
-    return nameList.includes(base);
+    if (!nameList.includes(base)) return false;
+    if (currentEquip && base === currentEquip) return false;
+    return true;
   });
+  // Deduplicate — one entry per base name, keeping the highest enchant level
+  const _seenBases = new Map();
+  rawFiltered.forEach(i => {
+    const base = (i.name || '').replace(/\s*\+\d+$/, '').trim();
+    const lvl  = i.enchantLevel || parseInt((i.name || '').match(/\+(\d+)$/)?.[1] || '0');
+    const prev = _seenBases.get(base);
+    const prevLvl = prev ? (prev.enchantLevel || parseInt((prev.name || '').match(/\+(\d+)$/)?.[1] || '0')) : -1;
+    if (!prev || lvl > prevLvl) _seenBases.set(base, i);
+  });
+  const filtered = Array.from(_seenBases.values());
 
   title.textContent = type === 'weapon' ? 'Equip Weapon' : 'Equip Armor';
 
@@ -1248,18 +1265,65 @@ window.openEquipModal = function(type) {
     try {
       const charRef   = doc(db, "characters", _uid);
       const field     = type === 'weapon' ? 'equipment.weapon' : 'equipment.armor';
+      // Always store the base name — enchant level lives on the inventory item, not the equipment slot
       const storeName = (selected.name || '').replace(/\s*\+\d+$/, '').trim();
+
+      // Capture stat snapshot BEFORE equipping
+      const c         = window._charData || {};
+      const oldEquip  = c.equipment?.[type] || '';
+      const statsMap  = type === 'weapon' ? EQUIP_WEAPON_STATS : EQUIP_ARMOR_STATS;
+      const oldBase   = oldEquip.replace(/\s*\+\d+$/, '').trim();
+      const newBase   = storeName.replace(/\s*\+\d+$/, '').trim();
+      const oldStats  = oldBase ? (statsMap[oldBase] || {}) : {};
+      const newStats  = statsMap[newBase] || {};
+      const racePct   = getRaceEquipBonus(c.race);
+      const diff      = {};
+      const allKeys   = new Set([...Object.keys(oldStats), ...Object.keys(newStats)]);
+      allKeys.forEach(k => {
+        const before = Math.round((oldStats[k] || 0) * (1 + racePct));
+        const after  = Math.round((newStats[k] || 0) * (1 + racePct));
+        if (after - before !== 0) diff[k] = after - before;
+      });
+
       await updateDoc(charRef, { [field]: storeName });
       if (window._charData) {
         if (!window._charData.equipment) window._charData.equipment = {};
         window._charData.equipment[type] = storeName;
       }
       _renderEquipPanel(window._charData || {});
+      populateDashboard(window._charData);   // ← refresh character panel stats
       closeEquipModal();
-      const nameMatch    = (selected.name || '').match(/\+(\d+)$/);
-      const lvl          = selected.enchantLevel || (nameMatch ? parseInt(nameMatch[1]) : 0);
-      const displayName  = lvl ? `${storeName} +${lvl}` : storeName;
-      showToast(`${displayName} equipped!`, 'success');
+
+      // Show stat-boost overlay — always show full new stats + net change vs old gear
+      const nameMatch   = (selected.name || '').match(/\+(\d+)$/);
+      const lvl         = selected.enchantLevel || (nameMatch ? parseInt(nameMatch[1]) : 0);
+      const displayName = lvl ? `${storeName} +${lvl}` : storeName;
+      const overlay     = document.getElementById('equip-boost-overlay');
+      const statLabels  = { str:'STR', int:'INT', def:'DEF', dex:'DEX', hp:'HP' };
+      if (overlay) {
+        document.getElementById('equip-boost-title').textContent =
+          type === 'weapon' ? '⚔️ Weapon Equipped!' : '🛡️ Armor Equipped!';
+        document.getElementById('equip-boost-name').textContent = displayName;
+        // Show each stat with its full value and the net change vs previous gear
+        const statEntries = Object.entries(newStats);
+        if (statEntries.length > 0) {
+          document.getElementById('equip-boost-stats').innerHTML = statEntries
+            .map(([k, v]) => {
+              const boosted  = Math.round(v * (1 + racePct));
+              const deltaVal = diff[k] || boosted; // if no old gear, full value is the gain
+              const cls      = k === 'hp' ? 'stat-hp' : k === 'def' ? 'stat-def' : '';
+              const sign     = deltaVal > 0 ? '+' : '';
+              const deltaHtml = `<span class="equip-boost-delta">(${sign}${deltaVal})</span>`;
+              return `<span class="equip-boost-stat ${cls}">+${boosted} ${statLabels[k] || k.toUpperCase()} ${deltaHtml}</span>`;
+            }).join('');
+        } else {
+          document.getElementById('equip-boost-stats').innerHTML =
+            '<span style="color:var(--text-dim);font-size:0.8rem">No stat data found.</span>';
+        }
+        overlay.style.display = 'flex';
+      } else {
+        showToast(`${displayName} equipped!`, 'success');
+      }
     } catch(e) {
       error.textContent = 'Failed to equip. Try again.';
       btn.disabled = false;
@@ -1273,6 +1337,22 @@ window.openEquipModal = function(type) {
 window.closeEquipModal = function() {
   const m = document.getElementById('equip-modal');
   if (m) m.style.display = 'none';
+};
+
+window.unequipSlot = async function(type) {
+  try {
+    const field = type === 'weapon' ? 'equipment.weapon' : 'equipment.armor';
+    await updateDoc(doc(db, 'characters', _uid), { [field]: '' });
+    if (window._charData) {
+      if (!window._charData.equipment) window._charData.equipment = {};
+      window._charData.equipment[type] = '';
+    }
+    _renderEquipPanel(window._charData || {});
+    populateDashboard(window._charData);
+    showToast(type === 'weapon' ? 'Weapon unequipped.' : 'Armor unequipped.', 'info');
+  } catch(e) {
+    showToast('Failed to unequip. Try again.', 'error');
+  }
 };
 // ═══════════════════════════════════════════════════
 //  FORGE OF LEGENDS — Dashboard Logic  (Phase A + B)
@@ -2668,6 +2748,9 @@ export function initDashboard() {
       _charData.uid = user.uid; // ensure uid is always available on charData
       // Patch old accounts silently on load
       _charData = await _migrateAccountStats(_charData);
+      // Clean up any mistyped inventory items (e.g. equipment stored as material)
+      const _cleanedInv = await _stampMissingIids(_charData.inventory || []);
+      _charData.inventory = _cleanedInv;
       // Set baseline for faith watcher
       _prevFaithLevel = _charData.faithLevel ?? 0;
       window.startBestowWatcher();
@@ -2736,6 +2819,17 @@ function populateDashboard(c) {
     // Persist correction to Firestore silently
     if (_uid) updateDoc(doc(db, 'characters', _uid), { hp: _hpClamped, mana: _manaClamped }).catch(()=>{});
   }
+  // Compute equipment HP bonus early so all HP-max displays are correct
+  const _earlyEquipHpBonus = (() => {
+    let hp = 0;
+    if (c.equipment?.armor) {
+      const aBase = c.equipment.armor.replace(/\s*\+\d+$/, '').trim();
+      hp = EQUIP_ARMOR_STATS[aBase]?.hp || 0;
+    }
+    const racePct = getRaceEquipBonus(c.race);
+    return Math.round(hp * (1 + racePct));
+  })();
+  const _effectiveHpMax = (c.hpMax ?? 100) + _earlyEquipHpBonus;
   const classIcon = CLASS_ICONS[c.charClass] || "⚔️";
   const deityIcon = DEITY_ICONS[c.deity]     || "✨";
   const xpPct     = Math.min(100, Math.round(((c.xp||0)/(c.xpMax||100))*100));
@@ -2756,7 +2850,7 @@ function populateDashboard(c) {
   set("stat-level",     `Level ${c.level||1}`);
   set("stat-gold",      c.gold    ?? 500);
   set("stat-hp",        c.hp      ?? 100);
-  set("stat-hp-max",   `/ ${c.hpMax   ?? 100}`);
+  set("stat-hp-max",   `/ ${_effectiveHpMax}`);
   set("stat-mana",      c.mana    ?? 50);
   set("stat-mana-max", `/ ${c.manaMax ?? 50}`);
   const overviewLocRaw = (c.kingdom || c.location || "—").split("—")[0].trim();
@@ -2819,12 +2913,14 @@ function populateDashboard(c) {
   set("prof-age",          c.age        || "—");
   set("prof-bio",          c.bio        || "No history written yet.");
 
-  set("s-hp",    `${c.hp??100} / ${c.hpMax??100}`);
+  set("s-hp",    `${c.hp??100} / ${_effectiveHpMax}`);
   set("s-mana",  `${c.mana??50} / ${c.manaMax??50}`);
   set("s-gold",  c.gold  ?? 100);
   set("s-xp",    `${c.xp??0} / ${c.xpMax??100}`);
   set("s-faith", c.faithLevel ?? 0);
   set("s-rep",   c.reputation ?? 0);
+  // Inventory must be set BEFORE _renderEquipPanel so enchant/grade lookups work
+  window._allInvItems = c.inventory || [];
   _renderEquipPanel(c);
 
   // Stat allocation + equipment bonuses
@@ -2832,30 +2928,52 @@ function populateDashboard(c) {
   const pts   = c.statPoints ?? 20;
   // Equipment bonuses
   let equipBonus = { str:0, int:0, def:0, dex:0, hp:0 };
-  if (c.equipment?.weapon && EQUIP_WEAPON_STATS[c.equipment.weapon]) {
-    const w = EQUIP_WEAPON_STATS[c.equipment.weapon];
-    for (const k in w) equipBonus[k] = (equipBonus[k]||0) + w[k];
+  if (c.equipment?.weapon) {
+    const wBase = c.equipment.weapon.replace(/\s*\+\d+$/, '').trim();
+    const w = EQUIP_WEAPON_STATS[wBase];
+    if (w) {
+      // Find enchant level from inventory item
+      const wEnchant = (window._allInvItems || []).find(i => (i.name||'').replace(/\s*\+\d+$/,'').trim() === wBase)?.enchantLevel || 0;
+      for (const k in w) equipBonus[k] = (equipBonus[k]||0) + w[k] + wEnchant;
+    }
   }
-  if (c.equipment?.armor && EQUIP_ARMOR_STATS[c.equipment.armor]) {
-    const a = EQUIP_ARMOR_STATS[c.equipment.armor];
-    for (const k in a) equipBonus[k] = (equipBonus[k]||0) + a[k];
+  if (c.equipment?.armor) {
+    const aBase = c.equipment.armor.replace(/\s*\+\d+$/, '').trim();
+    const a = EQUIP_ARMOR_STATS[aBase];
+    if (a) {
+      const aEnchant = (window._allInvItems || []).find(i => (i.name||'').replace(/\s*\+\d+$/,'').trim() === aBase)?.enchantLevel || 0;
+      for (const k in a) equipBonus[k] = (equipBonus[k]||0) + a[k] + aEnchant;
+    }
   }
   // Race bonus
   const raceBonusPct = getRaceEquipBonus(c.race);
   for (const k in equipBonus) equipBonus[k] = Math.round(equipBonus[k] * (1 + raceBonusPct));
   // Total stats
   const totalStats = {
-    str: (stats.str??10) + (equipBonus.str||0),
-    int: (stats.int??10) + (equipBonus.int||0),
-    def: (stats.def??10) + (equipBonus.def||0),
-    dex: (stats.dex??10) + (equipBonus.dex||0),
-    hp:  (c.hp??100) + (equipBonus.hp||0)
+    str:   (stats.str??10) + (equipBonus.str||0),
+    int:   (stats.int??10) + (equipBonus.int||0),
+    def:   (stats.def??10) + (equipBonus.def||0),
+    dex:   (stats.dex??10) + (equipBonus.dex||0),
+    // Armor HP bonus boosts max HP display, not current HP
+    hpMax: _effectiveHpMax
   };
   window._baseStats    = { ...stats };
   window._pendingStats = { ...stats };
   window._statPoints   = pts;
-  set("a-str", totalStats.str); set("a-int", totalStats.int);
-  set("a-def", totalStats.def); set("a-dex", totalStats.dex);
+  // Show base stat + gear bonus inline: "142 +14 STR" style
+  function _setStatWithBonus(elId, baseVal, bonusVal) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    if (bonusVal > 0) {
+      el.innerHTML = `${baseVal} <span class="stat-equip-bonus">+${bonusVal}</span>`;
+    } else {
+      el.textContent = baseVal;
+    }
+  }
+  _setStatWithBonus("a-str", (stats.str??10), equipBonus.str||0);
+  _setStatWithBonus("a-int", (stats.int??10), equipBonus.int||0);
+  _setStatWithBonus("a-def", (stats.def??10), equipBonus.def||0);
+  _setStatWithBonus("a-dex", (stats.dex??10), equipBonus.dex||0);
   set("s-points", pts);
   const hint = document.getElementById("alloc-hint");
   if (hint) hint.style.display = pts > 0 ? "block" : "none";
@@ -2865,7 +2983,6 @@ function populateDashboard(c) {
   set("skills-subtitle", `${classIcon} ${c.charClass||""} skill tree — 2 skills unlock per rank ascension`);
 
   // Inventory
-  window._allInvItems = c.inventory || [];
   window.renderInventory(window._allInvItems);
   buildDeityIngredients(c.deity);
 
@@ -3473,7 +3590,7 @@ const ITEM_ICONS = {
   "Mystic Knife":             "🔪",
   "Silver Greatsword":        "⚔️", "Arcane Staff":             "🪄", "Composite Bow":            "🏹",
   "Assassin Daggers":         "🗡️", "Mystic Blade":             "⚔️", "Spellknife":               "🔪",
-  "Dagon Bow":                "🏹", "Bronze Cleaver":           "🪓", "Dark Rod":                 "🔮",
+  "Dagon Bow":                "🏹", "Bronze Cleaver":           "🪓", "Dark Rod":                 "🔮", "War Maul":                 "🔨",
   "Myth-Blade":               "⚔️", "High-Scepter":             "🪄", "Draconic Bow":             "🏹",
   "Shadow-Strike":            "🗡️", "Warbreaker":               "🔨", "Mystic Jian":              "⚔️",
   "Phantom Longbow":          "🏹", "Spellhammer":              "🔨", "Venom Daggers":            "🗡️",
@@ -3548,7 +3665,14 @@ const ITEM_TYPES = {
 };
 
 function getItemType(name) {
+  // Equipment: check exact name lists first (strips enchant suffix like "+2")
+  // This prevents S/A-grade items with unique names (Abjuration, Null, Saturn etc.)
+  // from falling through to "material" via keyword mismatch.
+  const baseName = (name || '').replace(/\s*\+\d+$/, '').trim();
+  if (ALL_WEAPON_NAMES.includes(baseName) || ALL_ARMOR_NAMES.includes(baseName)) return 'equipment';
+  // Everything else: keyword scan (consumables, quest items, materials)
   for (const [type, keywords] of Object.entries(ITEM_TYPES)) {
+    if (type === 'equipment') continue; // already handled above
     if (keywords.some(k => name.includes(k))) return type;
   }
   return "material"; // default
@@ -4522,8 +4646,7 @@ async function _loadGeneralNpcsForSidebar() {
     _generalNpcs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
   } catch(e) { console.warn("[_loadGeneralNpcsForSidebar]", e); }
 
-  // Rebuild the NPC sidebar toggle so "All NPCs" reflects global list
-  _locationNpcs = _generalNpcs;
+  // Rebuild NPC sidebar with general NPCs — do NOT overwrite _locationNpcs
   renderNpcSidebarToggle();
   if (_npcSidebarTab === "npcs") renderNpcList();
 }
@@ -5007,14 +5130,17 @@ function renderNpcList() {
   if (listEl) listEl.style.display = "none";
   npcListEl.style.display = "";
 
-  if (!_locationNpcs.length) {
-    npcListEl.innerHTML = `<span style="color:var(--ash);font-size:0.72rem;font-style:italic">No NPCs in this location</span>`;
+  // General tab shows general NPCs; RP tab shows location NPCs only
+  const npcsToShow = _chatTab === "general" ? _generalNpcs : _locationNpcs;
+
+  if (!npcsToShow.length) {
+    npcListEl.innerHTML = `<span style="color:var(--ash);font-size:0.72rem;font-style:italic">${_chatTab === "general" ? "No general NPCs" : "No NPCs in this location"}</span>`;
     return;
   }
 
   const isDeity = _charData?.isDeity;
 
-  npcListEl.innerHTML = _locationNpcs.map(npc => {
+  npcListEl.innerHTML = npcsToShow.map(npc => {
     const av = npc.avatar?.startsWith("http")
       ? `<img src="${npc.avatar}" style="width:100%;height:100%;object-fit:cover;border-radius:50%"/>`
       : `<span style="font-size:1rem">${npc.avatar || "🧙"}</span>`;
@@ -5536,6 +5662,8 @@ window.startEditMsg = startEditMsg;
 //  MARKETPLACE
 // ═══════════════════════════════════════════════════
 async function buyItem({ name, icon, price, type, qty = 1 }) {
+  // Guard: derive type from name if caller didn't supply it
+  if (!type) type = getItemType(name);
   const errEl = document.getElementById("buy-error");
   errEl.textContent = "";
   const gold = _charData?.gold ?? 0;
@@ -6516,8 +6644,29 @@ window._doGather = async function() {
     Herbalist: ["wisteria","arctic_willow","arctic_willow_west","asahi","wisteria forest","arctic willow","asahi valley"],
     Hunter:    ["wisteria","asahi","wisteria forest","asahi valley"],
   };
-  const deityLocKeywords = ["shrine","basin","estuary","purgatory","temple","heart garden","valley of overflowing"];
-  const isDeityLoc = deityLocKeywords.some(k => loc.includes(k.split(" ")[0]));
+  // Deity location → material mapping (location-specific, NOT profession-specific)
+  const DEITY_LOC_MATS = {
+    "shrine of secrets":       ["Ancient Scroll Fragments","White Mystic Woods","Truths"],           // God of Knowledge
+    "aurora basin":            ["Starlight Dust","Moon Petals","Crystallized Night Dews"],           // Goddess of Stars
+    "forgotten estuary":       ["Ephemeral Footprints","Oil-stained Feathers","Whispering Purple Sands"], // God of Darkness
+    "purgatory of light":      ["Volcanic Roots","Devil-Spring Water","Ash of Elder Trees"],         // God of Flames
+    "temple of verdict":       ["Broken Shackles","Iron Oaths","Verdict Quill"],                     // God of Justice
+    "heart garden":            ["Crimson Toad Moss","Branch of Soul Tree","Bloom Petals"],           // Goddess of Love
+    "valley of overflowing":   ["Golden Wheat Sheaves","Miracle Coins","Ancient Mint Seeds"],        // God of Abundance
+  };
+  // Find which deity location the player is at (if any)
+  let deityMatPool = null;
+  for (const [locKey, mats] of Object.entries(DEITY_LOC_MATS)) {
+    if (locKey.split(" ").every(word => loc.includes(word)) || loc.includes(locKey.split(" ")[0])) {
+      // More precise match: check majority of key words present
+      const words = locKey.split(" ").filter(w => w.length > 3);
+      if (words.length === 0 || words.some(w => loc.includes(w))) {
+        deityMatPool = mats;
+        break;
+      }
+    }
+  }
+  const isDeityLoc = deityMatPool !== null;
   const validZones = PROF_ZONES[prof] || [];
   const isAtResourceZone = validZones.some(z => loc.includes(z));
 
@@ -6552,11 +6701,11 @@ window._doGather = async function() {
     const logLines = [];
 
     if (isDeityLoc) {
-      // 20% chance to find a deity material
-      if (Math.random() < 0.20) {
-        const pool = resources.deityMats || [];
+      // 10% chance to find a deity worship material (spec: 10% per shrine/location)
+      if (Math.random() < 0.10) {
+        const pool = deityMatPool || [];
         found = pool[Math.floor(Math.random()*pool.length)];
-        logLines.push(`<div class="gather-log-entry success">✨ You found <strong>${found}</strong>! (Deity Material)</div>`);
+        logLines.push(`<div class="gather-log-entry success">✨ You found <strong>${found}</strong>! (Deity Worship Material)</div>`);
       } else {
         logLines.push(`<div class="gather-log-entry empty">🌑 You explored carefully... but found nothing.</div>`);
       }
@@ -6596,7 +6745,7 @@ window._doGather = async function() {
       const ex = inv.find(i=>i.name===found);
       const _fIsEquip = getItemType(found)==='equipment';
       if (ex && !_fIsEquip) { ex.qty += count; }
-      else { const _ni={name:found,qty:count}; if(_fIsEquip) _ni.iid=Math.random().toString(36).slice(2,10)+Date.now().toString(36); inv.push(_ni); }
+      else { const _ni={name:found,qty:count,type:_fIsEquip?'equipment':getItemType(found)}; if(_fIsEquip) _ni.iid=Math.random().toString(36).slice(2,10)+Date.now().toString(36); inv.push(_ni); }
       _charData.inventory = inv;
       window._allInvItems = inv;
       window._refreshInvDisplay();
@@ -6687,7 +6836,7 @@ window._doGather = async function() {
       const ex = inv.find(i=>i.name===found);
       const _dIsEquip = getItemType(found)==='equipment';
       if (ex && !_dIsEquip) { ex.qty += 1; }
-      else { const _ni={name:found,qty:1}; if(_dIsEquip) _ni.iid=Math.random().toString(36).slice(2,10)+Date.now().toString(36); inv.push(_ni); }
+      else { const _ni={name:found,qty:1,type:_dIsEquip?'equipment':getItemType(found)}; if(_dIsEquip) _ni.iid=Math.random().toString(36).slice(2,10)+Date.now().toString(36); inv.push(_ni); }
       await updateDoc(doc(db,"characters",_uid), {inventory:inv});
       _charData.inventory = inv;
       window._allInvItems = inv;
@@ -6801,14 +6950,30 @@ window.openEquipModal = function(type) {
   // Filter inventory for correct type using explicit name lists
   const inv = window._allInvItems || [];
   // Strip +N suffix before matching so enchanted items (e.g. "Iron Dagger +2") are included
-  let filtered = inv.filter(i => {
-    const base = (i.name || '').replace(/\s*\+\d+$/, '');
-    return type === 'weapon'
-      ? (i.type === 'weapon' || i.type === 'equipment') && ALL_WEAPON_NAMES.includes(base)
-      : (i.type === 'armor'  || i.type === 'equipment') && ALL_ARMOR_NAMES.includes(base);
+  // Also exclude whatever is already equipped in this slot
+  const currentEquip = (window._charData?.equipment?.[type] || '').replace(/\s*\+\d+$/, '').trim();
+  let rawFiltered = inv.filter(i => {
+    const base = (i.name || '').replace(/\s*\+\d+$/, '').trim();
+    if (type === 'weapon') {
+      if (!(i.type === 'weapon' || i.type === 'equipment') || !ALL_WEAPON_NAMES.includes(base)) return false;
+    } else {
+      if (!(i.type === 'armor' || i.type === 'equipment') || !ALL_ARMOR_NAMES.includes(base)) return false;
+    }
+    // Exclude the currently equipped item
+    if (currentEquip && base === currentEquip) return false;
+    return true;
+  });
+  // Deduplicate — one entry per base name, keeping the highest enchant level
+  const _seenBases = new Map();
+  rawFiltered.forEach(i => {
+    const base = (i.name || '').replace(/\s*\+\d+$/, '').trim();
+    const lvl  = i.enchantLevel || parseInt((i.name || '').match(/\+(\d+)$/)?.[1] || '0');
+    const prev = _seenBases.get(base);
+    const prevLvl = prev ? (prev.enchantLevel || parseInt((prev.name || '').match(/\+(\d+)$/)?.[1] || '0')) : -1;
+    if (!prev || lvl > prevLvl) _seenBases.set(base, i);
   });
   // Sort: by enchant level desc (enchanted first), then alphabetically
-  filtered = filtered.sort((a, b) => {
+  let filtered = Array.from(_seenBases.values()).sort((a, b) => {
     const ea = a.enchantLevel || 0, eb = b.enchantLevel || 0;
     if (eb !== ea) return eb - ea;
     return (a.name || '').localeCompare(b.name || '');
@@ -6857,15 +7022,21 @@ window.openEquipModal = function(type) {
     btn.disabled = true;
     error.textContent = '';
     try {
-      // Update equipped item in Firestore — store base name so panel can cross-ref enchant from inventory
       const charRef = doc(db, "characters", _uid);
       const field = type === 'weapon' ? 'equipment.weapon' : 'equipment.armor';
-      const storeName = (selected.name || '').replace(/\s*\+\d+$/, '');
+      // Always store the base name — enchant level lives on the inventory item
+      const storeName = (selected.name || '').replace(/\s*\+\d+$/, '').trim();
       await updateDoc(charRef, { [field]: storeName });
-      // Update local display
-      if (window._charData) { if (!window._charData.equipment) window._charData.equipment = {}; window._charData.equipment[type] = storeName; } _renderEquipPanel(window._charData || {});
+      if (window._charData) {
+        if (!window._charData.equipment) window._charData.equipment = {};
+        window._charData.equipment[type] = storeName;
+      }
+      _renderEquipPanel(window._charData || {});
+      populateDashboard(window._charData);
       closeEquipModal();
-      showToast(`${selected.name} equipped!`, 'success');
+      const enchantLevel = selected.enchantLevel || 0;
+      const displayName = enchantLevel ? `${storeName} +${enchantLevel}` : storeName;
+      showToast(`${displayName} equipped!`, 'success');
     } catch(e) {
       error.textContent = 'Failed to equip. Try again.';
       btn.disabled = false;
@@ -8217,13 +8388,13 @@ function _rollDrops(grade) {
       const sameChance = table.items.filter(e => e.chance === entry.chance);
       const picked = _rollWeightedItem(sameChance);
       if (!items.find(i => i.name === picked.name)) {
-        items.push({ name: picked.name, qty: 1 });
+        items.push({ name: picked.name, qty: 1, type: getItemType(picked.name) });
       }
     }
   }
   // Runestone: base 5%, boosted by luck
   if (table.runestone && Math.random() < Math.min(0.30, table.runestone.chance * totalLuck)) {
-    items.push({ name: table.runestone.name, qty: 1 });
+    items.push({ name: table.runestone.name, qty: 1, type: getItemType(table.runestone.name) });
   }
 
   // Sah'run blessing: X% chance to also drop a random forge material
@@ -8232,7 +8403,7 @@ function _rollDrops(grade) {
     if (Math.random() < sahPct) {
       const forgeMats = ['Iron','Copper','Tin','Silver','Bronze','Gold','Mythril','Titanium','Adamantium'];
       const mat = forgeMats[Math.floor(Math.random() * forgeMats.length)];
-      items.push({ name: mat, qty: 1 });
+      items.push({ name: mat, qty: 1, type: 'material' });
     }
   }
 
@@ -8242,7 +8413,7 @@ function _rollDrops(grade) {
     if (Math.random() < elionPct) {
       const preciousPool = ['Ancient Rune','Magic Crystal','Dragon Scales','Cyclops Eye','Phoenix Bloom','Adamantium','Titanium'];
       const bonus = preciousPool[Math.floor(Math.random() * preciousPool.length)];
-      items.push({ name: bonus, qty: 1 });
+      items.push({ name: bonus, qty: 1, type: getItemType(bonus) });
     }
   }
 
@@ -8282,6 +8453,42 @@ async function _clientStartBattle(grade, zoneName=null, existingMonster=null) {
   return { monster, playerHp: state.playerHp, playerMana: state.playerMana };
 }
  
+// ── Resolve full effective combat stats for farming/auto-battle ─────────────
+// Mirrors _buildFighter but returns only the stats object (str/int/def/dex).
+// Applies: equipment bonuses + Dwarf/Titan gear bonus + food buffs + race bonuses + companion bonuses.
+function _resolveCombatStats(c) {
+  const base  = c.stats || { str:10, int:10, def:10, dex:10 };
+  const bonus = _calcEquipBonus(c);   // equipment + Dwarf race gear bonus
+
+  let str = (base.str ?? 10) + (bonus.str || 0);
+  let int_ = (base.int ?? 10) + (bonus.int || 0);
+  let def  = (base.def ?? 10) + (bonus.def || 0);
+  let dex  = (base.dex ?? 10) + (bonus.dex || 0);
+
+  // Active food buffs (timed)
+  const now = Date.now();
+  const foods = c.activeFoods || {};
+  if (foods.str && foods.str.expiry > now) str  = Math.round(str  * (1 + foods.str.pct));
+  if (foods.int && foods.int.expiry > now) int_ = Math.round(int_ * (1 + foods.int.pct));
+  if (foods.def && foods.def.expiry > now) def  = Math.round(def  * (1 + foods.def.pct));
+  if (foods.dex && foods.dex.expiry > now) dex  = Math.round(dex  * (1 + foods.dex.pct));
+
+  // Race bonuses
+  const race = (c.race || '').toLowerCase();
+  if (race.includes('orc') || race.includes('warlord'))  str  = Math.round(str  * 1.10);
+  if (race.includes('undead') || race.includes('lich'))  def  = Math.round(def  * 1.10);
+
+  // Companion bonuses
+  const comp = (c.companion?.name || '').toLowerCase();
+  if (comp === 'emberling') str  = Math.round(str  * 1.10);
+  if (comp === 'pebblin')   def  += 10;
+  if (comp === 'zappit')    dex  = Math.round(dex  * 1.10);
+  if (comp === 'trackit')   dex  = Math.round(dex  * 1.06);
+  if (comp === 'whispling') int_ = Math.round(int_ * 1.10);
+
+  return { str, int: int_, def, dex };
+}
+
 async function _clientBattleTurn(action, skillName) {
   const uid  = auth.currentUser.uid;
   const bSnap = await getDoc(doc(db, "battles", uid));
@@ -8294,7 +8501,8 @@ async function _clientBattleTurn(action, skillName) {
   }
 
   const char   = _charData;
-  const stats  = char.stats || { str:10, int:10, def:10, dex:10 };
+  // ── Resolve full effective stats (equipment + race + food + companion) ──
+  const stats  = _resolveCombatStats(char);
   const log    = [];
   let { playerHp, playerMana, monster } = b;
   const playerHpMax = char.hpMax || 100;
@@ -8313,22 +8521,42 @@ async function _clientBattleTurn(action, skillName) {
     return { status:"fled", message:`You fled! Lost ${fleeCost} gold.` };
   }
 
-  // ── Tick DoT (applied at start of player turn) ──
+  // ── Tick DoT on MONSTER (player-applied debuffs like Bleeding Edge, Poison, etc.) ──
   if (b.dotActive && b.dotTurns > 0) {
-    const dotDmg = Math.round(playerHpMax * b.dotPct);
-    playerHp = Math.max(0, playerHp - dotDmg);
+    const dotDmg = Math.round((monster.maxHp || monster.hp) * b.dotPct);
+    monster.hp = Math.max(0, monster.hp - dotDmg);
     const newTurns = b.dotTurns - 1;
-    log.push(`🩸 ${b.dotLabel||"Bleed"}: ${dotDmg} damage! (${newTurns} turns left)`);
+    let dotLogLine = `🩸 ${b.dotLabel||"Bleed"}: ${dotDmg} damage to monster! (${newTurns} turns left)`;
+    // Usurper lifesteal: heals player for the same amount
+    if (b.dotLifesteal) {
+      const healed = Math.min(dotDmg, playerHpMax - playerHp);
+      playerHp = Math.min(playerHpMax, playerHp + healed);
+      dotLogLine += ` 💚 Lifestealed ${healed} HP!`;
+    }
+    log.push(dotLogLine);
     await updateDoc(doc(db, "battles", uid), {
-      dotActive: newTurns > 0, dotTurns: newTurns
+      dotActive: newTurns > 0, dotTurns: newTurns, monster
     });
-    if (playerHp <= 0) {
-      const halfInv = (char.inventory||[]).map(item => ({ ...item, qty: Math.max(1, Math.floor((item.qty ?? 1) / 2)) }));
-      const resurrectAt = new Date(Date.now() + 24*60*60*1000);
-      await updateDoc(doc(db, "characters", uid), { hp:0, inventory:halfInv, resurrectAt, isDead:true });
-      await updateDoc(doc(db, "battles", uid), { status:"defeat" });
-      log.push("💀 Killed by " + (b.dotLabel||"damage over time") + "!");
-      return { status:"defeat", log, resurrectAt: resurrectAt.toISOString() };
+    // If monster dies from DoT, handle victory
+    if (monster.hp <= 0) {
+      const drops  = _rollDrops(b.grade);
+      const _veilExpBonus = _charData?.deity === 'Veil' ? (1 + _getFaithBlessingPct(_charData)) : 1;
+      const expGain = Math.round((MONSTER_EXP_LOCAL[b.grade] || 10) * _getRaceExpMult(_charData?.race) * _getCompanionExpMult(_charData?.companion?.name) * _veilExpBonus * _getExpBuffMult(_charData));
+      const inv = [...(char.inventory||[])];
+      drops.items.forEach(item => {
+        const ex = inv.find(i => i.name === item.name);
+        const _isEquip = getItemType(item.name) === 'equipment';
+        if (ex && !_isEquip) { ex.qty += item.qty; }
+        else { const _ni = {...item}; if (_isEquip) _ni.iid = Math.random().toString(36).slice(2,10)+Date.now().toString(36); inv.push(_ni); }
+      });
+      const gold = (char.gold||0) + drops.gold;
+      const { newXp, newLevel, newRank, newXpMax, leveledUp } = _processExp(char.xp||0, char.xpMax||100, char.level||1, char.rank||'Wanderer', expGain, char.charClass);
+      Object.assign(_charData, { gold, inventory: inv, xp: newXp, level: newLevel, rank: newRank, xpMax: newXpMax, hp: playerHp, mana: playerMana });
+      await updateDoc(doc(db, "characters", uid), { gold, inventory: inv, xp: newXp, level: newLevel, rank: newRank, xpMax: newXpMax, hp: playerHp, mana: playerMana });
+      await updateDoc(doc(db, "battles", uid), { status:"victory" });
+      const updates = {};
+      log.push(`💀 ${monster.name} defeated by ${b.dotLabel||"DoT"}! +${expGain} EXP, +${drops.gold} gold`);
+      return { status:"victory", log, updates, drops, expGain, leveledUp, newLevel, newRank };
     }
   }
 
@@ -8349,10 +8577,11 @@ async function _clientBattleTurn(action, skillName) {
 
   if (action === 'melee') {
     const primary    = _getPrimaryStat(char.charClass, stats);
-    const effectiveDef = Math.floor(monster.def * 0.5);
+    // defBreak (Abyssal-touch) reduces monster DEF by defBreakAmt before applying
+    const defBreakFactor = b.defBreak ? (1 - (b.defBreakAmt || 0)) : 1;
+    const effectiveDef = Math.floor(monster.def * defBreakFactor * 0.5);
     let dmg = Math.max(1, primary - effectiveDef);
-    // Apply defBreak
-    if (b.defBreak) dmg = Math.round(dmg / (1 - (b.defBreakAmt || 0)));
+    if (b.defBreak) { battleUpdates.defBreak = false; battleUpdates.defBreakAmt = 0; }  // consume defBreak after 1 hit
     // Death Mark
     if (b.deathMark) { dmg = Math.round(dmg * (1 + (b.deathMarkBonus || 0.60))); battleUpdates.deathMark = false; log.push(`☠️ Death Mark triggered!`); }
     monster.hp = Math.max(0, monster.hp - dmg);
@@ -8396,12 +8625,14 @@ async function _clientBattleTurn(action, skillName) {
 
   // ── Summon tick ──
   if (b.summonActive && b.summonTurns > 0) {
-    const sumDmg   = Math.round((stats.int || 10) * b.summonDmgPct);
+    const intWithBuff = Math.round((stats.int || 10) * (1 + (b.buff_int || 0)));
+    const sumDmg   = Math.round(intWithBuff * (b.summonDmgPct || 0.40));
     monster.hp     = Math.max(0, monster.hp - sumDmg);
-    const newTurns = b.summonTurns - 1;
+    const newTurns = b.leviathanSummoned ? b.summonTurns : b.summonTurns - 1;  // Leviathan doesn't expire
     battleUpdates.summonActive = newTurns > 0;
     battleUpdates.summonTurns  = newTurns;
-    log.push(`🐉 Summon attacks for ${sumDmg}! (${newTurns} turns left)`);
+    const label = b.leviathanSummoned ? 'Leviathan' : 'Summon';
+    log.push(`🐉 ${label} attacks for ${sumDmg}!${!b.leviathanSummoned ? ` (${newTurns} turns left)` : ''}`);
   }
 
   // ── Victory ──
@@ -8468,23 +8699,34 @@ async function _clientBattleTurn(action, skillName) {
     return { status:"victory", log, updates, drops, expGain, leveledUp, newLevel, newRank };
   }
 
-  // ── Monster turn (skip if stunned/skilllocked) ──
-  const isStunned = b.monsterStunned || battleUpdates.monsterStunned;
+  // ── Monster turn (skip if stunned; skill-locked means it can only melee) ──
+  const isStunned     = b.monsterStunned     || battleUpdates.monsterStunned;
+  const isSkillLocked = b.monsterSkillLocked || battleUpdates.monsterSkillLocked;
   if (isStunned) {
     log.push(`💫 Monster is stunned — skips their turn!`);
     battleUpdates.monsterStunned = false;
   } else {
     const _monDefMit = Math.min(Math.floor((stats.def||10) * 0.3), Math.floor(monster.atk * 0.75));
-    let monDmg = Math.max(Math.ceil(monster.atk * 0.25), monster.atk - _monDefMit);
-    // Apply DEF buffs
-    if (b.buff_def) monDmg = Math.round(monDmg / (1 + b.buff_def));
+    // Apply DEF buffs from player
+    const buffDefFactor = b.buff_def ? (1 + b.buff_def) : 1;
+    let monDmg = Math.max(Math.ceil(monster.atk * 0.25), Math.round((monster.atk - _monDefMit) / buffDefFactor));
+    // If skill-locked, monster is reduced to a weaker basic attack (50% damage)
+    if (isSkillLocked) {
+      monDmg = Math.max(1, Math.round(monDmg * 0.50));
+      battleUpdates.monsterSkillLocked = false;
+      log.push(`🔇 Monster's skills are locked — basic attack only!`);
+    }
     // Apply shield
     if (b.shieldPct) {
       const blocked = Math.round(monDmg * b.shieldPct);
-      monDmg = monDmg - blocked;
+      monDmg = Math.max(0, monDmg - blocked);
       battleUpdates.shieldPct = 0;
       log.push(`🛡️ Shield absorbed ${blocked} damage!`);
     }
+    // Dragonborn/Elder Dragon: 10%/20% magic resistance (applied as flat damage reduction)
+    const _race = (char.race || '').toLowerCase();
+    if (_race.includes('elder dragon')) monDmg = Math.round(monDmg * 0.80);
+    else if (_race.includes('dragonborn')) monDmg = Math.round(monDmg * 0.90);
     playerHp = Math.max(0, playerHp - monDmg);
     log.push(`👹 Monster attacks for ${monDmg}. Your HP: ${playerHp}`);
   }
@@ -8492,7 +8734,7 @@ async function _clientBattleTurn(action, skillName) {
   // ── Defeat ──
   if (playerHp <= 0) {
     const halfInv = (char.inventory||[]).map(item => ({ ...item, qty: Math.max(1, Math.floor((item.qty ?? 1) / 2)) }));
-    const resurrectAt = new Date(Date.now() + 24*60*60*1000);
+    const resurrectAt = new Date(Date.now() + 5*60*60*1000);
     await updateDoc(doc(db, "characters", uid), { hp:0, inventory:halfInv, resurrectAt, isDead:true });
     await updateDoc(doc(db, "battles", uid), { status:"defeat" });
     log.push("💀 You were defeated!");
@@ -8620,7 +8862,7 @@ async function _clientAutoBattle(grade, maxTurns=15, zoneName=null) {
     return { status:"victory", log, updates, drops, expGain, leveledUp, newLevel, newRank };
   } else if (status === "defeat") {
     const halfInv = (char.inventory||[]).map(item => ({ ...item, qty: Math.max(1, Math.floor((item.qty ?? 1) / 2)) }));
-    const resurrectAt = new Date(Date.now() + 24*60*60*1000);
+    const resurrectAt = new Date(Date.now() + 5*60*60*1000);
     Object.assign(updates, { hp:0, inventory:halfInv, resurrectAt, isDead:true });
     log.push("💀 You were defeated in auto-battle!");
     await updateDoc(doc(db, "characters", uid), updates);
@@ -8710,10 +8952,10 @@ const SKILL_DATA = {
   "Beastmaster":       { mana:25, type:"summon",       summonDmgPct:0.40, summonTurns:3 },
   "Beast Empowerment": { mana:25, type:"summonbuff",   summonBuffMult:0.30 },
   "Usurper":           { mana:25, type:"dot",          dotPct:0.05, dotTurns:4, lifesteal:true, stat:"int" },
-  "Offering":          { mana:20, type:"heal",         healPct:0.20 },
+  "Offering":          { mana:20, type:"offering",     healPct:0.20 },  // sacrifices one summon for HP
   "Leviathan":         { mana:50, type:"summon",       summonDmgPct:1.20, stat:"int", unique:true },
   "Abyssal-touch":     { mana:50, type:"debuff",       debuffType:"defbreak", defReduce:0.40 },
-  "Profane Lord":      { mana:50, type:"damage",      mult:2.00, stat:"int" },
+  "Profane Lord":      { mana:50, type:"profanelord", mult:2.00, stat:"int" },
 };
 
 // Skills per class for in-battle menu (keep for menu building)
@@ -8747,6 +8989,9 @@ function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stat
     return Math.round(base * (1 + (b[buffKey] || 0)));
   };
 
+  // defBreak factor: Abyssal-touch reduces monster DEF by defBreakAmt
+  const defBreakFactor = b.defBreak ? (1 - (b.defBreakAmt || 0)) : 1;
+
   const primaryVal = getStat(sk.stat || "str");
 
   switch (sk.type) {
@@ -8756,8 +9001,9 @@ function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stat
       const isFirst    = !b.backstabUsed;
       const mult       = isBackstab ? (isFirst ? sk.mult : sk.multAfter) : sk.mult;
       const defPen     = sk.defPen || 0;
-      const effectiveDef = Math.floor(monster.def * (1 - defPen) * 0.5);
+      const effectiveDef = Math.floor(monster.def * defBreakFactor * (1 - defPen) * 0.5);
       dmg = Math.max(1, Math.round(primaryVal * mult) - effectiveDef);
+      if (b.defBreak) updates.defBreak = false;  // consume after use
       // Echo-strike doubles the hit
       if (b.echoActive) { dmg *= 2; updates.echoActive = false; log.push(`🔁 Echo-strike doubles the hit!`); }
       // Death Mark bonus
@@ -8770,7 +9016,7 @@ function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stat
     case "execute": {
       const hpPct = monster.hp / (monster.maxHp || monster.hp);
       const mult  = hpPct <= sk.threshold ? sk.mult : 1.05;
-      const effectiveDef = Math.floor(monster.def * 0.5);
+      const effectiveDef = Math.floor(monster.def * defBreakFactor * 0.5);
       dmg = Math.max(1, Math.round(primaryVal * mult) - effectiveDef);
       monHp = Math.max(0, monHp - dmg);
       log.push(hpPct <= sk.threshold
@@ -8781,7 +9027,7 @@ function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stat
     case "multihit": {
       let total = 0;
       for (let i = 0; i < sk.hits; i++) {
-        const h = Math.max(1, Math.round(primaryVal * sk.multPerHit) - Math.floor(monster.def * 0.5));
+        const h = Math.max(1, Math.round(primaryVal * sk.multPerHit) - Math.floor(monster.def * defBreakFactor * 0.5));
         total += h; monHp = Math.max(0, monHp - h);
       }
       dmg = total;
@@ -8791,7 +9037,7 @@ function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stat
     case "condDamage": {
       const hasDebuff = b.dotActive || b.deathMark || b.defBreak;
       const mult      = hasDebuff ? sk.mult : 1.05;
-      const effectiveDef = Math.floor(monster.def * 0.5);
+      const effectiveDef = Math.floor(monster.def * defBreakFactor * 0.5);
       dmg = Math.max(1, Math.round(primaryVal * mult) - effectiveDef);
       monHp = Math.max(0, monHp - dmg);
       log.push(`🗡️ ${skillName}: ${dmg} damage${hasDebuff ? " (bonus vs debuffed!)" : ""}`);
@@ -8834,29 +9080,40 @@ function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stat
     }
     case "buff": {
       const bKey = `buff_${sk.stat}`;
-      updates[bKey] = (b[bKey] || 0) + sk.buffMult;
-      if (sk.hpBonus) { playerHp = Math.min(playerHpMax, playerHp + Math.round(playerHpMax * sk.hpBonus)); }
-      log.push(`⬆️ ${skillName}: +${Math.round(sk.buffMult*100)}% ${sk.stat.toUpperCase()}!`);
+      const BUFF_CAP = 1.60;  // spec: stackable buffs max 160%
+      const newBuff = Math.min(BUFF_CAP, (b[bKey] || 0) + sk.buffMult);
+      if ((b[bKey] || 0) >= BUFF_CAP) {
+        log.push(`⬆️ ${skillName}: Buff cap reached (160% max)!`);
+      } else {
+        updates[bKey] = newBuff;
+        if (sk.hpBonus) { playerHp = Math.min(playerHpMax, playerHp + Math.round(playerHpMax * sk.hpBonus)); }
+        log.push(`⬆️ ${skillName}: +${Math.round(sk.buffMult*100)}% ${sk.stat.toUpperCase()}! (Total: ${Math.round(newBuff*100)}%)`);
+      }
       break;
     }
     case "sacrificial": {
+      const BUFF_CAP_S = 1.60;
+      const bKey = `buff_${sk.buffStat}`;
+      if ((b[bKey] || 0) >= BUFF_CAP_S) {
+        log.push(`🩸 ${skillName}: Buff cap reached — skill has no effect!`);
+        break;
+      }
       const cost = Math.round(playerHpMax * sk.selfHpCost);
       playerHp = Math.max(1, playerHp - cost);
-      const bKey = `buff_${sk.buffStat}`;
-      updates[bKey] = (b[bKey] || 0) + sk.buffMult;
+      updates[bKey] = Math.min(BUFF_CAP_S, (b[bKey] || 0) + sk.buffMult);
       if (sk.buffStat2) {
         const bKey2 = `buff_${sk.buffStat2}`;
-        updates[bKey2] = (b[bKey2] || 0) + (sk.buffMult2 || 0);
+        updates[bKey2] = Math.min(BUFF_CAP_S, (b[bKey2] || 0) + (sk.buffMult2 || 0));
       }
-      log.push(`🩸 ${skillName}: Sacrificed ${cost} HP → +${Math.round(sk.buffMult*100)}% ${sk.buffStat.toUpperCase()}!`);
+      log.push(`🩸 ${skillName}: Sacrificed ${cost} HP → +${Math.round(sk.buffMult*100)}% ${sk.buffStat.toUpperCase()}! (Total: ${Math.round(updates[bKey]*100)}%)`);
       break;
     }
     case "stun": {
-      const effectiveDef = Math.floor(monster.def * 0.5);
+      const effectiveDef = Math.floor(monster.def * defBreakFactor * 0.5);
       dmg = Math.max(1, Math.round(primaryVal * (sk.mult || 1.00)) - effectiveDef);
       monHp = Math.max(0, monHp - dmg);
       updates.monsterStunned = true;
-      log.push(`💫 ${skillName}: ${dmg} damage + Monster stunned next turn!`);
+      log.push(`💫 ${skillName}: ${dmg} damage! Monster is stunned and will skip next turn!`);
       break;
     }
     case "skillock": {
@@ -8865,8 +9122,10 @@ function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stat
       break;
     }
     case "cleanse": {
-      updates.dotActive = false; updates.dotTurns = 0;
-      log.push(`✨ ${skillName}: All debuffs removed!`);
+      // Remove all active debuffs on the player
+      updates.dotActive   = false; updates.dotTurns = 0;
+      // Also clear any player-side debuffs if they exist
+      log.push(`✨ ${skillName}: All debuffs cleared!`);
       break;
     }
     case "echo": {
@@ -8887,16 +9146,76 @@ function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stat
       break;
     }
     case "summon": {
-      dmg = Math.round((stats.int || 10) * sk.summonDmgPct);
+      // Leviathan can only be summoned once per battle
+      if (sk.unique && b.leviathanSummoned) {
+        log.push(`🐉 ${skillName}: Already summoned — can only call once per battle!`);
+        break;
+      }
+      const intVal = getStat('int');
+      // Apply Beast Empowerment summon buff if active
+      const summonBuff = b.summonBuff || 0;
+      const effectiveDmgPct = sk.summonDmgPct * (1 + summonBuff);
+      dmg = Math.round(intVal * effectiveDmgPct);
       monHp = Math.max(0, monHp - dmg);
       updates.summonActive = true;
-      updates.summonDmgPct = sk.summonDmgPct;
-      updates.summonTurns  = sk.summonTurns;
-      log.push(`🐉 ${skillName}: Summon deals ${dmg} damage! Active for ${sk.summonTurns} turns.`);
+      updates.summonDmgPct = effectiveDmgPct;
+      if (sk.unique) {
+        updates.summonTurns = 999;  // Leviathan persists indefinitely (1 per battle)
+        updates.leviathanSummoned = true;
+        log.push(`🐉 ${skillName}: Leviathan rises! Deals ${dmg} damage and will attack every turn!`);
+      } else {
+        updates.summonTurns = sk.summonTurns;
+        log.push(`🐉 ${skillName}: Summon deals ${dmg} damage! Active for ${sk.summonTurns} turns.`);
+      }
+      break;
+    }
+    case "offering": {
+      // Offering — sacrifice one active summon to gain HP
+      if (!b.summonActive || b.summonTurns <= 0) {
+        log.push(`🐉 Offering: No active summons to sacrifice!`);
+        break;
+      }
+      const _glimmerM = (_charData?.companion?.name || '').toLowerCase() === 'glimmer' ? 1.15 : 1;
+      const healed = Math.round(playerHpMax * sk.healPct * _glimmerM);
+      playerHp = Math.min(playerHpMax, playerHp + healed);
+      // Reduce summon count by 1 (Leviathan cannot be sacrificed)
+      if (!b.leviathanSummoned) {
+        const newTurns = Math.max(0, b.summonTurns - 1);
+        updates.summonTurns = newTurns;
+        updates.summonActive = newTurns > 0;
+      }
+      log.push(`🩸 Offering: Sacrificed a summon → +${healed} HP restored!`);
+      break;
+    }
+    case "profanelord": {
+      // Profane Lord — destroy ALL active summons (including Leviathan) → 200% INT damage
+      if (!b.summonActive && !b.leviathanSummoned) {
+        log.push(`🌑 Profane Lord: No summons to sacrifice — cast fails!`);
+        break;
+      }
+      updates.summonActive        = false;
+      updates.summonTurns         = 0;
+      updates.leviathanSummoned   = false;
+      const effectiveDef = Math.floor(monster.def * defBreakFactor * 0.5);
+      dmg = Math.max(1, Math.round(primaryVal * sk.mult) - effectiveDef);
+      if (b.echoActive) { dmg *= 2; updates.echoActive = false; log.push(`🔁 Echo-strike doubles the hit!`); }
+      monHp = Math.max(0, monHp - dmg);
+      log.push(`🌑 Profane Lord: All summons destroyed → ${dmg} damage!`);
+      break;
+    }
+    case "summonbuff": {
+      // Beast Empowerment — boosts summon damage
+      const prevBuff = b.summonBuff || 0;
+      updates.summonBuff = prevBuff + sk.summonBuffMult;
+      // Also boost active summon dmgPct immediately if summons are out
+      if (b.summonActive) {
+        updates.summonDmgPct = (b.summonDmgPct || 0) * (1 + sk.summonBuffMult);
+      }
+      log.push(`🐉 ${skillName}: Summon damage boosted by +${Math.round(sk.summonBuffMult*100)}%!`);
       break;
     }
     default: {
-      const effectiveDef = Math.floor(monster.def * 0.5);
+      const effectiveDef = Math.floor(monster.def * defBreakFactor * 0.5);
       dmg = Math.max(1, Math.round(primaryVal * 1.05) - effectiveDef);
       monHp = Math.max(0, monHp - dmg);
       log.push(`⚔️ ${skillName}: ${dmg} damage.`);
@@ -9016,7 +9335,7 @@ function _launchAutoBattleLoop(grade, zoneName) {
 
   const char          = _charData;
   const poolSize      = ZONE_POOL_SIZE[grade] || 40;
-  const stats         = char.stats || { str:10, int:10, def:10, dex:10 };
+  const stats         = _resolveCombatStats(char);
   const primary       = _getPrimaryStat(char.charClass, stats);
   const classSkills   = _getActiveBattleSkills();
 
@@ -9084,6 +9403,9 @@ function _launchAutoBattleLoop(grade, zoneName) {
     _renderMonsterAvatar('monster-avatar-emoji', monster);
     addBattleLog(`👹 ${monster.name} appears! (${monHp} HP)`);
 
+    // ── Per-monster battle state (buffs, DoT, stun, etc.) ──
+    let battleState = {};  // tracks buffs/debuffs across turns for this monster
+
     // Combat loop for this monster
     while (monHp > 0 && playerHp > 0 && _autoBattleRunning) {
       // Pull potion heal from _charData only when a potion was actually just used
@@ -9095,17 +9417,47 @@ function _launchAutoBattleLoop(grade, zoneName) {
       // Passive mana regen per tick
       playerMana = Math.min(playerManaMax, playerMana + Math.floor(playerManaMax * 0.05));
 
+      // ── Tick DoT on monster ──
+      if (battleState.dotActive && battleState.dotTurns > 0) {
+        const dotDmg = Math.round((monster.maxHp || monster.hp) * battleState.dotPct);
+        monHp = Math.max(0, monHp - dotDmg);
+        battleState.dotTurns--;
+        if (battleState.dotTurns <= 0) battleState.dotActive = false;
+        if (battleState.dotLifesteal) playerHp = Math.min(playerHpMax, playerHp + dotDmg);
+        addBattleLog(`🩸 ${battleState.dotLabel||'Bleed'}: ${dotDmg} dmg to monster!`);
+        if (monHp <= 0) break;
+      }
+
+      // ── Tick summon on monster ──
+      if (battleState.summonActive && battleState.summonTurns > 0) {
+        const intBuff = Math.round((stats.int || 10) * (1 + (battleState.buff_int || 0)));
+        const sumDmg = Math.round(intBuff * (battleState.summonDmgPct || 0.40));
+        monHp = Math.max(0, monHp - sumDmg);
+        if (!battleState.leviathanSummoned) battleState.summonTurns--;
+        if (battleState.summonTurns <= 0) battleState.summonActive = false;
+        addBattleLog(`🐉 Summon: ${sumDmg} dmg!`);
+        if (monHp <= 0) break;
+      }
+
+      // ── Tick HoT on player ──
+      if (battleState.hotActive && battleState.hotTurns > 0) {
+        const hotHeal = Math.round(playerHpMax * battleState.hotPct);
+        playerHp = Math.min(playerHpMax, playerHp + hotHeal);
+        battleState.hotTurns--;
+        if (battleState.hotTurns <= 0) battleState.hotActive = false;
+      }
+
       // Pick next affordable skill, fall back to melee
       let usedSkill = null;
       if (!_autoBattleForceMelee) {
-      for (let i = 0; i < classSkills.length; i++) {
-        const sk = classSkills[(skillIdx + i) % classSkills.length];
-        if ((sk.mana || 0) <= playerMana) {
-          usedSkill = sk;
-          skillIdx  = (skillIdx + i + 1) % classSkills.length;
-          break;
+        for (let i = 0; i < classSkills.length; i++) {
+          const sk = classSkills[(skillIdx + i) % classSkills.length];
+          if ((sk.mana || 0) <= playerMana) {
+            usedSkill = sk;
+            skillIdx  = (skillIdx + i + 1) % classSkills.length;
+            break;
+          }
         }
-      }
       }
 
       const skillNameLabel = usedSkill ? usedSkill.name : 'Melee Strike';
@@ -9115,20 +9467,42 @@ function _launchAutoBattleLoop(grade, zoneName) {
       let dmg = 0;
       if (usedSkill) {
         playerMana -= (usedSkill.mana || 0);
-        const result = _applySkill(usedSkill.name, playerHp, playerMana, playerHpMax, monster, stats, {});
+        // Clone monster with correct hp for _applySkill
+        const monsterSnap = { ...monster, hp: monHp };
+        const result = _applySkill(usedSkill.name, playerHp, playerMana, playerHpMax, monsterSnap, stats, battleState);
         dmg        = result.playerDmg;
         playerHp   = result.playerHp;
         playerMana = result.playerMana;
+        monHp      = result.monsterHp;
+        // Merge skill updates into battleState
+        Object.assign(battleState, result.updates);
       } else {
-        dmg = Math.max(1, primary - Math.floor(monster.def * 0.5));
+        // Melee — apply defBreak if active
+        const defBreakFact = battleState.defBreak ? (1 - (battleState.defBreakAmt || 0)) : 1;
+        const effectiveDef = Math.floor(monster.def * defBreakFact * 0.5);
+        dmg = Math.max(1, primary - effectiveDef);
+        if (battleState.defBreak) { battleState.defBreak = false; battleState.defBreakAmt = 0; }
+        // Death Mark
+        if (battleState.deathMark) { dmg = Math.round(dmg * (1 + (battleState.deathMarkBonus || 0.60))); battleState.deathMark = false; }
+        monHp = Math.max(0, monHp - dmg);
       }
-      monHp = Math.max(0, monHp - dmg);
 
-      // Monster counter-attack if still alive
+      // Monster counter-attack (skip if stunned or skip-on-killed)
       if (monHp > 0) {
-        const _mit3 = Math.min(Math.floor((stats.def||10) * 0.3), Math.floor(monster.atk * 0.75));
-        const mdmg = Math.max(Math.ceil(monster.atk * 0.25), monster.atk - _mit3);
-        playerHp   = Math.max(0, playerHp - mdmg);
+        if (battleState.monsterStunned) {
+          battleState.monsterStunned = false;
+          addBattleLog(`💫 Monster stunned — skips attack!`);
+        } else {
+          const _mit3 = Math.min(Math.floor((stats.def||10) * 0.3), Math.floor(monster.atk * 0.75));
+          const buffDefFact = battleState.buff_def ? (1 + battleState.buff_def) : 1;
+          let mdmg = Math.max(Math.ceil(monster.atk * 0.25), Math.round((monster.atk - _mit3) / buffDefFact));
+          if (battleState.monsterSkillLocked) { mdmg = Math.max(1, Math.round(mdmg * 0.50)); battleState.monsterSkillLocked = false; }
+          if (battleState.shieldPct) { const blocked = Math.round(mdmg * battleState.shieldPct); mdmg = Math.max(0, mdmg - blocked); battleState.shieldPct = 0; }
+          const _raceAB = (char.race || '').toLowerCase();
+          if (_raceAB.includes('elder dragon')) mdmg = Math.round(mdmg * 0.80);
+          else if (_raceAB.includes('dragonborn')) mdmg = Math.round(mdmg * 0.90);
+          playerHp = Math.max(0, playerHp - mdmg);
+        }
       }
 
       updateBattleBars(monHp, monster.hp, playerHp, playerHpMax, playerMana, playerManaMax);
@@ -9145,7 +9519,7 @@ function _launchAutoBattleLoop(grade, zoneName) {
       addBattleLog('💀 You were defeated during auto-battle!');
       _autoBattleRunning = false;
       const halfInv     = (char.inventory||[]).map(item => ({ ...item, qty: Math.max(1, Math.floor((item.qty ?? 1) / 2)) }));
-      const resurrectAt = new Date(Date.now() + 24*60*60*1000);
+      const resurrectAt = new Date(Date.now() + 5*60*60*1000);
       await updateDoc(doc(db, 'characters', _uid), { hp:0, inventory:halfInv, resurrectAt, isDead:true });
       await refreshCharData();
       document.getElementById('auto-battle-hud').style.display = 'none';
@@ -9996,13 +10370,22 @@ let _pvpState = null;
 
 function _calcEquipBonus(c) {
   let bonus = { str:0, int:0, def:0, dex:0, hp:0 };
-  if (c.equipment?.weapon && EQUIP_WEAPON_STATS[c.equipment.weapon]) {
-    const w = EQUIP_WEAPON_STATS[c.equipment.weapon];
-    for (const k in w) bonus[k] = (bonus[k]||0) + w[k];
+  const inv = window._allInvItems || c.inventory || [];
+  if (c.equipment?.weapon) {
+    const wBase = c.equipment.weapon.replace(/\s*\+\d+$/, '').trim();
+    const w = EQUIP_WEAPON_STATS[wBase];
+    if (w) {
+      const wEnchant = inv.find(i => (i.name||'').replace(/\s*\+\d+$/,'').trim() === wBase)?.enchantLevel || 0;
+      for (const k in w) bonus[k] = (bonus[k]||0) + w[k] + wEnchant;
+    }
   }
-  if (c.equipment?.armor && EQUIP_ARMOR_STATS[c.equipment.armor]) {
-    const a = EQUIP_ARMOR_STATS[c.equipment.armor];
-    for (const k in a) bonus[k] = (bonus[k]||0) + a[k];
+  if (c.equipment?.armor) {
+    const aBase = c.equipment.armor.replace(/\s*\+\d+$/, '').trim();
+    const a = EQUIP_ARMOR_STATS[aBase];
+    if (a) {
+      const aEnchant = inv.find(i => (i.name||'').replace(/\s*\+\d+$/,'').trim() === aBase)?.enchantLevel || 0;
+      for (const k in a) bonus[k] = (bonus[k]||0) + a[k] + aEnchant;
+    }
   }
   const racePct = getRaceEquipBonus(c.race);
   for (const k in bonus) bonus[k] = Math.round(bonus[k] * (1 + racePct));
@@ -10959,9 +11342,14 @@ window.acceptPvpChallenge = async function() {
 
 window.declinePvpChallenge = async function() {
   const ch = window._pendingChallenge;
-  if (!ch) return;
-  await updateDoc(doc(db, 'pvpChallenges', ch.matchId), { status:'declined' });
-  // Notify challenger that their challenge was declined
+  if (!ch) {
+    // _pendingChallenge lost (e.g. page refresh) — hide panel and bail
+    document.getElementById('pvp-incoming').style.display = 'none';
+    return;
+  }
+  try {
+    await updateDoc(doc(db, 'pvpChallenges', ch.matchId), { status:'declined' });
+  } catch(e) { console.warn('PVP decline write:', e); }
   try {
     await addDoc(collection(db, 'notifications'), {
       uid: ch.challengerId,
@@ -10973,9 +11361,7 @@ window.declinePvpChallenge = async function() {
       fromName: _charData.name,
       matchId: ch.matchId
     });
-  } catch (e) {
-    console.warn('Failed to notify challenger (declined):', e);
-  }
+  } catch (e) { console.warn('PVP decline notif:', e); }
   document.getElementById('pvp-incoming').style.display = 'none';
   window._pendingChallenge = null;
 };
@@ -11031,6 +11417,189 @@ function _refreshPvpArena(match) {
   document.getElementById('pvp-waiting-msg').style.display  = isMyTurn ? 'none' : 'block';
 }
 
+// ── PvP skill processor — full skill parity with farming battle ──
+function _getPrimaryStatKey(charClass) {
+  const map = { Warrior:'str', Guardian:'def', Arcanist:'int', Cleric:'int',
+                Hunter:'dex', Assassin:'dex', Summoner:'int' };
+  return map[charClass] || 'str';
+}
+
+function _applyPvpSkill(skillName, me, opp, myHp, oppHp, myMana, myState, oppState) {
+  const sk = SKILL_DATA[skillName];
+  if (!sk) return { myHp, oppHp, myMana, log:[`❓ Unknown skill: ${skillName}`], myStateUpd:{}, oppStateUpd:{} };
+
+  const log = [], myStateUpd = {}, oppStateUpd = {};
+  const BUFF_CAP = 1.60;
+
+  const getStat = (s) => {
+    const base = me[s] || 10;
+    return Math.round(base * (1 + Math.min(myState[`buff_${s}`] || 0, BUFF_CAP)));
+  };
+
+  const primary    = getStat(sk.stat || _getPrimaryStatKey(me.charClass));
+  const effOppDef  = Math.max(0, Math.floor((opp.def||5) * 0.5 * (oppState.defBreak ? (1-(oppState.defBreakAmt||0.40)) : 1)));
+
+  const dealDmg = (raw) => {
+    let d = Math.max(1, raw);
+    if ((oppState.shield||0) > 0) {
+      const abs = Math.min(oppState.shield, d);
+      oppStateUpd.shield = oppState.shield - abs;
+      d -= abs;
+      if (abs > 0) log.push(`🛡️ ${opp.name}'s shield absorbed ${abs}!`);
+    }
+    return Math.max(0, d);
+  };
+
+  let dmg = 0;
+
+  switch (sk.type) {
+    case 'damage':
+    case 'backstab': {
+      dmg = dealDmg(Math.round(primary*(sk.mult||1)) - effOppDef);
+      log.push(`✨ ${me.name} uses ${skillName} for ${dmg} damage!`);
+      break;
+    }
+    case 'stun': {
+      dmg = dealDmg(Math.round(primary*(sk.mult||1.0)) - effOppDef);
+      oppStateUpd.stunned = true;
+      log.push(`💫 ${me.name} uses ${skillName} — ${dmg} dmg + STUNS ${opp.name} next turn!`);
+      break;
+    }
+    case 'dot': {
+      oppStateUpd.dotActive = true;
+      oppStateUpd.dotPct = sk.dotPct||0.10;
+      oppStateUpd.dotTurns = sk.dotTurns||3;
+      oppStateUpd.dotLifesteal = sk.lifesteal||false;
+      log.push(`🩸 ${me.name} afflicts ${opp.name} with ${sk.dotLabel||'Bleed'} (${Math.round((sk.dotPct||0.10)*100)}%×${sk.dotTurns||3} turns)!`);
+      break;
+    }
+    case 'heal': {
+      const h = Math.round(me.maxHp*(sk.healPct||0.15));
+      myHp = Math.min(me.maxHp, myHp+h);
+      log.push(`💚 ${me.name} uses ${skillName} — heals ${h} HP!`);
+      break;
+    }
+    case 'hot': {
+      myStateUpd.hotActive = true;
+      myStateUpd.hotPct = sk.hotPct||0.10;
+      myStateUpd.hotTurns = sk.hotTurns||3;
+      log.push(`💚 ${me.name} uses ${skillName} — regen ${Math.round((sk.hotPct||0.10)*100)}%×${sk.hotTurns||3} turns!`);
+      break;
+    }
+    case 'buff': {
+      const bKey = `buff_${sk.stat}`;
+      myStateUpd[bKey] = Math.min((myState[bKey]||0)+(sk.buffMult||0.20), BUFF_CAP);
+      log.push(`⬆️ ${me.name} uses ${skillName} — ${sk.stat.toUpperCase()} +${Math.round((sk.buffMult||0.20)*100)}%!`);
+      break;
+    }
+    case 'sacrificial': {
+      const cost = Math.round(me.maxHp*(sk.selfHpCost||0.15));
+      myHp = Math.max(1, myHp-cost);
+      if (sk.buffStat === 'all') {
+        ['str','int','def','dex'].forEach(s => {
+          const bk = `buff_${s}`;
+          myStateUpd[bk] = Math.min((myState[bk]||0)+(sk.buffMult||0.20), BUFF_CAP);
+        });
+        log.push(`💉 ${me.name} uses ${skillName} — paid ${cost} HP for ALL STATS +${Math.round((sk.buffMult||0.20)*100)}%!`);
+      } else {
+        const bKey = `buff_${sk.buffStat}`;
+        myStateUpd[bKey] = Math.min((myState[bKey]||0)+(sk.buffMult||0.50), BUFF_CAP);
+        if (sk.buffStat2) myStateUpd[`buff_${sk.buffStat2}`] = Math.min((myState[`buff_${sk.buffStat2}`]||0)+(sk.buffMult2||0.20), BUFF_CAP);
+        log.push(`💉 ${me.name} uses ${skillName} — paid ${cost} HP, ${sk.buffStat.toUpperCase()} +${Math.round((sk.buffMult||0.50)*100)}%!`);
+      }
+      break;
+    }
+    case 'shield': {
+      const sh = Math.round(me.maxHp*(sk.shieldPct||0.15));
+      myStateUpd.shield = (myState.shield||0)+sh;
+      log.push(`🛡️ ${me.name} uses ${skillName} — absorbs up to ${sh} damage!`);
+      break;
+    }
+    case 'hpbuff': {
+      const bonus = Math.round(me.maxHp*(sk.hpMult||0.50));
+      myHp = Math.min(me.maxHp+bonus, myHp+bonus);
+      myStateUpd.hpBuffBonus = (myState.hpBuffBonus||0)+bonus;
+      log.push(`❤️ ${me.name} uses ${skillName} — max HP +${bonus}!`);
+      break;
+    }
+    case 'cleanse': {
+      myStateUpd.dotActive = false; myStateUpd.deathMark = false;
+      myStateUpd.defBreak = false;  myStateUpd.stunned = false;
+      log.push(`✨ ${me.name} cleanses all debuffs!`);
+      break;
+    }
+    case 'debuff': {
+      if (sk.debuffType === 'deathmark') {
+        oppStateUpd.deathMark = true;
+        oppStateUpd.deathMarkBonus = sk.dmgBonus||0.60;
+        log.push(`☠️ ${me.name} marks ${opp.name} for death — next hit +${Math.round((sk.dmgBonus||0.60)*100)}% dmg!`);
+      } else if (sk.debuffType === 'defbreak') {
+        oppStateUpd.defBreak = true;
+        oppStateUpd.defBreakAmt = sk.defReduce||0.40;
+        log.push(`💢 ${me.name} shatters ${opp.name}'s DEF by ${Math.round((sk.defReduce||0.40)*100)}%!`);
+      }
+      break;
+    }
+    case 'multihit': {
+      let total = 0;
+      for (let i = 0; i < (sk.hits||3); i++)
+        total += Math.max(1, Math.round(primary*(sk.multPerHit||0.65)) - effOppDef);
+      dmg = dealDmg(total);
+      log.push(`⚡ ${me.name} uses ${skillName} — ${sk.hits||3} hits for ${dmg} total!`);
+      break;
+    }
+    case 'execute': {
+      if (oppHp <= opp.maxHp*(sk.threshold||0.40)) {
+        dmg = dealDmg(oppHp+1);
+        log.push(`💀 ${me.name} EXECUTES ${opp.name}!`);
+      } else {
+        dmg = dealDmg(Math.round(primary*(sk.mult||2.0)) - effOppDef);
+        log.push(`⚔️ ${me.name} uses ${skillName} for ${dmg} dmg (target above threshold)!`);
+      }
+      break;
+    }
+    case 'condDamage': {
+      const hasDebuff = oppState.dotActive||oppState.deathMark||oppState.defBreak;
+      dmg = dealDmg(Math.round(primary*(sk.mult||2.0)*(hasDebuff?1.30:1.0)) - effOppDef);
+      log.push(`${hasDebuff?'💥':'⚔️'} ${me.name} uses ${skillName} for ${dmg} dmg${hasDebuff?' (debuff bonus!)':''}!`);
+      break;
+    }
+    case 'echo': {
+      const base = myState.lastDmg || Math.round(primary*1.0);
+      dmg = dealDmg(Math.max(1, base - effOppDef));
+      log.push(`🔁 ${me.name} echoes last hit for ${dmg} damage!`);
+      break;
+    }
+    case 'priority': {
+      dmg = dealDmg(Math.round(primary*1.0) - effOppDef);
+      log.push(`⚡ ${me.name} uses ${skillName} — quick attack for ${dmg} damage!`);
+      break;
+    }
+    case 'skillock': {
+      oppStateUpd.skillLocked = true;
+      log.push(`📢 ${me.name} uses ${skillName} — ${opp.name}'s skills locked next turn!`);
+      break;
+    }
+    default: {
+      dmg = dealDmg(Math.round(primary*(sk.mult||1.0)) - effOppDef);
+      log.push(`✨ ${me.name} uses ${skillName} for ${dmg} damage!`);
+    }
+  }
+
+  // Death mark bonus
+  if (dmg > 0 && oppState.deathMark) {
+    dmg = Math.round(dmg*(1+(oppState.deathMarkBonus||0.60)));
+    oppStateUpd.deathMark = false;
+    log.push(`☠️ Death Mark detonates — bonus damage!`);
+  }
+
+  if (dmg > 0) myStateUpd.lastDmg = dmg;
+  oppHp = Math.max(0, oppHp - dmg);
+  myMana = Math.max(0, myMana - (sk.mana||0));
+
+  return { myHp, oppHp, myMana, log, myStateUpd, oppStateUpd };
+}
+
 window.doPvpTurn = async function(action, skillName) {
   const matchId = window._myPvpMatchId;
   if (!matchId) return;
@@ -11042,52 +11611,111 @@ window.doPvpTurn = async function(action, skillName) {
   const isChallenger = match.challengerId === _uid;
   const me  = isChallenger ? match.challengerData : match.targetData;
   const opp = isChallenger ? match.targetData     : match.challengerData;
+  const myKey  = isChallenger ? 'challenger' : 'target';
+  const oppKey = isChallenger ? 'target' : 'challenger';
 
-  let myHp   = isChallenger ? (match.challengerHp   ?? me.hp)   : (match.targetHp    ?? me.hp);
-  let oppHp  = isChallenger ? (match.targetHp       ?? opp.hp)  : (match.challengerHp ?? opp.hp);
-  let myMana = isChallenger ? (match.challengerMana ?? me.mana) : (match.targetMana   ?? me.mana);
+  let myHp   = match[`${myKey}Hp`]   ?? me.hp;
+  let oppHp  = match[`${oppKey}Hp`]  ?? opp.hp;
+  let myMana = match[`${myKey}Mana`] ?? me.mana;
+  let myState  = match[`${myKey}State`]  || {};
+  let oppState = match[`${oppKey}State`] || {};
 
-  const primary = _getPrimaryStat(me.charClass, me);
-  const log = [...(match.log || [])];
-  let dmg = 0;
+  const log = [...(match.log||[])];
 
-  if (action === 'melee') {
-    dmg = Math.max(1, primary - Math.floor((opp.def||5)*0.5) + _randInt(-2,3));
-    log.push(`⚔️ ${me.name} strikes ${opp.name} for ${dmg} damage!`);
-  } else if (action === 'skill' && skillName) {
-    const sk = SKILL_DATA[skillName];
-    if (sk && myMana >= (sk.mana||0)) {
-      myMana = Math.max(0, myMana - sk.mana);
-      if (sk.type === 'damage') {
-        const stat = me[sk.stat] || primary;
-        dmg = Math.max(1, Math.round(stat*(sk.mult||1)) - Math.floor((opp.def||5)*0.4));
-        log.push(`✨ ${me.name} uses ${skillName} for ${dmg} damage!`);
-      } else if (sk.type === 'heal' || sk.type === 'hot') {
-        const h = Math.round(me.maxHp * 0.12);
-        myHp = Math.min(me.maxHp, myHp + h);
-        log.push(`💚 ${me.name} uses ${skillName} — heals ${h} HP!`);
-      } else {
-        dmg = Math.max(1, primary - Math.floor((opp.def||5)*0.4));
-        log.push(`✨ ${me.name} uses ${skillName} for ${dmg} damage!`);
-      }
-    } else {
-      log.push(`❌ ${me.name} can't use ${skillName} — not enough mana!`);
+  // ── Tick DoT on ME (applied by opponent) ──
+  if (myState.dotActive && myState.dotTurns > 0) {
+    const dotDmg = Math.round((me.maxHp) * (myState.dotPct||0.10));
+    myHp = Math.max(0, myHp - dotDmg);
+    const turnsLeft = myState.dotTurns - 1;
+    myState = { ...myState, dotTurns: turnsLeft, dotActive: turnsLeft > 0 };
+    log.push(`🩸 ${me.name} takes ${dotDmg} DoT damage! (${turnsLeft} turns left)`);
+    if (myState.dotLifesteal) {
+      oppHp = Math.min(opp.maxHp, oppHp + dotDmg);
+      log.push(`🧛 ${opp.name} leeches ${dotDmg} HP!`);
     }
   }
 
-  oppHp = Math.max(0, oppHp - dmg);
-  const nextTurnUid = isChallenger ? match.targetId : match.challengerId;
+  // ── Tick HoT on ME ──
+  if (myState.hotActive && myState.hotTurns > 0) {
+    const hotHeal = Math.round(me.maxHp * (myState.hotPct||0.10));
+    myHp = Math.min(me.maxHp, myHp + hotHeal);
+    const hTurnsLeft = myState.hotTurns - 1;
+    myState = { ...myState, hotTurns: hTurnsLeft, hotActive: hTurnsLeft > 0 };
+    log.push(`💚 ${me.name} regenerates ${hotHeal} HP!`);
+  }
 
+  // ── Stunned — lose turn ──
+  if (myState.stunned) {
+    log.push(`💫 ${me.name} is stunned and loses their turn!`);
+    myState = { ...myState, stunned: false };
+    await updateDoc(doc(db, 'pvpChallenges', matchId), {
+      log, currentTurnUid: isChallenger ? match.targetId : match.challengerId,
+      [`${myKey}Hp`]: myHp, [`${myKey}Mana`]: myMana,
+      [`${oppKey}Hp`]: oppHp,
+      [`${myKey}State`]: myState, [`${oppKey}State`]: oppState,
+    });
+    return;
+  }
+
+  let myStateUpd = {}, oppStateUpd = {};
+
+  if (action === 'melee') {
+    const buffedPrim = Math.round(_getPrimaryStat(me.charClass, me) * (1 + Math.min(myState[`buff_${_getPrimaryStatKey(me.charClass)}`]||0, 1.60)));
+    const effDef = Math.max(0, Math.floor((opp.def||5)*0.5*(oppState.defBreak?(1-(oppState.defBreakAmt||0.40)):1)));
+    let dmg = Math.max(1, buffedPrim - effDef + _randInt(-2,3));
+    if ((oppState.shield||0) > 0) {
+      const abs = Math.min(oppState.shield, dmg);
+      oppStateUpd.shield = oppState.shield - abs; dmg -= abs;
+      if (abs > 0) log.push(`🛡️ ${opp.name}'s shield absorbed ${abs}!`);
+    }
+    if (oppState.deathMark) {
+      dmg = Math.round(dmg*(1+(oppState.deathMarkBonus||0.60)));
+      oppStateUpd.deathMark = false;
+      log.push(`☠️ Death Mark detonates!`);
+    }
+    oppHp = Math.max(0, oppHp - dmg);
+    myStateUpd.lastDmg = dmg;
+    log.push(`⚔️ ${me.name} strikes ${opp.name} for ${dmg} damage!`);
+
+  } else if (action === 'skill' && skillName) {
+    const sk = SKILL_DATA[skillName];
+    if (!sk) {
+      log.push(`❓ Unknown skill: ${skillName}`);
+    } else if (myMana < (sk.mana||0)) {
+      log.push(`❌ Not enough mana for ${skillName}!`);
+    } else if (oppState.skillLocked && (sk.mana||0) > 0) {
+      log.push(`📢 ${me.name}'s skills are locked this turn!`);
+    } else {
+      const res = _applyPvpSkill(skillName, me, opp, myHp, oppHp, myMana, myState, oppState);
+      myHp = res.myHp; oppHp = res.oppHp; myMana = res.myMana;
+      log.push(...res.log);
+      myStateUpd  = { ...myStateUpd,  ...res.myStateUpd };
+      oppStateUpd = { ...oppStateUpd, ...res.oppStateUpd };
+    }
+  }
+
+  // Merge & clear consumed states
+  myState  = { ...myState,  ...myStateUpd };
+  oppState = { ...oppState, ...oppStateUpd };
+  if (!oppStateUpd.skillLocked) delete oppState.skillLocked; // consumed after 1 turn
+
+  // If opponent was just stunned, skip their turn — keep turn with current player
+  const justStunned = oppStateUpd.stunned === true;
+  if (justStunned) {
+    oppState = { ...oppState, stunned: false };
+    log.push(`💫 ${opp.name} is stunned and loses their turn!`);
+  }
+
+  const nextTurnUid = justStunned ? _uid : (isChallenger ? match.targetId : match.challengerId);
   const updates = {
-    log,
-    currentTurnUid: nextTurnUid,
-    [isChallenger ? 'challengerHp'   : 'targetHp']:   myHp,
-    [isChallenger ? 'challengerMana' : 'targetMana']: myMana,
-    [isChallenger ? 'targetHp'       : 'challengerHp']: oppHp,
+    log, currentTurnUid: nextTurnUid,
+    [`${myKey}Hp`]: myHp, [`${myKey}Mana`]: myMana,
+    [`${oppKey}Hp`]: oppHp,
+    [`${myKey}State`]: myState, [`${oppKey}State`]: oppState,
   };
 
   if (oppHp <= 0) {
-    const wager = match.wager || 0;
+    const wager = match.wager||0;
     updates.status   = 'complete';
     updates.winnerId = _uid;
     updates.resultLog = [
@@ -11098,13 +11726,11 @@ window.doPvpTurn = async function(action, skillName) {
       try {
         const myRef  = doc(db, 'characters', _uid);
         const oppRef = doc(db, 'characters', opp.uid);
-        // Atomic: winner gains wager, loser loses wager.
-        // increment() applies the delta server-side so concurrent writes cannot interleave.
         await runTransaction(db, async tx => {
           tx.update(myRef,  { gold: increment(+wager) });
           tx.update(oppRef, { gold: increment(-wager) });
         });
-        _charData.gold = (_charData.gold || 0) + wager;
+        _charData.gold = (_charData.gold||0) + wager;
         set('stat-gold', _charData.gold); set('s-gold', _charData.gold);
       } catch(e) { console.warn('PVP wager:', e); }
     }
@@ -11267,7 +11893,7 @@ window.CANONICAL_EQUIP_RECIPES = {
     { name:"Composite Bow",     icon:"🏹", type:"weapon", cost:840,  stats:{dex:26,str:9},   requires:[{name:"Leather",qty:7},{name:"Gold",qty:3}] },
     { name:"Assassin Daggers",  icon:"🗡️", type:"weapon", cost:860,  stats:{dex:27,int:8},   requires:[{name:"Fangs",qty:7},{name:"Palladium",qty:2}] },
     { name:"Mystic Blade",      icon:"🗡️", type:"weapon", cost:830,  stats:{str:24,int:11},  requires:[{name:"Marble",qty:6},{name:"Spirit Venison",qty:2}] },
-    { name:"Warhammer",         icon:"🔨", type:"weapon", cost:920,  stats:{str:30,dex:5},   requires:[{name:"Obsidian",qty:8},{name:"Mythril",qty:3}] },
+    { name:"War Maul",          icon:"🔨", type:"weapon", cost:920,  stats:{str:30,dex:5},   requires:[{name:"Obsidian",qty:8},{name:"Mythril",qty:3}] },
     { name:"Spellknife",        icon:"🗡️", type:"weapon", cost:870,  stats:{dex:23,int:12},  requires:[{name:"Quartz",qty:7},{name:"Shadow Hide",qty:2}] },
     { name:"Dagon Bow",         icon:"🏹", type:"weapon", cost:850,  stats:{dex:25,str:9},   requires:[{name:"Silver",qty:7},{name:"Drake Meat",qty:3}] },
     { name:"Bronze Cleaver",    icon:"⚔️", type:"weapon", cost:840,  stats:{str:28,dex:7},   requires:[{name:"Bronze",qty:5},{name:"Palladium",qty:3}] },
@@ -11391,24 +12017,24 @@ window.CANONICAL_FOOD_RECIPES = {
 // Canonical potion recipes with correct category names and details
 window.CANONICAL_POTION_RECIPES = {
   HP: [
-    { name:"Minor HP Potion", icon:"🫧", type:"HP", effect:"+20% HP instantly", cost:50, requires:[{name:"Mint Leaves",qty:2},{name:"Soft Bark",qty:1}] },
-    { name:"Standard HP Potion", icon:"🧴", type:"HP", effect:"+40% HP instantly", cost:125, requires:[{name:"Silverleaf",qty:2},{name:"Goldroot",qty:1}] },
-    { name:"Greater HP Potion", icon:"❤️‍🔥", type:"HP", effect:"+70% HP instantly", cost:250, requires:[{name:"Spirit Herb",qty:2},{name:"Jade Vine",qty:1}] },
+    { name:"Minor HP Potion", icon:"🫧", type:"HP", effect:"+20% HP instantly", cost:30, requires:[{name:"Mint Leaves",qty:2},{name:"Soft Bark",qty:1}] },
+    { name:"Standard HP Potion", icon:"🧴", type:"HP", effect:"+40% HP instantly", cost:75, requires:[{name:"Silverleaf",qty:2},{name:"Goldroot",qty:1}] },
+    { name:"Greater HP Potion", icon:"❤️‍🔥", type:"HP", effect:"+70% HP instantly", cost:200, requires:[{name:"Spirit Herb",qty:2},{name:"Jade Vine",qty:1}] },
   ],
   Mana: [
-    { name:"Minor Mana Potion", icon:"💠", type:"Mana", effect:"+20% Mana instantly", cost:50, requires:[{name:"Wild Herbs",qty:2},{name:"Lotus",qty:1}] },
-    { name:"Standard Mana Potion", icon:"🔹", type:"Mana", effect:"+40% Mana instantly", cost:125, requires:[{name:"Goldroot",qty:2},{name:"Lotus",qty:2}] },
-    { name:"Greater Mana Potion", icon:"🌀", type:"Mana", effect:"+70% Mana instantly", cost:250, requires:[{name:"Spirit Herb",qty:2},{name:"Ghost Root",qty:1}] },
+    { name:"Minor Mana Potion", icon:"💠", type:"Mana", effect:"+20% Mana instantly", cost:30, requires:[{name:"Wild Herbs",qty:2},{name:"Lotus",qty:1}] },
+    { name:"Standard Mana Potion", icon:"🔹", type:"Mana", effect:"+40% Mana instantly", cost:75, requires:[{name:"Goldroot",qty:2},{name:"Lotus",qty:2}] },
+    { name:"Greater Mana Potion", icon:"🌀", type:"Mana", effect:"+70% Mana instantly", cost:200, requires:[{name:"Spirit Herb",qty:2},{name:"Ghost Root",qty:1}] },
   ],
   Luck: [
-    { name:"Minor Luck Potion", icon:"🍀", type:"Luck", effect:"+5% Luck (1h, 3/day)", cost:50, requires:[{name:"Basil Sprigs",qty:2},{name:"Mushroom",qty:1}] },
-    { name:"Standard Luck Potion", icon:"☘️", type:"Luck", effect:"+15% Luck (1h, 3/day)", cost:125, requires:[{name:"Nightshade",qty:2},{name:"Glowleaf",qty:1}] },
-    { name:"Greater Luck Potion", icon:"🌠", type:"Luck", effect:"+30% Luck (1h, 3/day)", cost:250, requires:[{name:"Spirit Herb",qty:2},{name:"Jade Vine",qty:1}] },
+    { name:"Minor Luck Potion", icon:"🍀", type:"Luck", effect:"+5% Luck (1h, 3/day)", cost:30, requires:[{name:"Basil Sprigs",qty:2},{name:"Mushroom",qty:1}] },
+    { name:"Standard Luck Potion", icon:"☘️", type:"Luck", effect:"+15% Luck (1h, 3/day)", cost:75, requires:[{name:"Nightshade",qty:2},{name:"Glowleaf",qty:1}] },
+    { name:"Greater Luck Potion", icon:"🌠", type:"Luck", effect:"+30% Luck (1h, 3/day)", cost:200, requires:[{name:"Spirit Herb",qty:2},{name:"Jade Vine",qty:1}] },
   ],
   Insight: [
-    { name:"Minor EXP Potion", icon:"✨", type:"Insight", effect:"+5% EXP gain (40-60 Coins)", cost:50, requires:[{name:"Wild Herbs",qty:2},{name:"Lotus",qty:1}] },
-    { name:"Standard EXP Potion", icon:"⭐", type:"Insight", effect:"+15% EXP gain (100-150 Coins)", cost:125, requires:[{name:"Goldroot",qty:2},{name:"Lotus",qty:2}] },
-    { name:"Greater EXP Potion", icon:"🌟", type:"Insight", effect:"+20 EXP gain (250-400 Coins)", cost:250, requires:[{name:"Spirit Herb",qty:2},{name:"Ghost Root",qty:1}] },
+    { name:"Minor EXP Potion", icon:"✨", type:"Insight", effect:"+5% EXP gain", cost:30, requires:[{name:"Wild Herbs",qty:2},{name:"Lotus",qty:1}] },
+    { name:"Standard EXP Potion", icon:"⭐", type:"Insight", effect:"+15% EXP gain", cost:75, requires:[{name:"Goldroot",qty:2},{name:"Lotus",qty:2}] },
+    { name:"Greater EXP Potion", icon:"🌟", type:"Insight", effect:"+20 EXP gain", cost:200, requires:[{name:"Spirit Herb",qty:2},{name:"Ghost Root",qty:1}] },
   ],
   Other: [
     { name:"Resurrection Potion", icon:"💀", effect:"Instantly revive from death without waiting 24 hours. Restores HP and Mana to full. Can be used from the death screen.", cost:5000 },
@@ -11673,31 +12299,59 @@ async function _stampMissingIids(inventory) {
   let dirty = false;
   const expanded = [];
   inventory.forEach(item => {
-    const isEquip = getItemType(item.name) === 'equipment';
-    if (!isEquip) { expanded.push(item); return; }
+    const correctType = getItemType(item.name); // 'equipment', 'material', 'consumable', 'quest'
+    const isEquip     = correctType === 'equipment';
+
+    // ── Fix wrong type field baked into the DB document ──────────────────
+    // Determines the correct storage type: equipment → 'weapon' or 'armor',
+    // everything else → use getItemType result.
+    let storageType = item.type;
+    if (isEquip) {
+      const base = (item.name || '').replace(/\s*\+\d+$/, '').trim();
+      const correctStorage = ALL_ARMOR_NAMES.includes(base) ? 'armor'
+                           : ALL_WEAPON_NAMES.includes(base) ? 'weapon'
+                           : 'equipment';
+      if (!storageType || (item.type !== correctStorage && item.type !== 'weapon' && item.type !== 'armor')) {
+        storageType = correctStorage;
+        dirty = true;
+      }
+    } else {
+      if (!storageType) {
+        // Item has no type at all — derive it from name
+        storageType = correctType;
+        dirty = true;
+      } else if (item.type !== correctType && item.type === 'material' && correctType !== 'material') {
+        // Non-equipment item wrongly stored as material
+        storageType = correctType;
+        dirty = true;
+      }
+    }
+
+    if (!isEquip) { expanded.push({ ...item, type: storageType }); return; }
+
     const qty = item.qty ?? 1;
     if (qty > 1) {
       // Legacy stacked equipment — split into individual iid'd entries
       for (let i = 0; i < qty; i++) {
-        expanded.push({ ...item, qty: 1, iid: _makeIid() });
+        expanded.push({ ...item, qty: 1, iid: _makeIid(), type: storageType });
       }
       dirty = true;
     } else if (!item.iid) {
-      expanded.push({ ...item, qty: 1, iid: _makeIid() });
+      expanded.push({ ...item, qty: 1, iid: _makeIid(), type: storageType });
       dirty = true;
     } else {
-      expanded.push(item);
+      expanded.push({ ...item, type: storageType });
     }
   });
   if (dirty) {
     try {
       await updateDoc(doc(db, 'characters', _uid), { inventory: expanded });
-      // Sync local cache so the inventory grid also reflects the iid'd items
+      // Sync local cache so the inventory grid also reflects the cleaned items
       if (window._charData) window._charData.inventory = expanded;
       if (window._allInvItems) window._allInvItems = expanded;
-      console.log('[IID] Stamped missing equipment iids for', _uid);
+      console.log('[STAMP] Fixed inventory types/iids for', _uid);
     } catch(e) {
-      console.warn('[IID] Could not stamp iids:', e);
+      console.warn('[STAMP] Could not fix inventory:', e);
     }
   }
   return expanded;
@@ -12533,7 +13187,7 @@ const _RANDOM_EVENTS = {
         const item  = gifts[Math.floor(Math.random()*gifts.length)];
         const inv   = [...(_charData.inventory||[])];
         const ex    = inv.find(i=>i.name===item);
-        if (ex) ex.qty++; else inv.push({name:item,qty:1});
+        if (ex) ex.qty++; else inv.push({name:item,qty:1,type:getItemType(item)});
         const updates = { inventory:inv, gold:(_charData.gold||0)+gold };
         await updateDoc(doc(db,'characters',_uid), updates);
         Object.assign(_charData, updates);
@@ -12568,7 +13222,7 @@ const _RANDOM_EVENTS = {
         const item  = pool[Math.floor(Math.random()*pool.length)];
         const inv   = [...(_charData.inventory||[])];
         const ex    = inv.find(i=>i.name===item);
-        if (ex) ex.qty+=bonus; else inv.push({name:item,qty:bonus});
+        if (ex) ex.qty+=bonus; else inv.push({name:item,qty:bonus,type:'material'});
         await updateDoc(doc(db,'characters',_uid),{inventory:inv});
         _charData.inventory=inv; window._allInvItems=inv; window._refreshInvDisplay();
         window.showToast(`Rich Vein Found! +${bonus} ${item}`, 'success');
@@ -12580,7 +13234,7 @@ const _RANDOM_EVENTS = {
         const item  = fish[Math.floor(Math.random()*fish.length)];
         const inv   = [...(_charData.inventory||[])];
         const ex    = inv.find(i=>i.name===item);
-        if (ex) ex.qty+=2; else inv.push({name:item,qty:2});
+        if (ex) ex.qty+=2; else inv.push({name:item,qty:2,type:'material'});
         await updateDoc(doc(db,'characters',_uid),{inventory:inv});
         _charData.inventory=inv; window._allInvItems=inv; window._refreshInvDisplay();
         window.showToast(`Golden Catch! Reeled in a rare ${item}!`, 'success');
@@ -12592,7 +13246,7 @@ const _RANDOM_EVENTS = {
         const item  = items[Math.floor(Math.random()*items.length)];
         const inv   = [...(_charData.inventory||[])];
         const ex    = inv.find(i=>i.name===item);
-        if (ex) ex.qty+=3; else inv.push({name:item,qty:3});
+        if (ex) ex.qty+=3; else inv.push({name:item,qty:3,type:'material'});
         await updateDoc(doc(db,'characters',_uid),{inventory:inv});
         _charData.inventory=inv; window._allInvItems=inv; window._refreshInvDisplay();
         window.showToast(`Bloom Surge! Triple ${item} found!`, 'success');
@@ -12604,7 +13258,7 @@ const _RANDOM_EVENTS = {
         const item  = items[Math.floor(Math.random()*items.length)];
         const inv   = [...(_charData.inventory||[])];
         const ex    = inv.find(i=>i.name===item);
-        if (ex) ex.qty+=2; else inv.push({name:item,qty:2});
+        if (ex) ex.qty+=2; else inv.push({name:item,qty:2,type:'material'});
         await updateDoc(doc(db,'characters',_uid),{inventory:inv});
         _charData.inventory=inv; window._allInvItems=inv; window._refreshInvDisplay();
         window.showToast(`Rare Herb Patch! Bonus ${item} gathered.`, 'success');

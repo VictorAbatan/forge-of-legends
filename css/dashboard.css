@@ -1164,10 +1164,106 @@
   color: var(--text);
   background: rgba(255,255,255,0.06);
 }
+.equip-item-unequip-btn {
+  flex-shrink: 0;
+  font-size: 0.6rem;
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(192,57,43,0.35);
+  background: rgba(192,57,43,0.06);
+  color: #c0392b;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.equip-item-unequip-btn:hover {
+  border-color: rgba(192,57,43,0.7);
+  background: rgba(192,57,43,0.14);
+}
 
 @media (max-width: 500px) {
   .equip-item-stats { font-size: 0.6rem; }
   .equip-item-change-btn { padding: 4px 8px; }
+}
+
+/* ── Equip stat-boost overlay ── */
+.equip-boost-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.75);
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: fadeIn 0.15s ease;
+}
+.equip-boost-box {
+  background: #13100a;
+  border: 1px solid rgba(201,168,76,0.5);
+  border-radius: var(--radius);
+  padding: 24px 20px;
+  width: 100%;
+  max-width: 320px;
+  text-align: center;
+  box-shadow: 0 12px 48px rgba(0,0,0,0.9);
+  animation: slideUp 0.2s ease;
+}
+@keyframes slideUp {
+  from { opacity:0; transform: translateY(16px); }
+  to   { opacity:1; transform: translateY(0); }
+}
+.equip-boost-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--gold);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.equip-boost-name {
+  font-size: 1.1rem;
+  color: var(--text);
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+.equip-boost-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+.equip-boost-stat {
+  background: rgba(93,190,133,0.12);
+  border: 1px solid rgba(93,190,133,0.35);
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #5dbe85;
+  letter-spacing: 0.04em;
+}
+.equip-boost-stat.stat-hp {
+  background: rgba(192,57,43,0.12);
+  border-color: rgba(192,57,43,0.35);
+  color: #e74c3c;
+}
+.equip-boost-stat.stat-def {
+  background: rgba(91,159,224,0.12);
+  border-color: rgba(91,159,224,0.35);
+  color: #5b9fe0;
+}
+.equip-boost-delta {
+  font-size: 0.75rem;
+  opacity: 0.7;
+  font-weight: 500;
+}
+/* Inline gear bonus shown next to base stat in stats panel */
+.stat-equip-bonus {
+  font-size: 0.75em;
+  color: #5dbe85;
+  font-weight: 700;
+  margin-left: 4px;
 }
 
 /* ── Equip selection modal ── */

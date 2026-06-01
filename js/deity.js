@@ -2303,7 +2303,7 @@ function openDeityNpcForm(npcId) {
         return;
       }
     }
-    const data = { name, avatar: avatar||"🧙", description: desc||"", autoResponses, locationId, updatedAt: serverTimestamp() };
+    const data = { name, avatar: avatar||"🧙", description: desc||"", autoResponses, locationId, deityUid: _uid, updatedAt: serverTimestamp() };
     try {
       if (npcId) await setDoc(doc(db,"npcs",locationId,"list",npcId), data, { merge:true });
       else       await addDoc(collection(db,"npcs",locationId,"list"), data);

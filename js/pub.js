@@ -35,8 +35,29 @@ let _activeGameId    = null;
 let _resultsUnsub    = null;
 let _lobbyGamesUnsub = null;
 let _awardedGameIds  = new Set();
+let _tdCancelTimer   = null;
+let _hrCancelTimer   = null;
+let _dhCancelTimer   = null;
 
 // ── Location constants ─────────────────────────────────────────
+// ── Live countdown helper ──────────────────────────────────────
+// Starts a 1-second interval that rewrites only the countdown portion
+// of a status bar element. Returns the interval id.
+// buildText(secsLeft) → full string to set on statusEl.textContent
+// Clears itself automatically when secsLeft hits 0.
+function _startCancelCountdown(statusEl, createdMs, buildText) {
+  const expiresMs = createdMs + 3 * 60 * 1000;
+  function tick() {
+    if (!statusEl || !document.body.contains(statusEl)) { clearInterval(id); return; }
+    const secsLeft = Math.max(0, Math.ceil((expiresMs - Date.now()) / 1000));
+    statusEl.textContent = buildText(secsLeft);
+    if (secsLeft === 0) clearInterval(id);
+  }
+  tick(); // fire immediately so there's no 1-second blank
+  const id = setInterval(tick, 1000);
+  return id;
+}
+
 const PUB_LOCATIONS = {
   northern: {
     location:    "Frostspire",
@@ -682,6 +703,9 @@ function _backToLobby() {
   if (_tdTableUnsub)    { _tdTableUnsub();    _tdTableUnsub    = null; }
   if (_hrTableUnsub)    { _hrTableUnsub();    _hrTableUnsub    = null; }
   if (_dhLobbyUnsub)    { _dhLobbyUnsub();    _dhLobbyUnsub    = null; }
+  if (_tdCancelTimer)   { clearInterval(_tdCancelTimer); _tdCancelTimer = null; }
+  if (_hrCancelTimer)   { clearInterval(_hrCancelTimer); _hrCancelTimer = null; }
+  if (_dhCancelTimer)   { clearInterval(_dhCancelTimer); _dhCancelTimer = null; }
   _activeGameId = null;
   const container = document.getElementById('pub-game-container');
   if (container) container.innerHTML = '';
@@ -981,15 +1005,23 @@ function _tdRenderGameState(game, gameId) {
     if (rollBtn)  rollBtn.style.display  = (isHost && amPlaying && game.players.length >= 2) ? '' : 'none';
     if (leaveBtn) leaveBtn.style.display = amPlaying ? '' : 'none';
     if (statusEl) {
-      statusEl.textContent = amPlaying
-        ? (isHost ? `You're the host — roll when ready!` : `Waiting for the host to roll...`)
-        : `${game.players.length} player${game.players.length !== 1 ? 's' : ''} seated. Join them!`;
+        const _createdMs = game.createdAt?.toMillis?.() || (game.createdAt?.seconds ? game.createdAt.seconds * 1000 : null);
+      if (_tdCancelTimer) { clearInterval(_tdCancelTimer); _tdCancelTimer = null; }
+      if (_createdMs && game.players.length === 1 && isHost) {
+        _tdCancelTimer = _startCancelCountdown(statusEl, _createdMs, (secsLeft) => {
+          const mm = Math.floor(secsLeft/60), ss = String(secsLeft%60).padStart(2,'0');
+          const timerSuffix = secsLeft > 0 ? ` · Cancels in ${mm}:${ss}` : ' · Cancelling…';
+          return `You're the host — roll when ready!${timerSuffix}`;
+        });
+      } else {
+        statusEl.textContent = amPlaying
+          ? (isHost ? `You're the host — roll when ready!` : `Waiting for the host to roll...`)
+          : `${game.players.length} player${game.players.length !== 1 ? 's' : ''} seated. Join them!`;
+      }
       statusEl.className = 'pub-status-bar';
     }
   }
-
   if (game.status === 'rolling') {
-    if (createBtn) createBtn.style.display = 'none';
     if (joinBtn)   joinBtn.style.display   = 'none';
     if (rollBtn)   rollBtn.style.display   = 'none';
     if (leaveBtn)  leaveBtn.style.display  = 'none';
@@ -1030,6 +1062,7 @@ function _tdRenderGameState(game, gameId) {
     }
 
     setTimeout(() => {
+      if (_tdCancelTimer) { clearInterval(_tdCancelTimer); _tdCancelTimer = null; }
       if (_activeGameUnsub) { _activeGameUnsub(); _activeGameUnsub = null; }
       _activeGameId = null;
     }, 5000);
@@ -1072,6 +1105,7 @@ window._tdLeaveGame = async function() {
     }
     await _awardGold(_uid, myEntry.bet || 0);
     window.showToast?.('Left the table. Bet refunded.', '');
+    if (_tdCancelTimer) { clearInterval(_tdCancelTimer); _tdCancelTimer = null; }
     if (_activeGameUnsub) { _activeGameUnsub(); _activeGameUnsub = null; }
     _activeGameId = null;
     _backToLobby();
@@ -1480,9 +1514,19 @@ function _hrRenderGameState(game, gameId) {
     if (rollBtn)  rollBtn.style.display  = (isHost && amPlaying && game.players.length >= 2) ? '' : 'none';
     if (leaveBtn) leaveBtn.style.display = amPlaying ? '' : 'none';
     if (statusEl) {
-      statusEl.textContent = amPlaying
-        ? (isHost ? `You're the host — roll when ready!` : `Waiting for the host to roll...`)
-        : `${game.players.length} player${game.players.length !== 1 ? 's' : ''} seated. Join them!`;
+        const _createdMs = game.createdAt?.toMillis?.() || (game.createdAt?.seconds ? game.createdAt.seconds * 1000 : null);
+      if (_hrCancelTimer) { clearInterval(_hrCancelTimer); _hrCancelTimer = null; }
+      if (_createdMs && game.players.length === 1 && isHost) {
+        _hrCancelTimer = _startCancelCountdown(statusEl, _createdMs, (secsLeft) => {
+          const mm = Math.floor(secsLeft/60), ss = String(secsLeft%60).padStart(2,'0');
+          const timerSuffix = secsLeft > 0 ? ` · Cancels in ${mm}:${ss}` : ' · Cancelling…';
+          return `You're the host — roll when ready!${timerSuffix}`;
+        });
+      } else {
+        statusEl.textContent = amPlaying
+          ? (isHost ? `You're the host — roll when ready!` : `Waiting for the host to roll...`)
+          : `${game.players.length} player${game.players.length !== 1 ? 's' : ''} seated. Join them!`;
+      }
       statusEl.className = 'pub-status-bar';
     }
   }
@@ -1514,7 +1558,7 @@ function _hrRenderGameState(game, gameId) {
       const myBet = game.players.find(p => p.uid === _uid)?.bet || 0;
       setTimeout(() => _showResultOverlay(didWin, game.rollResult, game.winnerName, game.prize, didWin ? game.prize : myBet), 800);
     }
-    setTimeout(() => { if (_activeGameUnsub) { _activeGameUnsub(); _activeGameUnsub = null; } _activeGameId = null; }, 5000);
+    setTimeout(() => { if (_hrCancelTimer) { clearInterval(_hrCancelTimer); _hrCancelTimer = null; } if (_activeGameUnsub) { _activeGameUnsub(); _activeGameUnsub = null; } _activeGameId = null; }, 5000);
   }
 }
 
@@ -1551,6 +1595,7 @@ window._hrLeaveGame = async function() {
     }
     await _awardGold(_uid, myEntry.bet || 0);
     window.showToast?.('Left the table. Bet refunded.', '');
+    if (_hrCancelTimer) { clearInterval(_hrCancelTimer); _hrCancelTimer = null; }
     if (_activeGameUnsub) { _activeGameUnsub(); _activeGameUnsub = null; }
     _activeGameId = null;
     _backToLobby();
@@ -1667,6 +1712,7 @@ function _dhCardHtml(instanceId, showFace = true, matchHighlight = false) {
 let _dhLobbyUnsub = null;
 
 function _dhWatchLobby() {
+  if (_dhCancelTimer)  { clearInterval(_dhCancelTimer); _dhCancelTimer = null; }
   if (_dhLobbyUnsub) { _dhLobbyUnsub(); _dhLobbyUnsub = null; }
   const pub = _getCurrentPub();
   if (!pub) return;
@@ -1686,8 +1732,10 @@ function _dhWatchLobby() {
       const amIn   = game.players.some(p => p.uid === (_uid || window._uid));
 
       // Show join button + player list
-      const joinBtn = document.getElementById('dh-join-btn');
-      if (joinBtn) joinBtn.style.display = amIn ? 'none' : '';
+      const joinBtn  = document.getElementById('dh-join-btn');
+      const leaveBtn = document.getElementById('dh-leave-btn');
+      if (joinBtn)  joinBtn.style.display  = amIn ? 'none' : '';
+      if (leaveBtn) leaveBtn.style.display = amIn ? '' : 'none';
 
       const playerList = document.getElementById('dh-lobby-players');
       if (playerList) {
@@ -1703,7 +1751,14 @@ function _dhWatchLobby() {
 
       const statusEl = document.getElementById('dh-lobby-status');
       if (statusEl) {
-        statusEl.textContent = `${game.players.length}/4 players ready. Need 3 minimum.`;
+        const createdMs = game.createdAt?.toMillis?.() || game.createdAt?.seconds * 1000 || Date.now();
+        if (_dhCancelTimer) { clearInterval(_dhCancelTimer); _dhCancelTimer = null; }
+        const _dhPlayerCount = game.players.length;
+        _dhCancelTimer = _startCancelCountdown(statusEl, createdMs, (secsLeft) => {
+          const mm = Math.floor(secsLeft/60), ss = String(secsLeft%60).padStart(2,'0');
+          const timerStr = secsLeft > 0 ? ` · Cancels in ${mm}:${ss}` : ' · Cancelling…';
+          return `${_dhPlayerCount}/4 players ready. Need 3 minimum.${timerStr}`;
+        });
         statusEl.className = 'pub-status-bar';
       }
 
@@ -1727,10 +1782,12 @@ function _dhWatchLobby() {
       }
     } else {
       // No open lobby — show create UI, unlock stake
-      const createBtn = document.getElementById('dh-create-btn');
-      const joinBtn   = document.getElementById('dh-join-btn');
-      if (createBtn) createBtn.style.display = '';
-      if (joinBtn)   joinBtn.style.display   = 'none';
+      const createBtn  = document.getElementById('dh-create-btn');
+      const joinBtn    = document.getElementById('dh-join-btn');
+      const leaveBtnNo = document.getElementById('dh-leave-btn');
+      if (createBtn)  createBtn.style.display  = '';
+      if (joinBtn)    joinBtn.style.display    = 'none';
+      if (leaveBtnNo) leaveBtnNo.style.display = 'none';
       _dhUnlockStake();
       const playerList = document.getElementById('dh-lobby-players');
       if (playerList) playerList.innerHTML = '<div class="dh-lobby-player-row" style="justify-content:center;color:var(--text-dim);font-style:italic">No open table. Open one to start.</div>';
@@ -1777,6 +1834,7 @@ function _buildDevilsHandView(container) {
             <button class="dh-btn-primary" id="dh-create-btn" onclick="window._dhCreate()">🃏 Open Table</button>
             <button class="dh-btn-primary" id="dh-join-btn" onclick="window._dhJoin()" style="display:none">🚪 Join Table</button>
             <button class="dh-btn-primary" id="dh-start-btn" onclick="window._dhStartGame()" style="display:none">▶ Deal Cards!</button>
+            <button class="pub-btn-secondary" id="dh-leave-btn" onclick="window._dhLeaveTable()" style="display:none">🚪 Leave Table</button>
           </div>
         </div>
       </div>
@@ -1933,6 +1991,48 @@ window._dhCreate = async function() {
   }
 };
 
+// ── Leave Devil's Hand table (lobby only) ─────────────────────────
+window._dhLeaveTable = async function() {
+  if (!_activeGameId || !_uid) return;
+  const btn = document.getElementById('dh-leave-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Leaving…'; }
+  try {
+    const snap = await getDoc(doc(db, 'pubGames', _activeGameId));
+    if (!snap.exists()) {
+      // Doc already gone — clean up locally
+      if (_activeGameUnsub) { _activeGameUnsub(); _activeGameUnsub = null; }
+      _activeGameId = null;
+      return;
+    }
+    const game = snap.data();
+    if (game.status !== 'lobby') {
+      window.showToast?.("Game has already started — you can't leave now.", '');
+      if (btn) { btn.disabled = false; btn.textContent = '🚪 Leave Table'; }
+      return;
+    }
+    const remaining = game.players.filter(p => p.uid !== _uid);
+    if (remaining.length === 0) {
+      // Last player — delete the whole doc
+      await deleteDoc(doc(db, 'pubGames', _activeGameId));
+    } else {
+      // Transfer host if needed
+      const newHostUid = game.hostUid === _uid ? remaining[0].uid : game.hostUid;
+      await updateDoc(doc(db, 'pubGames', _activeGameId), {
+        players:       remaining,
+        hostUid:       newHostUid,
+        notifications: [...(game.notifications || []), `${game.players.find(p => p.uid === _uid)?.name || 'A player'} left the table.`],
+      });
+    }
+    window.showToast?.('Left the table.', '');
+    if (_activeGameUnsub) { _activeGameUnsub(); _activeGameUnsub = null; }
+    _activeGameId = null;
+  } catch(e) {
+    console.warn('[DH] leave error:', e);
+    window.showToast?.('Failed to leave. Try again.', 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '🚪 Leave Table'; }
+  }
+};
+
 // ── Join Devil's Hand table ────────────────────────────────────────
 window._dhJoin = async function() {
   _uid      = _uid || window._uid;
@@ -2068,8 +2168,8 @@ async function _dhRenderGameState(game, gameId) {
     const gameDiv = document.getElementById('dh-game');
     if (setup)   setup.style.display   = 'none';
     if (gameDiv) gameDiv.style.display = '';
-    if (_dhLobbyUnsub) { _dhLobbyUnsub(); _dhLobbyUnsub = null; }
-  }
+    if (_dhCancelTimer)  { clearInterval(_dhCancelTimer); _dhCancelTimer = null; }
+    if (_dhLobbyUnsub) { _dhLobbyUnsub(); _dhLobbyUnsub = null; }  }
 
   // Round pips
   for (let i = 1; i <= 5; i++) {
