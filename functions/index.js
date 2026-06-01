@@ -1180,6 +1180,9 @@ exports.settlePubGame = onDocumentUpdated(
     // Only act on the transition to 'complete', and only once
     if (before.status === "complete" || after.status !== "complete") return;
 
+    // Devil's Hand settles gold round-by-round on the client; skip trigger
+    if (after.gameType === "devils-hand") return;
+
     const { winnerUid, pot, goldSettled } = after;
     if (!winnerUid || !pot || goldSettled) return;
 
@@ -1379,6 +1382,123 @@ exports.rollPubGame = onCall(CALL_OPTS, async (request) => {
 
     tx.update(gameRef, update);
     return { success: true, rollResult, winnerUid: winner.uid, winnerName: winner.name, prize };
+  });
+});
+
+// ── createDevilsHandGame ──────────────────────────────────────
+//  Callable: host opens a Devil's Hand lobby. Validates gold
+//  (must cover 5 rounds), creates the pubGames doc as admin,
+//  and deducts nothing yet — gold is deducted per round at deal.
+exports.createDevilsHandGame = onCall(CALL_OPTS, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Must be logged in.");
+
+  const { baseStake, pubLocation, playerName } = request.data;
+  if (!baseStake || baseStake < 1 || !pubLocation)
+    throw new HttpsError("invalid-argument", "Missing required fields.");
+
+  const charRef = db.collection("characters").doc(uid);
+
+  return await db.runTransaction(async (tx) => {
+    const charSnap = await tx.get(charRef);
+    if (!charSnap.exists) throw new HttpsError("not-found", "Character not found.");
+    const char = charSnap.data();
+
+    const minGold = baseStake * 5;
+    if ((char.gold || 0) < minGold)
+      throw new HttpsError(
+        "failed-precondition",
+        `Need at least ${minGold} 💰 to cover 5 rounds. You have ${char.gold || 0}.`
+      );
+
+    // Block if a lobby is already open at this pub
+    const openSnap = await db.collection("pubGames")
+      .where("gameType",    "==", "devils-hand")
+      .where("status",      "==", "lobby")
+      .where("pubLocation", "==", pubLocation)
+      .limit(1)
+      .get();
+    if (!openSnap.empty)
+      throw new HttpsError("already-exists", "A Devil's Hand table is already open — join it instead!");
+
+    const gameRef = db.collection("pubGames").doc();
+    tx.set(gameRef, {
+      gameType:      "devils-hand",
+      status:        "lobby",
+      pubLocation,
+      hostUid:       uid,
+      baseStake,
+      round:         0,
+      tableCards:    [],
+      hands:         {},
+      players:       [{ uid, name: playerName || char.name, status: "waiting", totalBet: 0, roundsWon: 0 }],
+      turnOrder:     [],
+      currentTurn:   0,
+      roundPot:      0,
+      totalPot:      0,
+      notifications: ["Table opened. Waiting for players..."],
+      roundWinner:   null,
+      winnerUid:     null,
+      winnerName:    null,
+      prize:         0,
+      goldSettled:   true,   // DH settles per-round client-side; block the trigger
+      createdAt:     FieldValue.serverTimestamp(),
+    });
+
+    return { success: true, gameId: gameRef.id };
+  });
+});
+
+// ── joinDevilsHandGame ────────────────────────────────────────
+//  Callable: player joins an existing Devil's Hand lobby. Validates
+//  gold (must cover 5 rounds) and adds them atomically.
+exports.joinDevilsHandGame = onCall(CALL_OPTS, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Must be logged in.");
+
+  const { pubLocation, playerName } = request.data;
+  if (!pubLocation) throw new HttpsError("invalid-argument", "Missing pubLocation.");
+
+  const charRef = db.collection("characters").doc(uid);
+
+  return await db.runTransaction(async (tx) => {
+    const charSnap = await tx.get(charRef);
+    if (!charSnap.exists) throw new HttpsError("not-found", "Character not found.");
+    const char = charSnap.data();
+
+    // Find the open lobby
+    const lobbySnap = await db.collection("pubGames")
+      .where("gameType",    "==", "devils-hand")
+      .where("status",      "==", "lobby")
+      .where("pubLocation", "==", pubLocation)
+      .limit(1)
+      .get();
+    if (lobbySnap.empty)
+      throw new HttpsError("not-found", "No open Devil's Hand table found.");
+
+    const gameRef  = lobbySnap.docs[0].ref;
+    const game     = lobbySnap.docs[0].data();
+    const baseStake = game.baseStake || 100;
+    const minGold   = baseStake * 5;
+
+    if ((char.gold || 0) < minGold)
+      throw new HttpsError(
+        "failed-precondition",
+        `Need at least ${minGold} 💰 to cover 5 rounds. You have ${char.gold || 0}.`
+      );
+    if (game.players.some(p => p.uid === uid))
+      throw new HttpsError("already-exists", "Already seated at this table.");
+    if (game.players.length >= 4)
+      throw new HttpsError("failed-precondition", "Table is full. (4 players max)");
+
+    const newPlayer = { uid, name: playerName || char.name, status: "waiting", totalBet: 0, roundsWon: 0 };
+
+    tx.update(gameRef, {
+      players:       FieldValue.arrayUnion(newPlayer),
+      notifications: FieldValue.arrayUnion(`${playerName || char.name} joined the table!`),
+    });
+
+    return { success: true, gameId: lobbySnap.docs[0].id, baseStake };
   });
 });
 
