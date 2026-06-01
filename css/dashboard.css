@@ -2466,12 +2466,12 @@
   border: 1px solid rgba(201,168,76,0.5);
   border-radius: var(--radius);
   padding: 12px;
-  display: flex;
-  gap: 8px;
   box-shadow: 0 8px 32px rgba(0,0,0,0.9);
   z-index: 501;
   animation: slideIn 0.15s ease;
   pointer-events: all;
+  max-width: calc(100vw - 32px);
+  box-sizing: border-box;
 }
 @keyframes slideIn {
   from { opacity: 0; transform: scale(0.9); }
@@ -2484,7 +2484,8 @@
   display: none;
 }
 .player-popup-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
 .popup-action-btn {

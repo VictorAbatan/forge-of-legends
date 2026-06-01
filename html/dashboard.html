@@ -2225,11 +2225,23 @@ button,
     const isNpc = uid && uid.startsWith('npc_');
     const profileBtn = popup.querySelector('[onclick="playerAction(\'profile\')"]');
     if (profileBtn) profileBtn.style.display = isNpc ? 'none' : '';
-    // Position near clicked element
-    const rect = el.getBoundingClientRect();
+    // Position popup — always centered on mobile to avoid overflow
+    const rect  = el.getBoundingClientRect();
     const panel = document.getElementById('panel-chat').getBoundingClientRect();
-    popup.style.top  = (rect.bottom - panel.top + 8) + 'px';
-    popup.style.left = Math.min(rect.left - panel.left, panel.width - 200) + 'px';
+    const inner = popup.querySelector('.player-popup-inner');
+    if (window.innerWidth <= 768) {
+      inner.style.left      = '50%';
+      inner.style.transform = 'translateX(-50%)';
+      inner.style.right     = 'auto';
+      popup.style.top  = (rect.bottom - panel.top + 8) + 'px';
+      popup.style.left = '0';
+    } else {
+      inner.style.left      = '';
+      inner.style.transform = '';
+      inner.style.right     = '';
+      popup.style.top  = (rect.bottom - panel.top + 8) + 'px';
+      popup.style.left = Math.min(rect.left - panel.left, panel.width - 220) + 'px';
+    }
     popup.style.display = 'block';
   }
   function closePlayerPopup() {
