@@ -13044,3 +13044,91 @@ window._encounterConfirmFight = async function() {
   document.getElementById('encounter-stance-picker').style.display = 'none';
   await window._confirmFight?.();
 };
+
+// ═══════════════════════════════════════════════════
+//  VIEW PLAYER PROFILE
+// ═══════════════════════════════════════════════════
+const _PROFILE_CLASS_ICONS = { Warrior:'⚔️', Guardian:'🛡️', Arcanist:'🔮', Hunter:'🏹', Assassin:'🗡️', Cleric:'✨', Summoner:'🌀' };
+const _PROFILE_ACH_META = {
+  'first-death':      { icon:'🪦', label:'First Blood',      desc:'First player to fall in battle'        },
+  'first-monster-kill':{ icon:'⚔️', label:'Monster Slayer',  desc:'First to slay a high-class monster'    },
+  'first-ascension':  { icon:'⬆️', label:'First Ascension',  desc:'First player to rank up'               },
+  'first-level5':     { icon:'🌟', label:'Early Riser',       desc:'First player to reach Level 5'         },
+};
+
+window.viewPlayerProfile = async function(uid) {
+  const modal   = document.getElementById('player-profile-modal');
+  const loading = document.getElementById('pprofile-loading');
+  if (!modal) return;
+
+  // Reset and show modal immediately
+  document.getElementById('pprofile-name').textContent    = '—';
+  document.getElementById('pprofile-rank').textContent    = '';
+  document.getElementById('pprofile-rank-val').textContent= '—';
+  document.getElementById('pprofile-level').textContent   = '—';
+  document.getElementById('pprofile-faction').textContent = '—';
+  document.getElementById('pprofile-bio').textContent     = '';
+  document.getElementById('pprofile-race-tag').textContent= '';
+  document.getElementById('pprofile-class-tag').textContent= '';
+  document.getElementById('pprofile-avatar').innerHTML    = '';
+  document.getElementById('pprofile-banner').style.backgroundImage = '';
+  document.getElementById('pprofile-achievements').style.display = 'none';
+  if (loading) loading.style.display = 'block';
+  modal.style.display = 'flex';
+
+  try {
+    const snap = await getDoc(doc(db, 'characters', uid));
+    if (!snap.exists()) {
+      document.getElementById('pprofile-name').textContent = 'Character not found.';
+      if (loading) loading.style.display = 'none';
+      return;
+    }
+    const c = snap.data();
+    const classIcon = _PROFILE_CLASS_ICONS[c.charClass] || '⚔️';
+
+    // Avatar
+    const avatarEl = document.getElementById('pprofile-avatar');
+    if (c.avatarUrl && c.avatarUrl.startsWith('http')) {
+      avatarEl.innerHTML = `<img src="${c.avatarUrl}" alt="${c.name}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
+    } else {
+      avatarEl.textContent = classIcon;
+    }
+
+    // Banner — reuse avatar as blurred bg if available
+    const bannerEl = document.getElementById('pprofile-banner');
+    if (c.avatarUrl && c.avatarUrl.startsWith('http')) {
+      bannerEl.style.backgroundImage = `url('${c.avatarUrl}')`;
+    } else {
+      bannerEl.style.backgroundImage = '';
+    }
+
+    // Core fields
+    document.getElementById('pprofile-name').textContent     = c.name || '—';
+    document.getElementById('pprofile-rank').textContent     = c.rank || 'Wanderer';
+    document.getElementById('pprofile-rank-val').textContent = c.rank || 'Wanderer';
+    document.getElementById('pprofile-level').textContent    = `${c.level || 1}`;
+    document.getElementById('pprofile-faction').textContent  = c.faction || 'None';
+    document.getElementById('pprofile-bio').textContent      = c.bio || 'No history written yet.';
+    document.getElementById('pprofile-race-tag').textContent = c.race ? `🧬 ${c.race}` : '';
+    document.getElementById('pprofile-class-tag').textContent= c.charClass ? `${classIcon} ${c.charClass}` : '';
+
+    // Achievements
+    const achs = Array.isArray(c.achievements) ? c.achievements : [];
+    const achSection = document.getElementById('pprofile-achievements');
+    const achList    = document.getElementById('pprofile-ach-list');
+    if (achs.length > 0) {
+      achList.innerHTML = achs.map(id => {
+        const m = _PROFILE_ACH_META[id];
+        if (!m) return '';
+        return `<div class="pprofile-ach-badge" title="${m.desc}"><span class="pprofile-ach-icon">${m.icon}</span><span class="pprofile-ach-name">${m.label}</span></div>`;
+      }).filter(Boolean).join('');
+      if (achList.innerHTML.trim()) achSection.style.display = 'block';
+    }
+
+    if (loading) loading.style.display = 'none';
+  } catch (err) {
+    console.error('[Profile] Failed to load:', err);
+    document.getElementById('pprofile-name').textContent = 'Failed to load profile.';
+    if (loading) loading.style.display = 'none';
+  }
+};

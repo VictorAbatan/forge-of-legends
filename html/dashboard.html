@@ -701,11 +701,42 @@ button,
             <button class="popup-action-btn" onclick="playerAction('speak')">💬 Speak</button>
             <button class="popup-action-btn" onclick="playerAction('trade')">🔄 Trade</button>
             <button class="popup-action-btn" onclick="playerAction('duel')">⚔️ Duel</button>
+            <button class="popup-action-btn" onclick="playerAction('profile')">👤 Profile</button>
           </div>
         </div>
       </div>
 
 
+    </div>
+
+    <!-- ── Player Profile Modal ──────────────────────────────── -->
+    <div class="pprofile-overlay" id="player-profile-modal" style="display:none" onclick="closePlayerProfile()">
+      <div class="pprofile-card" onclick="event.stopPropagation()">
+        <button class="pprofile-close" onclick="closePlayerProfile()">✕</button>
+        <div class="pprofile-banner" id="pprofile-banner"></div>
+        <div class="pprofile-avatar-wrap">
+          <div class="pprofile-avatar" id="pprofile-avatar"></div>
+        </div>
+        <div class="pprofile-body">
+          <div class="pprofile-name" id="pprofile-name">—</div>
+          <div class="pprofile-rank" id="pprofile-rank">—</div>
+          <div class="pprofile-tags">
+            <span class="pprofile-tag" id="pprofile-race-tag"></span>
+            <span class="pprofile-tag" id="pprofile-class-tag"></span>
+          </div>
+          <div class="pprofile-meta-row">
+            <div class="pprofile-meta-item"><span class="pprofile-meta-label">LEVEL</span><span class="pprofile-meta-val" id="pprofile-level">—</span></div>
+            <div class="pprofile-meta-item"><span class="pprofile-meta-label">RANK</span><span class="pprofile-meta-val" id="pprofile-rank-val">—</span></div>
+            <div class="pprofile-meta-item"><span class="pprofile-meta-label">FACTION</span><span class="pprofile-meta-val" id="pprofile-faction">—</span></div>
+          </div>
+          <div class="pprofile-bio" id="pprofile-bio">—</div>
+          <div class="pprofile-achievements" id="pprofile-achievements" style="display:none">
+            <div class="pprofile-ach-title">🏅 Achievements</div>
+            <div class="pprofile-ach-list" id="pprofile-ach-list"></div>
+          </div>
+          <div class="pprofile-loading" id="pprofile-loading" style="display:none">Loading…</div>
+        </div>
+      </div>
     </div>
 
     <!-- PROFESSION -->
@@ -2190,6 +2221,10 @@ button,
   function openPlayerPopup(uid, name, el) {
     _playerActionTarget = { uid, name };
     const popup = document.getElementById('player-action-popup');
+    // Hide Profile button for NPCs (uid starts with "npc_")
+    const isNpc = uid && uid.startsWith('npc_');
+    const profileBtn = popup.querySelector('[onclick="playerAction(\'profile\')"]');
+    if (profileBtn) profileBtn.style.display = isNpc ? 'none' : '';
     // Position near clicked element
     const rect = el.getBoundingClientRect();
     const panel = document.getElementById('panel-chat').getBoundingClientRect();
@@ -2257,11 +2292,17 @@ button,
             .catch(() => window.showToast('Failed to send duel challenge.', 'error'));
         }
       }
+    } else if (action === 'profile') {
+      window.viewPlayerProfile?.(uid);
     }
   }
   window.openPlayerPopup  = openPlayerPopup;
   window.closePlayerPopup = closePlayerPopup;
   window.playerAction     = playerAction;
+  window.closePlayerProfile = function() {
+    const m = document.getElementById('player-profile-modal');
+    if (m) m.style.display = 'none';
+  };
 
   // Quest checkboxes are now read-only — progress tracked automatically by actions
   function toggleQuest() { /* no-op: quests auto-complete via _incrementQuest */ }
