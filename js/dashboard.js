@@ -1822,7 +1822,7 @@ const DEITY_INGREDIENTS = {
 };
 
 // Profession EXP thresholds per level (doc: Profession section)
-const PROF_EXP_TABLE = [0,100,200,400,800,1600,3200,6400,12800,25600,51200];
+const PROF_EXP_TABLE = [0,300,600,1200,2400,4800,9600,19200,38400,76800,153600];
 
 // Weekly Profession Quota Table (by level)
 const PROF_QUOTA_TABLE = [
@@ -4004,7 +4004,9 @@ window.useItem = async function(itemName, kind) {
     if (!confirmed) return;
     if (inv[idx].qty > 1) inv[idx].qty--; else inv.splice(idx, 1);
     const baseStats = { str:10, int:10, def:10, dex:10 };
-    const earnedPoints = Math.max(0, ((_charData.level || 1) - 1) * 3);
+    // Level-earned points (3 per level after 1) + the 20 welcome bonus every player started with
+    const WELCOME_BONUS = 20;
+    const earnedPoints = Math.max(0, ((_charData.level || 1) - 1) * 3) + WELCOME_BONUS;
     await updateDoc(doc(db, 'characters', _uid), { stats: baseStats, statPoints: earnedPoints, inventory: inv });
     Object.assign(_charData, { stats: baseStats, statPoints: earnedPoints, inventory: inv });
     window._allInvItems = inv;
@@ -4013,6 +4015,7 @@ window.useItem = async function(itemName, kind) {
     logActivity('🔄', `Used a <b>Stat Reset Potion</b>. Stats reset to base, ${earnedPoints} points refunded.`, '#c9a84c');
     if (typeof switchPanel === 'function') switchPanel('character');
     return;
+
 
   } else if (itemName === 'Race Rebirth Potion') {
     const confirmed = await inkConfirm('Use <b>Race Rebirth Potion</b>?<br><span style="font-size:0.85rem;color:var(--ash)">Your race and racial attribute will be cleared. Choose a new race.</span>');

@@ -191,9 +191,12 @@ function _renderPubGate(panel) {
       actionHtml = `<button class="pub-gate-action-btn" onclick="window._pubTravelTo('${p.travelId}','${p.continent}')">ENTER PUB — 10 💰 · 1 min</button>`;
     } else if (inContinent) {
       statusHtml = `<div class="pub-gate-status near">📍 You are in the ${p.continent}</div>`;
-      actionHtml = `<div class="pub-gate-hint">Travel to ${p.location} first, then visit the pub.</div>
-        <button class="pub-gate-action-btn secondary" onclick="window.openTravelModal?.('${p.capitalDest}','${p.continent}',${p.capitalCost},${p.capitalTime})">
-          GO TO ${p.location.toUpperCase()} — ${p.capitalCost} 💰 · 5m
+      actionHtml = `
+        <button class="pub-gate-action-btn" onclick="window.openTravelModal?.('${p.capitalDest}','${p.continent}',20,60)">
+          TRAVEL TO ${p.location.toUpperCase()} — 20 💰 · 1 min
+        </button>
+        <button class="pub-gate-action-btn secondary" onclick="window._viewCapitalFromPub?.('${p.continentId}')" style="margin-top:6px;">
+          VIEW ${p.location.toUpperCase()} →
         </button>`;
     } else {
       statusHtml = `<div class="pub-gate-status far">🌍 ${p.continent}</div>`;
@@ -231,6 +234,14 @@ window._pubTravelTo = function(travelId, continent) {
   } else {
     window.showToast?.('Open the World Map to travel.', '');
   }
+};
+
+// Opens the capital map view from the pub gate panel (used when player is in continent but not at capital)
+window._viewCapitalFromPub = function(continentId) {
+  if (typeof window.switchPanel === 'function') window.switchPanel('map');
+  setTimeout(() => {
+    window._renderCapital?.(continentId);
+  }, 120);
 };
 
 // ── Pub Manual ────────────────────────────────────────────────

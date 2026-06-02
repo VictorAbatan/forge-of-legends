@@ -429,7 +429,10 @@ function _openTT(el, e) {
       e2.stopPropagation();
       const d = btn.dataset;
       _closeTT();
-      window.openTravelModal?.(d.dest, (d.cont||"").split("·")[0].trim(), parseInt(d.cost), parseInt(d.time));
+      // Monster, resource and deity zones are always free — never charge the zone travelCost
+      const zoneType = d.zoneType || "";
+      const isFree = zoneType === "monster" || zoneType === "resource" || zoneType === "deity";
+      window.openTravelModal?.(d.dest, (d.cont||"").split("·")[0].trim(), isFree ? 0 : parseInt(d.cost), parseInt(d.time));
     });
   });
 
@@ -815,7 +818,7 @@ function renderWildlands(cid) {
                     🙏 VISIT TEMPLE
                   </button>`
                : ""}`
-          : `<button class="lmap-wpin-travel-btn" data-cost="${zone.travelCost}" data-time="${zone.travelTime}" data-dest="${zone.label}" data-cont="${cont.label}" style="margin-top:8px;">
+          : `<button class="lmap-wpin-travel-btn" data-cost="${zone.travelCost}" data-time="${zone.travelTime}" data-dest="${zone.label}" data-cont="${cont.label}" data-zone-type="${zone.type}" style="margin-top:8px;">
                TRAVEL HERE — ⏱ ${_ft(zone.travelTime)}${zone.type==="monster"||zone.type==="resource"||zone.type==="deity" ? " · Free" : ` · ${zone.travelCost}🪙`}
              </button>`
         }
