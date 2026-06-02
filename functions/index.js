@@ -557,7 +557,7 @@ exports.battleTurn = onCall(CALL_OPTS, async (request) => {
       db.collection("battles").doc(uid).update({ status:"defeat" }),
       db.collection("characters").doc(uid).update({ hp:0, mana:playerMana, inventory:halfInv, resurrectAt, isDead:true }),
     ]);
-    log.push(`💀 You have been defeated! Resurrect in 24 hours.`);
+    log.push(`💀 You have been defeated! Resurrect in 5 hours.`);
     log.push(`⚠️ Half your inventory was lost.`);
     return { status:"defeat", log, resurrectAt: resurrectAt.toISOString() };
   }

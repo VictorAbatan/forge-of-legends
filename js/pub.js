@@ -2448,10 +2448,10 @@ window._dhRaise = async function() {
   if (game.turnOrder?.[game.currentTurn] !== _uid) { window.showToast?.("Not your turn!", ''); return; }
 
   const raiseAmount = game.baseStake || 100;
-  if ((_charData?.gold || window._charData?.gold || 0) < raiseAmount) {
-    window.showToast?.(`Need ${raiseAmount} 💰 to raise!`, 'error');
-    if (btn) btn.disabled = false;
-    return;
+  const currentGold = (_charData?.gold || window._charData?.gold || 0);
+  const willLoan = currentGold < raiseAmount;
+  if (willLoan) {
+    window.showToast?.(`Raising on a loan — your balance will go negative.`, 'warning');
   }
 
   await _deductGold(raiseAmount);
@@ -2461,7 +2461,7 @@ window._dhRaise = async function() {
     p.uid === _uid ? { ...p, status: 'raised', totalBet: (p.totalBet || 0) + raiseAmount } : p
   );
 
-  const notif = `${myEntry?.name || 'Player'} raises! +${raiseAmount} 💰`;
+  const notif = `${myEntry?.name || 'Player'} raises! +${raiseAmount} 💰${willLoan ? ' (loan)' : ''}`;
   const newRoundPot = (game.roundPot || 0) + raiseAmount;
   const newTotalPot = (game.totalPot || 0) + raiseAmount;
   const nextTurn    = _dhNextActiveTurn(game, game.currentTurn);
@@ -2721,7 +2721,7 @@ async function _deductGold(amount) {
   if (!_uid || amount <= 0) return;
   try {
     await updateDoc(doc(db, 'characters', _uid), { gold: increment(-amount) });
-    const newGold = Math.max(0, (_charData?.gold || 0) - amount);
+    const newGold = (_charData?.gold || 0) - amount;
     if (_charData)        { _charData.gold = newGold; }
     if (window._charData) { window._charData.gold = newGold; }
     document.getElementById('stat-gold') && (document.getElementById('stat-gold').textContent = newGold);

@@ -578,9 +578,12 @@ async function _applyTradeResolution(trade, uid, initInv, initGold, targInv, tar
       if (window._charData && !trade.initiatorNpcId) {
         window._charData.inventory = initInv;
         window._charData.gold      = initGold;
+        window._allInvItems        = initInv;
         _charData = window._charData;
       }
-      if (!trade.initiatorNpcId) window.renderInventory?.(initInv);
+      if (!trade.initiatorNpcId) {
+        window._refreshInvDisplay?.();
+      }
     } else if (uid === trade.targetId) {
       if (trade.targetNpcId) {
         await _writeNpcDoc(trade.targetNpcId, trade.targetNpcLoc, { inventory: targInv, gold: targGold });
@@ -590,9 +593,12 @@ async function _applyTradeResolution(trade, uid, initInv, initGold, targInv, tar
       if (window._charData && !trade.targetNpcId) {
         window._charData.inventory = targInv;
         window._charData.gold      = targGold;
+        window._allInvItems        = targInv;
         _charData = window._charData;
       }
-      if (!trade.targetNpcId) window.renderInventory?.(targInv);
+      if (!trade.targetNpcId) {
+        window._refreshInvDisplay?.();
+      }
     }
   } catch (e) {
     console.warn('[Trade] _applyTradeResolution failed:', e);

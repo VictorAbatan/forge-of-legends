@@ -1196,13 +1196,13 @@ window.openEquipModal = function(type) {
   // then cross-check the correct slot via ALL_WEAPON_NAMES / ALL_ARMOR_NAMES on base name.
   const inv = window._allInvItems || [];
   const nameList     = type === 'weapon' ? ALL_WEAPON_NAMES : ALL_ARMOR_NAMES;
-  const currentEquip = (window._charData?.equipment?.[type] || '').replace(/\s*\+\d+$/, '').trim();
-  // Filter valid slot items, exclude currently equipped
+  const currentEquipFull = (window._charData?.equipment?.[type] || '').trim();
+  // Filter valid slot items, exclude the exact currently equipped item only
   const rawFiltered = inv.filter(i => {
     if (getItemType(i.name) !== 'equipment') return false;
     const base = (i.name || '').replace(/\s*\+\d+$/, '').trim();
     if (!nameList.includes(base)) return false;
-    if (currentEquip && base === currentEquip) return false;
+    if (currentEquipFull && i.name === currentEquipFull) return false;
     return true;
   });
   // Deduplicate — one entry per base name, keeping the highest enchant level
@@ -1856,7 +1856,7 @@ function getPlayerQuotaProgress() {
 
 function renderProfessionQuota() {
   const prof = _charData?.profession;
-  const level = _charData?.professionLevel || 0;
+  const level = _charData?.professionLvl || 0;
   const quota = PROF_QUOTA_TABLE[level] || PROF_QUOTA_TABLE[0];
   const progress = getPlayerQuotaProgress();
   const submitted = progress.submitted || {common:0,uncommon:0,rare:0,legendary:0,mythic:0};
@@ -1925,7 +1925,7 @@ function updateQuotaProgress(submit=false) {
   // Only allow submit if not completed
   const progress = getPlayerQuotaProgress();
   if (submit && !progress.completed) {
-    const level = _charData?.professionLevel || 0;
+    const level = _charData?.professionLvl || 0;
     const quota = PROF_QUOTA_TABLE[level] || PROF_QUOTA_TABLE[0];
     const inv = [...(_charData?.inventory||[])];
     const rarityMap = {
@@ -3766,7 +3766,8 @@ window.renderInventory = function(items) {
     const isEquipment = type === 'equipment';
     // Strip any +N suffix baked into the name by the Cloud Function, then show a single enchant badge
     const baseName = item.name.replace(/\s*\+\d+$/, '');
-    const enchantLevel = item.enchantLevel || 0;
+    const enchantMatch = (item.name || '').match(/\+(\d+)$/);
+    const enchantLevel = item.enchantLevel || (enchantMatch ? parseInt(enchantMatch[1]) : 0);
     const enchantSuffix = (isEquipment && enchantLevel) ? ` <span style="color:var(--gold);font-size:0.7rem">+${enchantLevel}</span>` : '';
     const safeBase = baseName.replace(/'/g, "\\'");
     return `
@@ -4268,10 +4269,12 @@ function showActiveProfession(c) {
 async function startTravel({ dest, continent, cost, seconds }) {
   const errEl = document.getElementById("travel-error");
   errEl.textContent = "";
+  const travelCost = Number(cost) || 0;
+  const travelSeconds = Number(seconds) || 0;
 
   // Check gold
   const gold = _charData?.gold ?? 0;
-  if (gold < cost) { errEl.textContent = `Not enough gold. You have ${gold} coins.`; return; }
+  if (gold < travelCost) { errEl.textContent = `Not enough gold. You have ${gold} coins.`; return; }
 
   // Check not already traveling
   if (_charData?.travelingUntil?.toDate && _charData.travelingUntil.toDate() > new Date()) {
@@ -4287,25 +4290,25 @@ async function startTravel({ dest, continent, cost, seconds }) {
   if (btn) { btn.disabled = true; btn.textContent = "DEPARTING..."; }
 
   try {
-    const arrivalTime = new Date(Date.now() + seconds * 1000);
+    const arrivalTime = new Date(Date.now() + travelSeconds * 1000);
     await updateDoc(doc(db, "characters", _uid), {
-      gold:          gold - cost,
+      gold:          gold - travelCost,
       travelingUntil: arrivalTime,
       travelDest:    dest,
       travelContinent: continent,
     });
     if (_charData) {
-      _charData.gold = gold - cost;
+      _charData.gold = gold - travelCost;
       _charData.travelingUntil = { toDate: () => arrivalTime };
       _charData.travelDest = dest;
       _charData.travelContinent = continent;
     }
-    set("stat-gold", gold - cost);
-    set("s-gold",    gold - cost);
+    set("stat-gold", gold - travelCost);
+    set("s-gold",    gold - travelCost);
     document.getElementById("travel-modal").style.display = "none";
     startTravelCountdown(arrivalTime, dest);
     window.showToast(`Traveling to ${dest}...`, "");
-    logActivity('🚶', `<b>Departed</b> for <b>${dest}</b>${cost > 0 ? ` · -${cost}💰` : ''}.`, '#5b9fe0');
+    logActivity('🚶', `<b>Departed</b> for <b>${dest}</b>${travelCost > 0 ? ` · -${travelCost}💰` : ''}.`, '#5b9fe0');
   } catch(err) {
     console.error(err);
     errEl.textContent = "Failed to travel. Try again.";
@@ -5873,6 +5876,8 @@ async function sellItem() {
     }
     await updateDoc(doc(db, "characters", _uid), { inventory: inv });
     _charData.inventory = inv;
+    window._allInvItems = inv;
+    window._refreshInvDisplay?.();
 
     window.showToast(`${item.name} listed for ${price} coins each.`, "success");
     logActivity('🏪', `<b>Listed on Market:</b> ${item.name} × ${qty} @ ${price}💰 each.`, '#c9a84c');
@@ -5905,8 +5910,10 @@ window.renderPlayerMarketListings = function() {
     return;
   }
   container.innerHTML = "";
+  let displayedAny = false;
   listings.forEach(l => {
     if (l.qty <= 0) return;
+    displayedAny = true;
     const el = document.createElement("div");
     el.className = "listing-card";
     const hasStatView = (l.itemType === 'weapon' || l.itemType === 'armor' || l.itemType === 'consumable' || l.itemType === 'equipment');
@@ -5925,6 +5932,9 @@ window.renderPlayerMarketListings = function() {
       <div style="margin-top:8px">${viewBtn}${buyBtn}</div>`;
     container.appendChild(el);
   });
+  if (!displayedAny) {
+    container.innerHTML = `<div class="listing-empty">No items found.</div>`;
+  }
 };
 
 window.filterPlayerMarketListings = function() {
@@ -5964,19 +5974,22 @@ window._buyListing = async (listingId, name, icon, price, type, maxQty) => {
     if (!listingId) { errEl.textContent = "Invalid listing. Please refresh the market."; return; }
 
     const btn = document.getElementById("btn-confirm-buy");
-    btn.disabled = true;
-    btn.textContent = "BUYING...";
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "BUYING...";
+    }
 
     try {
       // Call the secure Cloud Function
       const fnBuyListing = httpsCallable(functions, "buyListing");
       const result = await fnBuyListing({ listingId, qty });
 
-      // Locally update inventory and gold (will be refreshed from server soon)
+      // Locally update gold and inventory from the latest server state
       if (_charData) { _charData.gold = gold - totalPrice; }
+      await refreshCharData();
       window._allInvItems = _charData?.inventory || [];
       _syncAllDisplays(_charData);
-      window.renderInventory(_charData?.inventory || []);
+      window._refreshInvDisplay?.();
       document.getElementById("buy-modal").style.display = "none";
 
       window.showToast(`Purchased ${qty}x ${target.name}!`, "success");
@@ -5989,8 +6002,6 @@ window._buyListing = async (listingId, name, icon, price, type, maxQty) => {
       }
       // Refresh market so the purchased listing updates
       loadPlayerListings();
-      // Restore default _buyItem
-      window._buyItem = buyItem;
     } catch(e) {
       console.error("[_buyListing] Cloud Function error:", e);
       // Surface the actual error message from the Cloud Function
@@ -5999,8 +6010,10 @@ window._buyListing = async (listingId, name, icon, price, type, maxQty) => {
       // Also reload market in case listing is stale (e.g. already sold)
       loadPlayerListings();
     } finally {
-      btn.disabled = false;
-      btn.textContent = "BUY";
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "BUY";
+      }
     }
   };
 };
@@ -6571,7 +6584,6 @@ const PROF_RESOURCES = {
     rare:      ["Gold","Mythril","Palladium"],
     legendary: ["Titanium","Adamantium"],
     mythic:    ["Aetherium"],
-    deityMats: ["Scales of Equilibrium","The Void-Eye","Gem of Luminance"],
   },
   Forager:   {
     common:    ["Apples","Blueberries","Garlic","Melons","Golden Pears"],
@@ -6579,7 +6591,6 @@ const PROF_RESOURCES = {
     rare:      ["Spirit Plum","Frost Apples","Ember Fruit","Nightshade","Glowleaf","Spirit Herb","Jade Vine","Ghost Root"],
     legendary: ["Celestial Fig","Dragonfruit","Phoenix Bloom","Void Orchid"],
     mythic:    ["Eden's Tear"],
-    deityMats: ["Crimson Toad Moss","Branch of Soul Tree","Bloom Petals","Moon Petals"],
   },
   Herbalist: {
     common:    ["Mint Leaves","Soft Bark","Wild Herbs","Mushroom"],
@@ -6587,7 +6598,6 @@ const PROF_RESOURCES = {
     rare:      ["Ancient Herb","Spirit Root","Veilbloom"],
     legendary: ["Orb of Silence","Eye of All-knowing"],
     mythic:    ["Tears of The Endless Goldfish"],
-    deityMats: ["Ancient Scroll Fragments","White Mystic Woods","Truths","Crystallized Night Dews"],
   },
   Angler:    {
     common:    ["Trout","Carp","Catfish","Sardine","Pufferfish"],
@@ -6595,7 +6605,6 @@ const PROF_RESOURCES = {
     rare:      ["Shadowfish","Flamefish","Ying Koi"],
     legendary: ["Celestial Whale","Black Unagi"],
     mythic:    ["Cosmic Leviathan"],
-    deityMats: ["Oil-stained Feathers","Ephemeral Footprints","Devil-Spring Water"],
   },
   Hunter:    {
     common:    ["Raw Meat","Bone Fragments","Tough Hide","Feathers","Animal Fat"],
@@ -6603,7 +6612,6 @@ const PROF_RESOURCES = {
     rare:      ["Spirit Venison","Shadow Hide","Drake Meat","Beast Core","Phantom Feather","Blood Crystal"],
     legendary: ["Titan Heart","Divine Bull Essence","Heart of the Red Phoenix"],
     mythic:    ["Forgotten Desire Seed"],
-    deityMats: ["Iron Oaths","Broken Shackles","Verdict Quill","Volcanic Roots","Ash of Elder Trees"],
   },
 };
 
@@ -6645,33 +6653,10 @@ window._doGather = async function() {
     Herbalist: ["wisteria","arctic_willow","arctic_willow_west","asahi","wisteria forest","arctic willow","asahi valley"],
     Hunter:    ["wisteria","asahi","wisteria forest","asahi valley"],
   };
-  // Deity location → material mapping (location-specific, NOT profession-specific)
-  const DEITY_LOC_MATS = {
-    "shrine of secrets":       ["Ancient Scroll Fragments","White Mystic Woods","Truths"],           // God of Knowledge
-    "aurora basin":            ["Starlight Dust","Moon Petals","Crystallized Night Dews"],           // Goddess of Stars
-    "forgotten estuary":       ["Ephemeral Footprints","Oil-stained Feathers","Whispering Purple Sands"], // God of Darkness
-    "purgatory of light":      ["Volcanic Roots","Devil-Spring Water","Ash of Elder Trees"],         // God of Flames
-    "temple of verdict":       ["Broken Shackles","Iron Oaths","Verdict Quill"],                     // God of Justice
-    "heart garden":            ["Crimson Toad Moss","Branch of Soul Tree","Bloom Petals"],           // Goddess of Love
-    "valley of overflowing":   ["Golden Wheat Sheaves","Miracle Coins","Ancient Mint Seeds"],        // God of Abundance
-  };
-  // Find which deity location the player is at (if any)
-  let deityMatPool = null;
-  for (const [locKey, mats] of Object.entries(DEITY_LOC_MATS)) {
-    if (locKey.split(" ").every(word => loc.includes(word)) || loc.includes(locKey.split(" ")[0])) {
-      // More precise match: check majority of key words present
-      const words = locKey.split(" ").filter(w => w.length > 3);
-      if (words.length === 0 || words.some(w => loc.includes(w))) {
-        deityMatPool = mats;
-        break;
-      }
-    }
-  }
-  const isDeityLoc = deityMatPool !== null;
   const validZones = PROF_ZONES[prof] || [];
   const isAtResourceZone = validZones.some(z => loc.includes(z));
 
-  if (!isDeityLoc && !isAtResourceZone) {
+  if (!isAtResourceZone) {
     window.showToast(`Travel to a ${prof} resource zone on the World Map before gathering.`, "error");
     return;
   }
@@ -6701,67 +6686,57 @@ window._doGather = async function() {
     let found = null;
     const logLines = [];
 
-    if (isDeityLoc) {
-      // 10% chance to find a deity worship material (spec: 10% per shrine/location)
-      if (Math.random() < 0.10) {
-        const pool = deityMatPool || [];
-        found = pool[Math.floor(Math.random()*pool.length)];
-        logLines.push(`<div class="gather-log-entry success">✨ You found <strong>${found}</strong>! (Deity Worship Material)</div>`);
-      } else {
-        logLines.push(`<div class="gather-log-entry empty">🌑 You explored carefully... but found nothing.</div>`);
-      }
-    } else {
-      // Normal gather — roll rarity (luck potion + fairy race bias the roll toward rare)
-      const _luckM = _getLuckMult(_charData);
-      const _raceR2 = (_charData?.race || '').toLowerCase();
-      const _raceLk2 = (_raceR2.includes('fairy') || _raceR2.includes('spirit')) ? 1.10 : 1;
-      const _trackit = (_charData?.companion?.name || '').toLowerCase() === 'trackit' ? 1.10 : 1;
-      const _totalLuck = _luckM * _raceLk2 * _trackit;
-      // Bias the roll: higher luck shifts roll toward 0 (rare end)
-      const _rawRoll = Math.random() * 100;
-      const roll = Math.max(0, _rawRoll / _totalLuck);
-      let cumulative = 0;
-      let rarity = "common";
-      for (const [r, pct] of Object.entries(rates)) {
-        cumulative += pct;
-        if (roll < cumulative) { rarity = r; break; }
-      }
-      const pool = resources[rarity] || resources.common;
-      found = pool[Math.floor(Math.random()*pool.length)];
+    // Normal gather — always returns a profession item
+    const _luckM = _getLuckMult(_charData);
+    const _raceR2 = (_charData?.race || '').toLowerCase();
+    const _raceLk2 = (_raceR2.includes('fairy') || _raceR2.includes('spirit')) ? 1.10 : 1;
+    const _trackit = (_charData?.companion?.name || '').toLowerCase() === 'trackit' ? 1.10 : 1;
+    const _totalLuck = _luckM * _raceLk2 * _trackit;
+    // Bias the roll: higher luck shifts roll toward 0 (rare end)
+    const _rawRoll = Math.random() * 100;
+    const roll = Math.max(0, _rawRoll / _totalLuck);
+    let cumulative = 0;
+    let rarity = "common";
+    for (const [r, pct] of Object.entries(rates)) {
+      cumulative += pct;
+      if (roll < cumulative) { rarity = r; break; }
+    }
+    const pool = resources[rarity] || resources.common;
+    found = pool[Math.floor(Math.random()*pool.length)];
 
-      const rarityColors = { common:"#aaa", uncommon:"#70c090", rare:"#5b9fe0", legendary:"#c9a84c", mythic:"#d070e0" };
-      const col = rarityColors[rarity]||"#aaa";
+    const rarityColors = { common:"#aaa", uncommon:"#70c090", rare:"#5b9fe0", legendary:"#c9a84c", mythic:"#d070e0" };
+    const col = rarityColors[rarity]||"#aaa";
 
-      // Chance of finding 2+ items based on level
-      let count = 1;
-      const doubleChance = [0,0,30,50,70,100,100,100,100,100,100][Math.min(lvl,10)];
-      const tripleChance = [0,0,0,0,0,0,12,24,32,50,50][Math.min(lvl,10)];
-      if (Math.random()*100 < tripleChance) count = 3;
-      else if (Math.random()*100 < doubleChance) count = 2;
+    // Chance of finding 2+ items based on level
+    let count = 1;
+    const doubleChance = [0,0,30,50,70,100,100,100,100,100,100][Math.min(lvl,10)];
+    const tripleChance = [0,0,0,0,0,0,12,24,32,50,50][Math.min(lvl,10)];
+    if (Math.random()*100 < tripleChance) count = 3;
+    else if (Math.random()*100 < doubleChance) count = 2;
 
-      logLines.push(`<div class="gather-log-entry success">✅ You found <strong style="color:${col}">x${count} ${found}</strong>! <span style="font-size:10px;color:${col};text-transform:uppercase;">(${rarity})</span></div>`);
+    logLines.push(`<div class="gather-log-entry success">✅ You found <strong style="color:${col}">x${count} ${found}</strong>! <span style="font-size:10px;color:${col};text-transform:uppercase;">(${rarity})</span></div>`);
 
-      // Add to inventory
-      const inv = [...(_charData.inventory||[])];
-      const ex = inv.find(i=>i.name===found);
-      const _fIsEquip = getItemType(found)==='equipment';
-      if (ex && !_fIsEquip) { ex.qty += count; }
-      else { const _ni={name:found,qty:count,type:_fIsEquip?'equipment':getItemType(found)}; if(_fIsEquip) _ni.iid=Math.random().toString(36).slice(2,10)+Date.now().toString(36); inv.push(_ni); }
-      _charData.inventory = inv;
-      window._allInvItems = inv;
-      window._refreshInvDisplay();
+    // Add to inventory
+    const inv = [...(_charData.inventory||[])];
+    const ex = inv.find(i=>i.name===found);
+    const _fIsEquip = getItemType(found)==='equipment';
+    if (ex && !_fIsEquip) { ex.qty += count; }
+    else { const _ni={name:found,qty:count,type:_fIsEquip?'equipment':getItemType(found)}; if(_fIsEquip) _ni.iid=Math.random().toString(36).slice(2,10)+Date.now().toString(36); inv.push(_ni); }
+    _charData.inventory = inv;
+    window._allInvItems = inv;
+    window._refreshInvDisplay();
 
-      // Profession XP
-      const xpGain = { common:2, uncommon:5, rare:10, legendary:20, mythic:50 }[rarity]||2;
-      // Veil blessing: +X% EXP from all activities including gathering
-      const _veilGatherBonus = _charData?.deity === 'Veil' ? (1 + _getFaithBlessingPct(_charData)) : 1;
-      const xpGainFinal = Math.round(xpGain * _veilGatherBonus);
-      const newProfXp  = (_charData.professionXp||0) + xpGainFinal;
-      const profExpTable = [0,100,200,400,800,1600,3200,6400,12800,25600,51200];
-      const xpNeeded   = profExpTable[Math.min(lvl, profExpTable.length-2)] || 100;
-      let newProfLvl   = lvl;
-      let leveledProf  = false;
-      if (newProfXp >= xpNeeded && lvl < 10) { newProfLvl = lvl+1; leveledProf=true; }
+    // Profession XP
+    const xpGain = { common:2, uncommon:5, rare:10, legendary:20, mythic:50 }[rarity]||2;
+    // Veil blessing: +X% EXP from all activities including gathering
+    const _veilGatherBonus = _charData?.deity === 'Veil' ? (1 + _getFaithBlessingPct(_charData)) : 1;
+    const xpGainFinal = Math.round(xpGain * _veilGatherBonus);
+    const newProfXp  = (_charData.professionXp||0) + xpGainFinal;
+    const profExpTable = [0,100,200,400,800,1600,3200,6400,12800,25600,51200];
+    const xpNeeded   = profExpTable[Math.min(lvl, profExpTable.length-2)] || 100;
+    let newProfLvl   = lvl;
+    let leveledProf  = false;
+    if (newProfXp >= xpNeeded && lvl < 10) { newProfLvl = lvl+1; leveledProf=true; }
 
       // ── PET GROWTH SYSTEM ──
       // Updated Companion EXP/level curve
@@ -6826,26 +6801,13 @@ window._doGather = async function() {
       await _incrementQuest("gather", count);
       logActivity(
         {Miner:'⛏️',Forager:'🌿',Herbalist:'🌱',Angler:'🎣',Hunter:'🏹'}[prof]||'🔍',
-        `<b>${prof} Gathering</b> at <b>${_charData?.kingdom || _charData?.location || 'unknown location'}</b> · ${found ? `Found <b>${count}x ${found}</b> <span style="color:#aaa;font-size:0.85em">(${rarity})</span>` : 'Nothing found'}.`,
+        `<b>${prof} Gathering</b> at <b>${_charData?.kingdom || _charData?.location || 'unknown location'}</b> · Found <b>${count}x ${found}</b> <span style="color:#aaa;font-size:0.85em">(${rarity})</span>.`,
         '#a09080'
       );
       if (Math.random() < 0.30) _rollGatherEvent(prof);
-    }
 
-    if (isDeityLoc && found) {
-      const inv = [...(_charData.inventory||[])];
-      const ex = inv.find(i=>i.name===found);
-      const _dIsEquip = getItemType(found)==='equipment';
-      if (ex && !_dIsEquip) { ex.qty += 1; }
-      else { const _ni={name:found,qty:1,type:_dIsEquip?'equipment':getItemType(found)}; if(_dIsEquip) _ni.iid=Math.random().toString(36).slice(2,10)+Date.now().toString(36); inv.push(_ni); }
-      await updateDoc(doc(db,"characters",_uid), {inventory:inv});
-      _charData.inventory = inv;
-      window._allInvItems = inv;
-      window._refreshInvDisplay();
-    }
-
-    logEl.innerHTML = logLines.join("");
-  } catch(err) {
+      logEl.innerHTML = logLines.join("");
+    } catch(err) {
     console.error(err);
     logEl.innerHTML = `<div class="gather-log-entry empty">❌ Gather failed. Try again.</div>`;
   }
@@ -8510,11 +8472,18 @@ async function _clientBattleTurn(action, skillName) {
 
   // ── Flee ──
   if (action === 'flee') {
-    
     const fleeCost = 10;
     const newGold  = Math.max(0, (char.gold || 0) - fleeCost);
-    await updateDoc(doc(db, "characters", uid), { gold: newGold });
-    if (char) char.gold = newGold;
+    await updateDoc(doc(db, "characters", uid), {
+      gold: newGold,
+      hp: playerHp,
+      mana: playerMana,
+    });
+    if (char) {
+      char.gold = newGold;
+      char.hp   = playerHp;
+      char.mana = playerMana;
+    }
     await updateDoc(doc(db, "battles", uid), { status:"fled" });
     // Sync gold display
     set('stat-gold', newGold);
@@ -8623,17 +8592,18 @@ async function _clientBattleTurn(action, skillName) {
   }
 
   log.push(`👹 Monster HP: ${monster.hp} / ${monster.maxHp}`);
+  const activeState = { ...b, ...battleUpdates };
 
   // ── Summon tick ──
-  if (b.summonActive && b.summonTurns > 0) {
-    const intWithBuff = Math.round((stats.int || 10) * (1 + (b.buff_int || 0)));
-    const sumDmg   = Math.round(intWithBuff * (b.summonDmgPct || 0.40));
+  if (activeState.summonActive && activeState.summonTurns > 0) {
+    const intWithBuff = Math.round((stats.int || 10) * (1 + (activeState.buff_int || 0)));
+    const sumDmg   = Math.round(intWithBuff * (activeState.summonDmgPct || 0.40));
     monster.hp     = Math.max(0, monster.hp - sumDmg);
-    const newTurns = b.leviathanSummoned ? b.summonTurns : b.summonTurns - 1;  // Leviathan doesn't expire
+    const newTurns = activeState.leviathanSummoned ? activeState.summonTurns : activeState.summonTurns - 1;
     battleUpdates.summonActive = newTurns > 0;
     battleUpdates.summonTurns  = newTurns;
-    const label = b.leviathanSummoned ? 'Leviathan' : 'Summon';
-    log.push(`🐉 ${label} attacks for ${sumDmg}!${!b.leviathanSummoned ? ` (${newTurns} turns left)` : ''}`);
+    const label = activeState.leviathanSummoned ? 'Leviathan' : 'Summon';
+    log.push(`🐉 ${label} attacks for ${sumDmg}!${!activeState.leviathanSummoned ? ` (${newTurns} turns left)` : ''}`);
   }
 
   // ── Victory ──
@@ -8701,25 +8671,22 @@ async function _clientBattleTurn(action, skillName) {
   }
 
   // ── Monster turn (skip if stunned; skill-locked means it can only melee) ──
-  const isStunned     = b.monsterStunned     || battleUpdates.monsterStunned;
-  const isSkillLocked = b.monsterSkillLocked || battleUpdates.monsterSkillLocked;
+  const isStunned     = activeState.monsterStunned;
+  const isSkillLocked = activeState.monsterSkillLocked;
   if (isStunned) {
     log.push(`💫 Monster is stunned — skips their turn!`);
     battleUpdates.monsterStunned = false;
   } else {
     const _monDefMit = Math.min(Math.floor((stats.def||10) * 0.3), Math.floor(monster.atk * 0.75));
-    // Apply DEF buffs from player
-    const buffDefFactor = b.buff_def ? (1 + b.buff_def) : 1;
+    const buffDefFactor = activeState.buff_def ? (1 + activeState.buff_def) : 1;
     let monDmg = Math.max(Math.ceil(monster.atk * 0.25), Math.round((monster.atk - _monDefMit) / buffDefFactor));
-    // If skill-locked, monster is reduced to a weaker basic attack (50% damage)
     if (isSkillLocked) {
       monDmg = Math.max(1, Math.round(monDmg * 0.50));
       battleUpdates.monsterSkillLocked = false;
       log.push(`🔇 Monster's skills are locked — basic attack only!`);
     }
-    // Apply shield
-    if (b.shieldPct) {
-      const blocked = Math.round(monDmg * b.shieldPct);
+    if (activeState.shieldPct) {
+      const blocked = Math.round(monDmg * activeState.shieldPct);
       monDmg = Math.max(0, monDmg - blocked);
       battleUpdates.shieldPct = 0;
       log.push(`🛡️ Shield absorbed ${blocked} damage!`);
@@ -8754,7 +8721,7 @@ async function _clientBattleTurn(action, skillName) {
 async function _clientAutoBattle(grade, maxTurns=15, zoneName=null) {
   const uid  = auth.currentUser.uid;
   const char = _charData;
-  const stats = char.stats || { str:10, int:10, def:10, dex:10 };
+  const stats = _resolveCombatStats(char);
   const primary = _getPrimaryStat(char.charClass, stats);
   const monster = _generateMonster(grade, zoneName);
   const log = [`⚔️ Auto-battle started vs ${monster.name}!`];
@@ -8798,7 +8765,6 @@ async function _clientAutoBattle(grade, maxTurns=15, zoneName=null) {
     }
 
     if (usedSkill) {
-      playerMana -= (usedSkill.mana || 0);
       // Use the real skill engine for effect
       const result = _applySkill(usedSkill.name, playerHp, playerMana, playerHpMax, monster, stats, battleState);
       playerHp   = result.playerHp;
@@ -9136,9 +9102,14 @@ function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stat
       break;
     }
     case "cleanse": {
-      // Remove all active debuffs on the player
-      updates.dotActive   = false; updates.dotTurns = 0;
-      // Also clear any player-side debuffs if they exist
+      // Remove all active player debuffs and refresh status
+      updates.dotActive       = false;
+      updates.dotTurns        = 0;
+      updates.dotLabel        = null;
+      updates.dotPct          = 0;
+      updates.dotLifesteal    = false;
+      updates.deathMark       = false;
+      updates.deathMarkBonus  = 0;
       log.push(`✨ ${skillName}: All debuffs cleared!`);
       break;
     }
@@ -9480,7 +9451,6 @@ function _launchAutoBattleLoop(grade, zoneName) {
 
       let dmg = 0;
       if (usedSkill) {
-        playerMana -= (usedSkill.mana || 0);
         // Clone monster with correct hp for _applySkill
         const monsterSnap = { ...monster, hp: monHp };
         const result = _applySkill(usedSkill.name, playerHp, playerMana, playerHpMax, monsterSnap, stats, battleState);
@@ -9814,7 +9784,7 @@ function showBattleResult(d) {
   }
 
   if (d.status === 'defeat') {
-    window.showToast('You were defeated. Resurrect in 24 hours.', 'error');
+    window.showToast('You were defeated. Resurrect in 5 hours.', 'error');
     checkDeathState();
   }
   // Activity log
@@ -9943,7 +9913,7 @@ function addBattleLog(msg) {
  
 window._resurrect = async function() {
   const btn = document.getElementById('btn-resurrect');
-  btn.disabled = true; btn.textContent = 'RESURRECTING...';
+  if (btn) { btn.disabled = true; btn.textContent = 'RESURRECTING...'; }
 
   try {
     const result = await fnResurrect({});
@@ -9952,7 +9922,8 @@ window._resurrect = async function() {
     document.getElementById('battle-dead-banner').style.display = 'none';
   } catch(err) {
     window.showToast(err.message || 'Cannot resurrect yet.', 'error');
-    btn.disabled = false; btn.textContent = 'RESURRECT';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'RESURRECT'; }
   }
 };
 
@@ -12096,7 +12067,7 @@ window.CANONICAL_POTION_RECIPES = {
     { name:"Greater EXP Potion", icon:"🌟", type:"Insight", effect:"+20 EXP gain", cost:200, requires:[{name:"Spirit Herb",qty:2},{name:"Ghost Root",qty:1}] },
   ],
   Other: [
-    { name:"Resurrection Potion", icon:"💀", effect:"Instantly revive from death without waiting 24 hours. Restores HP and Mana to full. Can be used from the death screen.", cost:5000 },
+    { name:"Resurrection Potion", icon:"💀", effect:"Instantly revive from death without waiting 5 hours. Restores HP and Mana to full. Can be used from the death screen.", cost:5000 },
     { name:"Class Reset Potion", icon:"⚗️", effect:"Allows players to reset class, and thus, skilltree. Keeps stat points that have been gathered prior.", cost:5000 },
     { name:"Race Rebirth Potion", icon:"🌀", effect:"Allows players to change their race.", cost:10000 },
     { name:"Divine Shift Potion", icon:"✨", effect:"Allows players to change their Deity. However, this results in a reset of “Faith level” too.", cost:15000 },
