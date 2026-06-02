@@ -3305,9 +3305,10 @@ window.openStanceEditor = function(idx) {
       const isSelected = selected.has(sk.name);
       const isLocked = !t.unlocked;
       const manaLabel = data.mana > 0 ? `${data.mana} MP` : 'Free';
+      const safeSkillName = sk.name.replace(/'/g, "\\'");
       return `<div class="stance-pool-skill${isSelected ? ' selected' : ''}${isLocked ? ' locked-skill' : ''}"
-                   data-skill="${sk.name}"
-                   onclick="${isLocked ? '' : `stanceToggleSkill(this,'${sk.name}')`}">
+                   data-skill="${sk.name.replace(/"/g, '&quot;')}"
+                   onclick="${isLocked ? '' : `stanceToggleSkill(this,'${safeSkillName}')`}">
         <div class="stance-pool-skill-check">${isSelected ? '✓' : ''}</div>
         <div class="stance-pool-skill-info">
           <div class="stance-pool-skill-name">${sk.name}</div>
@@ -8768,8 +8769,20 @@ async function _clientAutoBattle(grade, maxTurns=15, zoneName=null) {
     .map(n => ({ name: n, ...(SKILL_DATA[n] || {}) }))
     .filter(s => s.type); // only known skills
   let skillIdx = 0;
+  let battleState = {}; // tracks buffs/DoT/debuffs across turns
 
   while (turn < maxTurns && monHp > 0 && playerHp > 0) {
+    // ── Tick DoT on monster ──
+    if (battleState.dotActive && battleState.dotTurns > 0) {
+      const dotDmg = Math.round((monster.maxHp || monster.hp) * (battleState.dotPct || 0.10));
+      monHp = Math.max(0, monHp - dotDmg);
+      battleState.dotTurns--;
+      if (battleState.dotTurns <= 0) battleState.dotActive = false;
+      if (battleState.dotLifesteal) playerHp = Math.min(playerHpMax, playerHp + dotDmg);
+      log.push(`🩸 ${battleState.dotLabel||'Poison'}: ${dotDmg} dmg to monster!`);
+      if (monHp <= 0) { status = 'victory'; break; }
+    }
+
     // Pick action: try next affordable skill, else melee
     let dmg = 0;
     let usedSkill = null;
@@ -8787,12 +8800,13 @@ async function _clientAutoBattle(grade, maxTurns=15, zoneName=null) {
     if (usedSkill) {
       playerMana -= (usedSkill.mana || 0);
       // Use the real skill engine for effect
-      const result = _applySkill(usedSkill.name, playerHp, playerMana, playerHpMax, monster, stats, {});
-      dmg = result.playerDmg;
-      playerHp = result.playerHp;
+      const result = _applySkill(usedSkill.name, playerHp, playerMana, playerHpMax, monster, stats, battleState);
+      playerHp   = result.playerHp;
       playerMana = result.playerMana;
-      monHp = Math.max(0, monHp - dmg);
-      log.push(`✨ Turn ${turn+1}: ${usedSkill.name} — ${dmg} dmg. MP: ${playerMana}`);
+      monHp      = result.monsterHp;
+      Object.assign(battleState, result.updates);
+      const dmgLabel = result.playerDmg > 0 ? `${result.playerDmg} dmg` : 'applied';
+      log.push(`✨ Turn ${turn+1}: ${usedSkill.name} — ${dmgLabel}. MP: ${playerMana}`);
     } else {
       dmg = Math.max(1, primary - Math.floor(monster.def*0.5));
       monHp = Math.max(0, monHp - dmg);
@@ -9728,7 +9742,7 @@ function showBattleArena(monster, playerHp, playerMana) {
         return `
           <div class="skill-menu-item${usable ? '' : ' skill-locked-mana'}"
                style="opacity:${usable?'1':'0.4'};cursor:${usable?'pointer':'not-allowed'}"
-               ${usable ? `onclick=\"doBattleTurn('skill','${s}');closeSkillMenu()\"` : ''}>
+               ${usable ? `onclick=\"doBattleTurn('skill','${s.replace(/'/g, "\\\\'")}');closeSkillMenu()\"` : ''}>
             <span class="skill-menu-item-name">${s}</span>
             <span style="display:flex;gap:6px;align-items:center">${manaLabel}${lockLabel}</span>
           </div>`;
@@ -9785,7 +9799,7 @@ window._battleTurn = async function(action, skillName) {
 };
 
 function showBattleResult(d) {
-  
+  _currentBattle = null; // unblock passive regen now that the fight is over
   document.getElementById('battle-arena').style.display  = 'none';
   document.getElementById('battle-result').style.display = 'block';
   document.getElementById('auto-battle-bar').style.display = 'none';
@@ -9853,10 +9867,29 @@ function _renderBattlePotionStrip() {
 
 // Use a potion from the battle strip — calls existing useItem then re-renders strip + battle bars
 window._useBattlePotion = async function(itemName, kind) {
-  // Sync the live battle HP/Mana into _charData before useItem reads it,
-  // otherwise useItem sees stale (often max) values and heals for 0.
-  if (_charData && window._autoBattleLiveHp !== undefined)  _charData.hp   = window._autoBattleLiveHp;
-  if (_charData && window._autoBattleLiveMana !== undefined) _charData.mana = window._autoBattleLiveMana;
+  // Sync the live battle HP/Mana into _charData before useItem reads it.
+  // In auto-battle: _autoBattleLiveHp is kept up-to-date by the battle loop.
+  // In manual Fight: the live values live in the Firestore battles doc — read them now.
+  if (_charData) {
+    if (window._autoBattleLiveHp !== undefined) {
+      _charData.hp   = window._autoBattleLiveHp;
+    } else {
+      // Manual Fight mode — read current HP/Mana from the battles doc
+      try {
+        const uid = auth.currentUser?.uid;
+        if (uid) {
+          const bSnap = await getDoc(doc(db, 'battles', uid));
+          if (bSnap.exists()) {
+            const bData = bSnap.data();
+            if (bData.playerHp   !== undefined) _charData.hp   = bData.playerHp;
+            if (bData.playerMana !== undefined) _charData.mana = bData.playerMana;
+          }
+        }
+      } catch(_) {}
+    }
+    if (window._autoBattleLiveMana !== undefined) _charData.mana = window._autoBattleLiveMana;
+  }
+
   await window.useItem(itemName, 'potion');
   _autoBattlePotionPending = true; // signal the auto-battle loop to pick up the healed values
 
@@ -10948,6 +10981,15 @@ window.doRaidTurn = function(action, skillName) {
             s.boss._reflect = 0;
             s.log.push(`🪞 Reflected! ${me.name} takes ${rDmg} damage back!`);
           }
+        } else if (sk.type === 'dot') {
+          s.boss._dotActive  = true;
+          s.boss._dotPct     = sk.dotPct  || 0.10;
+          s.boss._dotTurns   = sk.dotTurns || 3;
+          s.boss._dotLabel   = sk.dotLabel || 'Poison';
+          s.boss._dotLifesteal = sk.lifesteal || false;
+          s.boss._dotHealer  = me.uid || me.name; // track who applied it (for lifesteal)
+          const dotAppliedLabel = `${Math.round((sk.dotPct||0.10)*100)}%×${sk.dotTurns||3} turns`;
+          s.log.push(`🩸 ${me.name} uses ${skillName} — ${s.boss._dotLabel} applied! (${dotAppliedLabel})`);
         } else if (sk.type === 'heal' || sk.type === 'hot') {
           const _healPct = sk.healPct || 0.15;
           const _glimmerRaid = (me.companion || '').toLowerCase() === 'glimmer' ? 1.15 : 1;
@@ -11011,6 +11053,23 @@ window.doRaidTurn = function(action, skillName) {
       s.boss._berserked = true;
       s.boss.atk = Math.round(s.boss.atk * 2);
       s.log.push(`💢 ${s.boss.name} crosses the threshold — BERSERK! Attack permanently doubled!`);
+    }
+
+    // ── Tick DoT on boss ──
+    if (s.boss._dotActive && s.boss._dotTurns > 0) {
+      const dotDmg = Math.round(s.boss.maxHp * (s.boss._dotPct || 0.10));
+      s.boss.hp = Math.max(0, s.boss.hp - dotDmg);
+      s.boss._dotTurns--;
+      if (s.boss._dotTurns <= 0) s.boss._dotActive = false;
+      const turnsLeft = s.boss._dotTurns;
+      s.log.push(`🩸 ${s.boss._dotLabel||'Poison'}: ${dotDmg} dmg to ${s.boss.name}!${turnsLeft > 0 ? ` (${turnsLeft} turn${turnsLeft===1?'':'s'} left)` : ' (expired)'}`);
+      if (s.boss.hp <= 0) {
+        s.status = 'victory';
+        s.log.push(`🏆 ${s.boss.name} has been slain!`);
+        _refreshRaidUI();
+        updateDoc(doc(db, 'parties', _partyId), { 'raid.state': s });
+        return;
+      }
     }
 
     // Boss uses ability every 3 turns, otherwise basic attack
@@ -12610,7 +12669,7 @@ function _calcPassiveRegen(hp, mana, hpMax, manaMax, minutes) {
 
 /** Returns true when regen should be blocked. */
 function _regenBlocked() {
-  return !!(_charData?.isDead) || !!_autoBattleRunning;
+  return !!(_charData?.isDead) || !!_autoBattleRunning || !!_currentBattle;
 }
 
 /**

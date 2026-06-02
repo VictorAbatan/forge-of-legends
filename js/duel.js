@@ -407,7 +407,9 @@ export async function doDuelTurn(duelId, action, extraArg) {
     myState = { ...myState, stunned: false };
     const stunNextUid  = actingAsNpc ? duel.challengerId   : (isChallenger ? duel.targetId    : duel.challengerId);
     const stunNextName = actingAsNpc ? duel.challengerName : (isChallenger ? duel.targetName  : duel.challengerName);
-    const stunRound    = actingAsNpc ? duel.round + 1      : (isChallenger ? duel.round       : duel.round + 1);
+    // Always increment the round on a stun-skip — whoever is about to act next
+    // is the same as a normal turn transition, so the round must advance.
+    const stunRound = duel.round + 1;
     const _tab2   = duel.chatTab        || _chatTab        || 'rp';
     const _locId2 = duel.chatLocationId || _chatLocationId || '';
     await updateDoc(duelRef, { round: stunRound, currentTurnUid: stunNextUid, [myStateKey]: myState });
@@ -416,6 +418,42 @@ export async function doDuelTurn(duelId, action, extraArg) {
     await _postEventBubble(_tab2, _locId2, duelId,
       `🔔 Round ${stunRound} — <b>${stunNextName}</b>'s turn!`, '🔔');
     return;
+  }
+
+  // ── Tick DoT on ME (applied by opponent on a previous turn) ──
+  // This fires before I act, so poison bites before I can respond.
+  if (myState.dotActive && myState.dotTurns > 0) {
+    const dotDmg    = Math.max(1, Math.round(me.maxHp * (myState.dotPct || 0.10)));
+    myHp            = Math.max(0, myHp - dotDmg);
+    const turnsLeft = myState.dotTurns - 1;
+    myState         = { ...myState, dotTurns: turnsLeft, dotActive: turnsLeft > 0 };
+    const oppDisplayForDot = actingAsNpc
+      ? (duel.challengerName || opp?.name || 'opponent')
+      : (opp?.name || (isChallenger ? duel.targetName : duel.challengerName) || 'opponent');
+    // If opponent has lifesteal, heal them too
+    if (myState.dotLifesteal) {
+      oppHp = Math.min(opp?.maxHp || oppHp, oppHp + dotDmg);
+    }
+    await _postEventBubble(_tab2, _locId2, duelId,
+      `🩸 <b>${meDisplayName || 'Fighter'}</b> takes <span class="duel-dmg">${dotDmg}</span> ${myState.dotLabel||'Poison'} damage! (${turnsLeft} turn${turnsLeft===1?'':'s'} left)`, '🩸');
+    // Check if DoT killed me
+    if (myHp <= 0) {
+      const myHpKey2   = actingAsNpc ? 'targetHp'     : (isChallenger ? 'challengerHp'   : 'targetHp');
+      const oppHpKey2  = actingAsNpc ? 'challengerHp' : (isChallenger ? 'targetHp'       : 'challengerHp');
+      const winnerName2 = oppDisplayForDot;
+      const loserName2  = meDisplayName || 'Fighter';
+      await updateDoc(duelRef, {
+        [myHpKey2]:   0,
+        [oppHpKey2]:  oppHp,
+        [myStateKey]: myState,
+        status: 'complete', winnerId: actingAsNpc ? duel.challengerId : (isChallenger ? duel.targetId : duel.challengerId),
+        winnerName: winnerName2, loserName: loserName2,
+        currentTurnUid: null,
+      });
+      await _postEventBubble(_tab2, _locId2, duelId,
+        `💀 <b>${loserName2}</b> has been slain by poison! <b>${winnerName2}</b> wins!`, '🏆');
+      return;
+    }
   }
 
   // Safe display names — fall back to duel doc names so Firestore IDs never leak.
@@ -487,9 +525,13 @@ export async function doDuelTurn(duelId, action, extraArg) {
     } else if (sk.type === 'buff') {
       eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — power surges!`;
     } else if (sk.type === 'dot') {
-      dmg = Math.max(1, Math.round(_calcDamage(me, opp) * (sk.dotPct || 0.15)));
-      oppHp = Math.max(0, oppHp - dmg);
-      eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — dealing <span class="duel-dmg">${dmg}</span> damage!`;
+      oppStateUpd.dotActive    = true;
+      oppStateUpd.dotPct       = sk.dotPct   || 0.10;
+      oppStateUpd.dotTurns     = sk.dotTurns || 3;
+      oppStateUpd.dotLabel     = sk.dotLabel || 'Poison';
+      oppStateUpd.dotLifesteal = sk.lifesteal || false;
+      const dotApplyLabel = `${Math.round((sk.dotPct||0.10)*100)}%×${sk.dotTurns||3} turns`;
+      eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — <span style="color:#c97fff">${oppStateUpd.dotLabel} applied!</span> (${dotApplyLabel})`;
     } else if (sk.type === 'shield') {
       const shielded = Math.round(me.maxHp * (sk.shieldPct || 0.15));
       myHp = Math.min(me.maxHp, myHp + shielded);
@@ -527,12 +569,11 @@ export async function doDuelTurn(duelId, action, extraArg) {
   const normalNextUid  = actingAsNpc ? duel.challengerId   : (isChallenger ? duel.targetId    : duel.challengerId);
   const normalNextName = actingAsNpc ? duel.challengerName : (isChallenger ? duel.targetName  : duel.challengerName);
 
-  // If we just stunned the opponent, keep the turn with the current player
-  const justStunned = oppStateUpd.stunned === true;
-  const nextUid  = justStunned ? duel.currentTurnUid : normalNextUid;
-  const nextName = justStunned ? meDisplayName       : normalNextName;
-  const newRound = justStunned ? duel.round
-    : (actingAsNpc ? duel.round + 1 : (isChallenger ? duel.round : duel.round + 1));
+  // Stun: opponent already has stunned=true in oppStateUpd — they lose their NEXT turn.
+  // We do NOT keep the current player's turn; just pass normally so both sides advance fairly.
+  const nextUid  = normalNextUid;
+  const nextName = normalNextName;
+  const newRound = actingAsNpc ? duel.round + 1 : (isChallenger ? duel.round : duel.round + 1);
 
   const isDuelOver = oppHp <= 0;
 
@@ -1011,9 +1052,10 @@ export function openDuelStancePicker(duelId) {
         const sk  = _skillRegistry[skillName] || {};
         const cost = sk.mana ?? 0;
         const ok  = myMana >= cost;
+        const safeSkillName = skillName.replace(/'/g, "\\'");
         return `
           <div class="duel-skill-item ${ok ? '' : 'duel-skill-locked'}"
-            ${ok ? `onclick="window.duelTurn('${duelId}','skill','${skillName}');window.closeDuelSkillPicker()"` : ''}>
+            ${ok ? `onclick="window.duelTurn('${duelId}','skill','${safeSkillName}');window.closeDuelSkillPicker()"` : ''}>
             <div class="duel-skill-name">${skillName}</div>
             <div class="duel-skill-meta">
               <span style="color:${ok ? '#6ab0f5' : '#e05555'}">${cost} MP</span>
@@ -1373,6 +1415,70 @@ function _calcDamage(me, opp, skillType = null) {
 }
 
 // ── Build combatant objects ────────────────────────
+
+// ── Equipment stat tables (mirrors dashboard.js — must stay in sync) ─────────
+const EQUIP_WEAPON_STATS = {
+  // E-GRADE
+  "Rusted Greatsword":{str:7}, "Crude Bow":{dex:6}, "Iron Dagger":{dex:5}, "Apprentice Wand":{int:8},
+  "Shortblade":{str:6}, "Bone Mace":{str:7}, "Hunter Knife":{dex:6}, "Quartz Rod":{int:9},
+  "Tin Blade":{str:5}, "Feather Knife":{dex:6},
+  // D-GRADE
+  "Obsidian Greatsword":{str:14,dex:5}, "Silver Wand":{int:12,dex:6}, "Longbow":{dex:13,str:5},
+  "Twin Daggers":{dex:11,str:6}, "Warhammer":{str:15,def:4}, "Arc Rod":{int:14,str:5},
+  "Bronze Blade":{str:13,dex:6}, "Hunter Bow":{dex:12,int:5}, "Spiked Mace":{str:14,dex:5},
+  "Mystic Knife":{dex:13,int:6},
+  // C-GRADE
+  "Silver Greatsword":{str:25,dex:8}, "Arcane Staff":{int:28,dex:10}, "Composite Bow":{dex:26,str:9},
+  "Assassin Daggers":{dex:27,int:8}, "Mystic Blade":{str:24,int:11}, "Spellknife":{dex:23,int:12},
+  "Dagon Bow":{dex:25,str:9}, "Bronze Cleaver":{str:28,dex:7}, "Dark Rod":{int:29,str:6}, "War Maul":{str:30,dex:5},
+  // B-GRADE
+  "Myth-Blade":{str:48,dex:15}, "High-Scepter":{int:50,str:14}, "Draconic Bow":{dex:47,str:16},
+  "Shadow-Strike":{dex:46,int:18}, "Warbreaker":{str:52,dex:10}, "Mystic Jian":{str:45,int:20},
+  "Phantom Longbow":{dex:48,int:14}, "Spellhammer":{str:51,int:12}, "Venom Daggers":{dex:47,str:16},
+  "Ancient Wand":{int:53,dex:10},
+  // A-GRADE
+  "Eragon-blade":{str:70,dex:20}, "Void-Steel":{str:75,def:15}, "Star Lance":{int:78,dex:18},
+  "Crack":{dex:68,int:22}, "Divine Fall":{str:72,int:20}, "Nether-Bow":{dex:69,str:19},
+  "Holy Relic":{int:77,str:16}, "Realm Cleaver":{str:74,dex:18}, "BeastFang":{dex:71,str:20},
+  "Scion":{str:73,int:17},
+  // S-GRADE
+  "Abjuration":{str:100,dex:40,int:30}, "Genesis":{int:100,str:35,dex:35}, "Longinus":{dex:100,str:40,int:25},
+  "Jingu Bang":{dex:100,int:45,str:20}, "Ragnarok":{str:100,dex:30,int:30}, "Godslayer":{int:100,str:30,dex:30},
+  "Durandal":{str:100,dex:35,int:20}, "Excalibur":{str:100,int:25,dex:35}, "Bane":{dex:100,int:35,str:25},
+  "Judgment":{int:100,str:30,dex:30},
+};
+const EQUIP_ARMOR_STATS = {
+  // E-GRADE
+  "Leather Vest":{def:6}, "Iron Plate":{def:8}, "Bone Armor":{def:7}, "Fur Coat":{def:5},
+  "Hide Armor":{def:6}, "Feather Cloak":{def:5}, "Tin Armor":{def:7}, "Copper Plate":{def:6},
+  "Marble Guard":{def:8}, "Obsidian Layer":{def:9},
+  // D-GRADE
+  "Steel Armor":{def:15,hp:7}, "Reinforced Leather":{def:13,hp:6}, "Silver Guard":{def:14,hp:7},
+  "Bone Plate":{def:16,hp:8}, "Fur Armor":{def:12,hp:6}, "Horned Armor":{def:17,hp:9},
+  "Scale Vest":{def:15,hp:7}, "Bronze Armor":{def:16,hp:8}, "Obsidian Plate":{def:18,hp:9},
+  "Marble Armor":{def:14,hp:6},
+  // C-GRADE
+  "Shining Armor":{def:30,hp:15}, "Bronze Cuirass":{def:32,hp:18}, "Jagged Chainmail":{def:28,hp:14},
+  "Bone Fortress":{def:31,hp:16}, "Obsidian Vest":{def:33,hp:17}, "Reptilian Scale":{def:29,hp:14},
+  "Shadow Cloak":{def:27,hp:13}, "Golden Cape":{def:26,hp:12}, "Warlord Hide":{def:30,hp:15},
+  "Arcane Shell":{def:34,hp:19},
+  // B-GRADE
+  "Void-Spell Armor":{def:50,hp:30}, "Golden Scales":{def:48,hp:25}, "Night Cloak":{def:45,hp:28},
+  "Spirit-Ward":{def:52,hp:35}, "Paladin's Mantle":{def:44,hp:24}, "Draconic Robe":{def:49,hp:27},
+  "Titanic Hide":{def:54,hp:39}, "Golden Warplate":{def:53,hp:36}, "Mythic Cuirass":{def:46,hp:26},
+  "Quintessence Mantle":{def:51,hp:33},
+  // A-GRADE
+  "Heart Hide":{def:75,hp:55}, "Destroyer Mantle":{def:79,hp:59}, "Chaos-garb":{def:68,hp:47},
+  "Devastator Armor":{def:66,hp:45}, "Tectonic-Mail":{def:72,hp:50}, "Elemental Shroud":{def:74,hp:52},
+  "Colossal Veil":{def:78,hp:58}, "Realm-Bound Tunic":{def:70,hp:49}, "Serpentine-Robe":{def:65,hp:44},
+  "Vasto-Shell":{def:76,hp:54},
+  // S-GRADE
+  "Saturn":{def:100,hp:80}, "Unshadowed":{def:100,hp:70}, "Null":{def:100,hp:78},
+  "Dominion":{def:100,hp:80}, "Godshroud":{def:100,hp:68}, "Oblivion":{def:100,hp:75},
+  "Gungnir":{def:100,hp:76}, "Imperium":{def:100,hp:79}, "Worldshell":{def:100,hp:74},
+  "Eternity":{def:100,hp:77},
+};
+
 // ── Skill registry — canonical source of truth for mana costs and effects.
 // Defined here (not just in dashboard.js) so duel.js works correctly on
 // both the player dashboard AND the deity dashboard, where dashboard.js
@@ -1471,6 +1577,46 @@ const BATTLE_SKILLS = {
 function _buildCombatant(d, uid) {
   // Firestore rejects undefined — every field must have a concrete fallback
   const resolvedName = d.name || d.charName || d.displayName || '';
+
+  // Player character docs store stats under d.stats; NPC docs may store them flat.
+  // Always prefer d.stats.<key> with fallback to flat d.<key>.
+  const baseStats = d.stats || {};
+  const baseStr = Number(baseStats.str ?? d.str ?? 10);
+  const baseDex = Number(baseStats.dex ?? d.dex ?? 8);
+  const baseInt = Number(baseStats.int ?? d.int ?? 8);
+  const baseDef = Number(baseStats.def ?? d.def ?? 5);
+
+  // Apply equipment bonuses from the character's equipped weapon/armor.
+  // EQUIP_WEAPON_STATS and EQUIP_ARMOR_STATS are defined below in duel.js.
+  let equipStr = 0, equipDex = 0, equipInt = 0, equipDef = 0;
+  if (d.equipment?.weapon) {
+    const wBase = d.equipment.weapon.replace(/\s*\+\d+$/, '').trim();
+    const w = EQUIP_WEAPON_STATS[wBase];
+    if (w) { equipStr += w.str||0; equipDex += w.dex||0; equipInt += w.int||0; equipDef += w.def||0; }
+  }
+  if (d.equipment?.armor) {
+    const aBase = d.equipment.armor.replace(/\s*\+\d+$/, '').trim();
+    const a = EQUIP_ARMOR_STATS[aBase];
+    if (a) { equipStr += a.str||0; equipDex += a.dex||0; equipInt += a.int||0; equipDef += a.def||0; }
+  }
+  // Dwarf/Titan race bonus: +10%/+20% to gear stats
+  const racePct = _getDuelRaceEquipBonus(d.race);
+  if (racePct > 0) {
+    equipStr = Math.round(equipStr * (1 + racePct));
+    equipDex = Math.round(equipDex * (1 + racePct));
+    equipInt = Math.round(equipInt * (1 + racePct));
+    equipDef = Math.round(equipDef * (1 + racePct));
+  }
+
+  // Race stat bonuses (mirrors dashboard.js _resolveCombatStats)
+  const race = (d.race || '').toLowerCase();
+  let finalStr = baseStr + equipStr;
+  let finalDex = baseDex + equipDex;
+  let finalInt = baseInt + equipInt;
+  let finalDef = baseDef + equipDef;
+  if (race.includes('orc') || race.includes('warlord'))  finalStr = Math.round(finalStr * 1.10);
+  if (race.includes('undead') || race.includes('lich'))  finalDef = Math.round(finalDef * 1.10);
+
   return {
     uid:       uid       || '',
     name:      resolvedName || 'Fighter',
@@ -1483,13 +1629,21 @@ function _buildCombatant(d, uid) {
     maxHp:     Number(d.hpMax  ?? d.hp     ?? 100),
     mana:      Number(d.mana   ?? d.manaMax ?? 50),
     maxMana:   Number(d.manaMax ?? d.mana   ?? 50),
-    str:       Number(d.str ?? 10),
-    dex:       Number(d.dex ?? 8),
-    int:       Number(d.int ?? 8),
-    def:       Number(d.def ?? 5),
+    str:       finalStr,
+    dex:       finalDex,
+    int:       finalInt,
+    def:       finalDef,
     // Carry stances so acceptNpcDuelChallenge stance fallback works correctly
     stances:   d.stances || [],
   };
+}
+
+function _getDuelRaceEquipBonus(race) {
+  if (!race) return 0;
+  const r = race.toLowerCase();
+  if (r.includes('titan')) return 0.20;
+  if (r.includes('dwarf')) return 0.10;
+  return 0;
 }
 function _buildFallbackCombatant(uid, name) {
   return { uid, name, avatarUrl: '', charClass: 'Warrior', rank: '?', level: 1,
