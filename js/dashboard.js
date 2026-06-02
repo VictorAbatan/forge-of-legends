@@ -1489,7 +1489,12 @@ window.renderFactionQuestsPanel = function(force) {
               if (quest) {
                 window._factionQuestDone = window._factionQuestDone || {};
                 window._factionQuestDone[data.questId] = true;
-                _applyReward(quest.reward?.exp||0, quest.reward?.gold||0, (quest.reward?.items?.[0]||null));
+                // Deliver ALL reward items, not just the first
+                if (quest.reward?.items?.length > 1) {
+                  _applyRewardMulti(quest.reward?.exp||0, quest.reward?.gold||0, quest.reward.items);
+                } else {
+                  _applyReward(quest.reward?.exp||0, quest.reward?.gold||0, (quest.reward?.items?.[0]||null));
+                }
                 window.showToast(`✅ Faction Quest complete: ${quest.title}! +${quest.reward?.gold||0} gold · +${quest.reward?.exp||0} EXP`, "success");
               }
             }
@@ -3846,7 +3851,16 @@ window.filterInv = function(btn, type) {
 window._refreshInvDisplay = function() {
   const all = window._allInvItems || [];
   const type = window._activeInvTab || "all";
-  const filtered = type === "all" ? all : all.filter(item => getItemType(item.name) === type);
+  // Exclude currently-equipped items from inventory display (they show in the equip panel)
+  const equippedWeapon = (window._charData?.equipment?.weapon || '').replace(/\s*\+\d+$/, '').trim().toLowerCase();
+  const equippedArmor  = (window._charData?.equipment?.armor  || '').replace(/\s*\+\d+$/, '').trim().toLowerCase();
+  const withoutEquipped = all.filter(item => {
+    const base = (item.name || '').replace(/\s*\+\d+$/, '').trim().toLowerCase();
+    if (equippedWeapon && base === equippedWeapon && getItemType(item.name) === 'equipment') return false;
+    if (equippedArmor  && base === equippedArmor  && getItemType(item.name) === 'equipment') return false;
+    return true;
+  });
+  const filtered = type === "all" ? withoutEquipped : withoutEquipped.filter(item => getItemType(item.name) === type);
   window.renderInventory(filtered);
 };
 
@@ -3861,7 +3875,16 @@ window.useItem = async function(itemName, kind) {
   if (itemName.includes('HP Potion') || itemName.includes('Health Potion')) {
     // Spec: Minor=+20% HP, Standard=+40% HP, Greater=+70% HP
     const pct     = itemName.includes('Minor') ? 0.20 : itemName.includes('Greater') ? 0.70 : 0.40;
-    const maxHp   = _charData.hpMax || 100;
+    // Use effective max HP (base + armor equipment bonus) so potions heal to the correct cap
+    const equipHpBonus = (() => {
+      let hp = 0;
+      if (_charData.equipment?.armor) {
+        const aBase = (_charData.equipment.armor || '').replace(/\s*\+\d+$/, '').trim();
+        hp = (typeof EQUIP_ARMOR_STATS !== 'undefined' && EQUIP_ARMOR_STATS[aBase]?.hp) || 0;
+      }
+      return Math.round(hp * (1 + (typeof getRaceEquipBonus === 'function' ? getRaceEquipBonus(_charData.race) : 0)));
+    })();
+    const maxHp   = (_charData.hpMax || 100) + equipHpBonus;
     const curHp   = _charData.hp    || 0;
     const heal    = Math.round(maxHp * pct);
     const applied = Math.min(heal, maxHp - curHp);
@@ -5828,23 +5851,35 @@ async function sellItem() {
   if (!price||price<1){ errEl.textContent = "Enter a valid price.";       return; }
   if (qty > item.qty){ errEl.textContent = "Not enough of that item.";    return; }
 
-  // Enforce min/max price brackets
+  // Enforce min/max price brackets — equipment grade takes priority over material rarity
   const priceBrackets = {
-    common:    [8,12],
-    uncommon:  [18,25],
-    rare:      [45,65],
-    legendary: [120,180],
-    mythic:    [350,500],
-    food:      [25,1200],
-    potion:    [40,400],
+    // Materials by rarity
+    common:      [8,   12],
+    uncommon:    [18,  25],
+    rare:        [45,  65],
+    legendary:   [120, 180],
+    mythic:      [350, 500],
+    // Consumables
+    food:        [25,  1200],
+    potion:      [40,  400],
+    // Equipment by grade (wide ranges to reflect actual crafting costs)
+    equip_E:     [30,   300],
+    equip_D:     [100,  800],
+    equip_C:     [300,  2000],
+    equip_B:     [800,  5000],
+    equip_A:     [2000, 10000],
+    equip_S:     [5000, 30000],
   };
-  // Determine bracket
+  // Determine bracket — check equipment grade first
   let bracket = "common";
   const n = item.name.toLowerCase();
-  if (["silver","bronze","obsidian","marble","quartz","golden pears","moon grapes","sunfruit","crystal berries","bitter root","silverfin","glowfish","spotted eel","coral snapper","red minnow","silverleaf","goldroot","nightshade","glowleaf","lotus","leather","fangs","fur","horns","claws"].some(x=>n.includes(x))) bracket = "uncommon";
+  if (getItemType(item.name) === 'equipment') {
+    const gradeMap = { E:'equip_E', D:'equip_D', C:'equip_C', B:'equip_B', A:'equip_A', S:'equip_S' };
+    bracket = gradeMap[item.grade] || 'equip_D';
+  } else if (["silver","bronze","obsidian","marble","quartz","golden pears","moon grapes","sunfruit","crystal berries","bitter root","silverfin","glowfish","spotted eel","coral snapper","red minnow","silverleaf","goldroot","nightshade","glowleaf","lotus","leather","fangs","fur","horns","claws"].some(x=>n.includes(x))) bracket = "uncommon";
   else if (["gold","mythril","palladium","spirit plum","frost apples","ember fruit","shadowfish","flamefish","ying koi","spirit herb","jade vine","ghost root","spirit venison","shadow hide","drake meat"].some(x=>n.includes(x))) bracket = "rare";
   else if (["titanium","adamantium","celestial fig","dragonfruit","celestial whale","black unagi","phoenix bloom","middlemist","cyclops eye","dragon scales"].some(x=>n.includes(x))) bracket = "legendary";
-  else if (["aetherium","eden’s tear","cosmic leviathan","void orchid","titan heart"].some(x=>n.includes(x))) bracket = "mythic";
+  else if (["aetherium","eden's tear","cosmic leviathan","void orchid","titan heart"].some(x=>n.includes(x))) bracket = "mythic";
   else if (["skewer","soup","carp","sardine","meat","food","herb fish","grilled","roasted","fried"].some(x=>n.includes(x))) bracket = "food";
   else if (["potion","elixir"].some(x=>n.includes(x))) bracket = "potion";
   const [minP, maxP] = priceBrackets[bracket];
@@ -6522,6 +6557,30 @@ async function _applyReward(xp, gold, item) {
   }
 }
 
+// Multi-item reward variant — delivers every item in the items array
+async function _applyRewardMulti(xp, gold, items) {
+  if (!_charData) return;
+  const inv = [...(_charData.inventory||[])];
+  for (const item of (items || [])) {
+    if (!item || !item.name) continue;
+    const ex = inv.find(i => i.name === item.name);
+    const _isEquip = getItemType(item.name) === 'equipment';
+    if (ex && !_isEquip) { ex.qty += (item.qty || 1); }
+    else { const _ni = {...item}; if (_isEquip) _ni.iid = Math.random().toString(36).slice(2,10)+Date.now().toString(36); inv.push(_ni); }
+  }
+  const { newXp, newLevel, newRank, newXpMax, leveledUp } = _processExp(_charData.xp||0,_charData.xpMax||100,_charData.level||1,_charData.rank||"Wanderer",xp,_charData.charClass);
+  const updates = { gold:(_charData.gold||0)+gold, inventory:inv, xp:newXp, xpMax:newXpMax, level:newLevel, rank:newRank };
+  if (leveledUp) { updates.statPoints=(_charData.statPoints||0)+3; updates.hpMax=(_charData.hpMax||100)+10; updates.manaMax=(_charData.manaMax||50)+5; }
+  await updateDoc(doc(db,"characters",_uid), updates);
+  Object.assign(_charData, updates);
+  window._allInvItems = inv;
+  _syncAllDisplays(_charData);
+  if (leveledUp) {
+    window.showToast(`🎉 LEVEL UP! Now Level ${newLevel}!`,"success");
+    logActivity('⬆️', `<b>Level Up!</b> You reached <b>Level ${newLevel}</b>.`, '#e8d070');
+  }
+}
+
 async function loadQuestProgress() {
   try {
     const snap  = await getDoc(doc(db,"dailyQuests",_uid));
@@ -6735,8 +6794,8 @@ window._doGather = async function() {
     const _veilGatherBonus = _charData?.deity === 'Veil' ? (1 + _getFaithBlessingPct(_charData)) : 1;
     const xpGainFinal = Math.round(xpGain * _veilGatherBonus);
     const newProfXp  = (_charData.professionXp||0) + xpGainFinal;
-    const profExpTable = [0,100,200,400,800,1600,3200,6400,12800,25600,51200];
-    const xpNeeded   = profExpTable[Math.min(lvl, profExpTable.length-2)] || 100;
+    // Use canonical PROF_EXP_TABLE (tripled values) — do NOT use the old inline table
+    const xpNeeded   = PROF_EXP_TABLE[Math.min(lvl, PROF_EXP_TABLE.length-2)] || 300;
     let newProfLvl   = lvl;
     let leveledProf  = false;
     if (newProfXp >= xpNeeded && lvl < 10) { newProfLvl = lvl+1; leveledProf=true; }
@@ -8662,6 +8721,9 @@ async function _clientBattleTurn(action, skillName) {
     log.push(`💰 +${drops.gold} gold · ⭐ +${expGain} EXP`);
     if (leveledUp) log.push(`🎉 LEVEL UP! Level ${newLevel}!`);
     await updateDoc(doc(db, "characters", uid), updates);
+    // Sync in-memory charData so HP bar updates immediately without full refresh
+    Object.assign(_charData, updates);
+    window._allInvItems = updates.inventory || _charData.inventory;
     await updateDoc(doc(db, "battles", uid), { status:"victory" });
     const isElite = ["B","A","S"].includes(b.grade);
     await _incrementQuest("kill", 1);
@@ -8707,6 +8769,8 @@ async function _clientBattleTurn(action, skillName) {
     const halfInv = (char.inventory||[]).map(item => ({ ...item, qty: Math.max(1, Math.floor((item.qty ?? 1) / 2)) }));
     const resurrectAt = new Date(Date.now() + 5*60*60*1000);
     await updateDoc(doc(db, "characters", uid), { hp:0, inventory:halfInv, resurrectAt, isDead:true });
+    Object.assign(_charData, { hp:0, inventory:halfInv, resurrectAt, isDead:true });
+    window._allInvItems = halfInv;
     await updateDoc(doc(db, "battles", uid), { status:"defeat" });
     log.push("💀 You were defeated!");
     return { status:"defeat", log, resurrectAt: resurrectAt.toISOString() };
@@ -8954,6 +9018,8 @@ const BATTLE_SKILLS = {
 window.SKILL_DATA    = SKILL_DATA;
 window.BATTLE_SKILLS = BATTLE_SKILLS;
 window.SKILL_TREES   = SKILL_TREES;
+window.ITEM_ICONS    = ITEM_ICONS;  // expose for trade.js icon resolution
+window.getItemIcon   = getItemIcon; // expose helper too
 
 // Resolve a skill use — returns { playerDmg, playerHp, log, updates:{} }
 function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stats, b) {
@@ -10377,12 +10443,15 @@ let _pvpState = null;
 
 function _calcEquipBonus(c) {
   let bonus = { str:0, int:0, def:0, dex:0, hp:0 };
-  const inv = window._allInvItems || c.inventory || [];
+  // Always use the raw Firestore inventory (c.inventory) for enchant lookup — NOT the filtered
+  // display array (_allInvItems excludes equipped items, so enchant level would read as 0).
+  const rawInv = c.inventory || window._allInvItems || [];
   if (c.equipment?.weapon) {
     const wBase = c.equipment.weapon.replace(/\s*\+\d+$/, '').trim();
     const w = EQUIP_WEAPON_STATS[wBase];
     if (w) {
-      const wEnchant = inv.find(i => (i.name||'').replace(/\s*\+\d+$/,'').trim() === wBase)?.enchantLevel || 0;
+      const wItem = rawInv.find(i => (i.name||'').replace(/\s*\+\d+$/,'').trim() === wBase);
+      const wEnchant = wItem?.enchantLevel || parseInt((wItem?.name||'').match(/\+(\d+)$/)?.[1] || '0');
       for (const k in w) bonus[k] = (bonus[k]||0) + w[k] + wEnchant;
     }
   }
@@ -10390,7 +10459,8 @@ function _calcEquipBonus(c) {
     const aBase = c.equipment.armor.replace(/\s*\+\d+$/, '').trim();
     const a = EQUIP_ARMOR_STATS[aBase];
     if (a) {
-      const aEnchant = inv.find(i => (i.name||'').replace(/\s*\+\d+$/,'').trim() === aBase)?.enchantLevel || 0;
+      const aItem = rawInv.find(i => (i.name||'').replace(/\s*\+\d+$/,'').trim() === aBase);
+      const aEnchant = aItem?.enchantLevel || parseInt((aItem?.name||'').match(/\+(\d+)$/)?.[1] || '0');
       for (const k in a) bonus[k] = (bonus[k]||0) + a[k] + aEnchant;
     }
   }
@@ -12220,15 +12290,20 @@ window.doCraft = async function(npc, recipeName) {
     }
     showCraftingModal(recipeName);
     try {
-      const newGold = gold - cost;
-      const inv = [...(window._charData?.inventory || [])];
-      const existing = inv.find(i => i.name === recipeName);
-      const _cIsEquip = getItemType(recipeName)==='equipment';
-      if (existing && !_cIsEquip) { existing.qty += 1; }
-      else { const _ni={name:recipeName,qty:1,type:_cIsEquip?'equipment':'consumable'}; if(_cIsEquip) _ni.iid=Math.random().toString(36).slice(2,10)+Date.now().toString(36); inv.push(_ni); }
-      await updateDoc(doc(db, 'characters', auth.currentUser.uid), { gold: newGold, inventory: inv });
-      window._charData.gold = newGold;
-      window._charData.inventory = inv;
+      // Use runTransaction to prevent race conditions (concurrent writes clobbering inventory)
+      const charRef = doc(db, 'characters', auth.currentUser.uid);
+      await runTransaction(db, async tx => {
+        const snap = await tx.get(charRef);
+        if (!snap.exists()) throw new Error('Character not found');
+        const data = snap.data();
+        if ((data.gold || 0) < cost) throw new Error('Not enough gold');
+        const inv = [...(data.inventory || [])];
+        const existing = inv.find(i => i.name === recipeName);
+        const _cIsEquip = getItemType(recipeName) === 'equipment';
+        if (existing && !_cIsEquip) { existing.qty += 1; }
+        else { const _ni = { name: recipeName, qty: 1, type: _cIsEquip ? 'equipment' : 'consumable' }; if (_cIsEquip) _ni.iid = Math.random().toString(36).slice(2,10)+Date.now().toString(36); inv.push(_ni); }
+        tx.update(charRef, { gold: (data.gold || 0) - cost, inventory: inv });
+      });
       showCraftingResult(`${recipeName} purchased and added to inventory!`);
       logActivity('🧪', `<b>Purchased:</b> ${recipeName} for ${cost} coins.`, '#a09080');
       await refreshCharData();

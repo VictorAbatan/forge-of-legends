@@ -1066,17 +1066,21 @@ function _getTradableItems(charData) {
   for (const i of (charData.inventory || [])) {
     if (i.name) items.push({ name: i.name, qty: i.qty ?? 1, icon: i.icon || _getIcon(i.name) });
   }
-  // Equipped weapon — show as qty 1, labelled (equipped)
+  // Equipped items: only add if NOT already in inventory (inventory filter excludes equipped items
+  // on the dashboard side, so equipped items won't double-count here).
   const eq = charData.equipment || {};
   if (eq.weapon) {
-    const existing = items.find(i => i.name === eq.weapon);
-    if (existing) { existing.qty += 1; }
-    else items.push({ name: eq.weapon, qty: 1, icon: _getIcon(eq.weapon), equipped: true });
+    const wBase = eq.weapon.replace(/\s*\+\d+$/, '').trim();
+    const existing = items.find(i => i.name.replace(/\s*\+\d+$/, '').trim() === wBase);
+    if (!existing) items.push({ name: eq.weapon, qty: 1, icon: _getIcon(eq.weapon), equipped: true });
+    // If it IS in inventory, mark it as equipped so UI can show (E) badge without double-counting qty
+    else existing.equipped = true;
   }
   if (eq.armor) {
-    const existing = items.find(i => i.name === eq.armor);
-    if (existing) { existing.qty += 1; }
-    else items.push({ name: eq.armor, qty: 1, icon: _getIcon(eq.armor), equipped: true });
+    const aBase = eq.armor.replace(/\s*\+\d+$/, '').trim();
+    const existing = items.find(i => i.name.replace(/\s*\+\d+$/, '').trim() === aBase);
+    if (!existing) items.push({ name: eq.armor, qty: 1, icon: _getIcon(eq.armor), equipped: true });
+    else existing.equipped = true;
   }
   return items;
 }

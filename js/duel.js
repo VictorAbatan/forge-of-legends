@@ -755,11 +755,11 @@ export async function doDuelTurn(duelId, action, extraArg) {
 
   const didApplyStun = !!oppStateUpd.stunned;
 
-  // Stun should apply damage and skip the opponent's next turn.
-  // Keep round unchanged when the attacker retains initiative through stun.
-  const nextUid  = didApplyStun ? duel.currentTurnUid : normalNextUid;
-  const nextName = didApplyStun ? meDisplayName   : normalNextName;
-  const newRound = didApplyStun ? duel.round : (actingAsNpc ? duel.round + 1 : (isChallenger ? duel.round : duel.round + 1));
+  // Stun: pass the turn to the OPPONENT so the stun-skip logic fires on THEIR turn,
+  // then the turn advances back normally. This prevents the stunner from acting twice.
+  const nextUid  = normalNextUid;
+  const nextName = normalNextName;
+  const newRound = actingAsNpc ? duel.round + 1 : (isChallenger ? duel.round : duel.round + 1);
 
   const isDuelOver = oppHp <= 0;
 
@@ -1772,15 +1772,34 @@ function _buildCombatant(d, uid) {
   // Apply equipment bonuses from the character's equipped weapon/armor.
   // EQUIP_WEAPON_STATS and EQUIP_ARMOR_STATS are defined below in duel.js.
   let equipStr = 0, equipDex = 0, equipInt = 0, equipDef = 0;
+  // Helper: get enchant level from raw inventory (not filtered display array)
+  const rawInv = d.inventory || [];
+  const _enchantOf = (baseName) => {
+    const item = rawInv.find(i => (i.name||'').replace(/\s*\+\d+$/,'').trim() === baseName);
+    return item?.enchantLevel || parseInt((item?.name||'').match(/\+(\d+)$/)?.[1] || '0');
+  };
   if (d.equipment?.weapon) {
     const wBase = d.equipment.weapon.replace(/\s*\+\d+$/, '').trim();
     const w = EQUIP_WEAPON_STATS[wBase];
-    if (w) { equipStr += w.str||0; equipDex += w.dex||0; equipInt += w.int||0; equipDef += w.def||0; }
+    if (w) {
+      const enchant = _enchantOf(wBase);
+      // Enchant adds +1 to each stat per level (matches dashboard.js behaviour)
+      equipStr += (w.str||0) + (w.str ? enchant : 0);
+      equipDex += (w.dex||0) + (w.dex ? enchant : 0);
+      equipInt += (w.int||0) + (w.int ? enchant : 0);
+      equipDef += (w.def||0) + (w.def ? enchant : 0);
+    }
   }
   if (d.equipment?.armor) {
     const aBase = d.equipment.armor.replace(/\s*\+\d+$/, '').trim();
     const a = EQUIP_ARMOR_STATS[aBase];
-    if (a) { equipStr += a.str||0; equipDex += a.dex||0; equipInt += a.int||0; equipDef += a.def||0; }
+    if (a) {
+      const enchant = _enchantOf(aBase);
+      equipStr += (a.str||0) + (a.str ? enchant : 0);
+      equipDex += (a.dex||0) + (a.dex ? enchant : 0);
+      equipInt += (a.int||0) + (a.int ? enchant : 0);
+      equipDef += (a.def||0) + (a.def ? enchant : 0);
+    }
   }
   // Dwarf/Titan race bonus: +10%/+20% to gear stats
   const racePct = _getDuelRaceEquipBonus(d.race);

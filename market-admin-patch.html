@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Market Admin — Delete Listings</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d0b08; color: #c9b97a; font-family: monospace; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
+  .box { background: #1a1710; border: 1px solid #3a2f1a; border-radius: 12px; padding: 32px 36px; max-width: 540px; width: 100%; }
+  h2 { font-size: 1rem; letter-spacing: 0.15em; color: #e05555; margin-bottom: 4px; }
+  .sub { font-size: 0.75rem; color: #666; margin-bottom: 24px; }
+  label { font-size: 0.75rem; color: #888; display: block; margin-bottom: 6px; letter-spacing: 0.08em; }
+  input[type=text] { width: 100%; background: #111; border: 1px solid #3a2f1a; border-radius: 6px; color: #c9b97a; font-family: monospace; font-size: 0.82rem; padding: 9px 12px; margin-bottom: 16px; }
+  button.run { width: 100%; background: linear-gradient(135deg,#8b1414,#6b0f0f); color: #ffe; border: none; border-radius: 6px; padding: 12px; font-family: monospace; font-size: 0.85rem; letter-spacing: 0.1em; cursor: pointer; margin-top: 4px; }
+  button.run:hover { background: linear-gradient(135deg,#b01a1a,#8b1414); }
+  button.run:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.preview { width: 100%; background: linear-gradient(135deg,#b8860b,#8b6914); color: #fff8e1; border: none; border-radius: 6px; padding: 10px; font-family: monospace; font-size: 0.8rem; letter-spacing: 0.1em; cursor: pointer; margin-bottom: 12px; }
+  button.preview:disabled { opacity: 0.4; cursor: not-allowed; }
+  #log { margin-top: 16px; font-size: 0.73rem; color: #70c090; white-space: pre-wrap; background: rgba(0,0,0,0.35); border-radius: 6px; padding: 12px 14px; display: none; max-height: 260px; overflow-y: auto; }
+  #log.visible { display: block; }
+  .err { color: #e07070; }
+  .warn { color: #c9a84c; }
+  .info { color: #5b9fe0; }
+  .divider { border: none; border-top: 1px solid #2a2010; margin: 20px 0; }
+</style>
+</head>
+<body>
+<div class="box">
+  <h2>🗑️ MARKET ADMIN PATCH</h2>
+  <p class="sub">Delete market listings by player UID or name. Irreversible.</p>
+
+  <label>FIREBASE PROJECT ID</label>
+  <input type="text" id="projectId" placeholder="e.g. forge-of-legends-12345" />
+
+  <label>TARGET — UID or Seller Name (leave blank to wipe ALL listings)</label>
+  <input type="text" id="targetInput" placeholder="uid or seller name — blank = wipe all" />
+
+  <label>MATCH BY</label>
+  <select id="matchBy" style="width:100%;background:#111;border:1px solid #3a2f1a;border-radius:6px;color:#c9b97a;font-family:monospace;font-size:0.82rem;padding:9px 12px;margin-bottom:16px;appearance:none;">
+    <option value="sellerUid">Seller UID</option>
+    <option value="sellerName">Seller Name</option>
+    <option value="all">ALL listings (wipe everything)</option>
+  </select>
+
+  <button class="preview" onclick="previewListings()">🔍 PREVIEW LISTINGS</button>
+  <button class="run" id="runBtn" onclick="deleteListings()" disabled>🗑️ DELETE LISTED ABOVE</button>
+
+  <div id="log"></div>
+</div>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+  import { getFirestore, collection, query, where, getDocs, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+  // ── Load config from the main app's firebase.js ──
+  // We rely on the same project config so we must paste it here or load from window.
+  // For safety, use the same config object as the main app.
+  const FIREBASE_CONFIG = {
+    apiKey: "AIzaSyCUmdWY9OfzQgOPv-4KgOlBfO76c0toxYQ",
+    authDomain: "inkcraftrp.firebaseapp.com",
+    projectId: "inkcraftrp",
+    storageBucket: "inkcraftrp.firebasestorage.app",
+    messagingSenderId: "125564034696",
+    appId: "1:125564034696:web:0b09ed319024309ad2493d"
+  };
+
+  let app, db, auth;
+  try {
+    app  = initializeApp(FIREBASE_CONFIG, 'market-admin');
+    db   = getFirestore(app);
+    auth = getAuth(app);
+  } catch(e) {
+    log(`<span class="err">Firebase init failed: ${e.message}</span>`);
+  }
+
+  let _toDelete = [];
+
+  function log(msg) {
+    const el = document.getElementById('log');
+    el.classList.add('visible');
+    el.innerHTML += msg + '\n';
+    el.scrollTop = el.scrollHeight;
+  }
+
+  window.previewListings = async function() {
+    _toDelete = [];
+    document.getElementById('log').innerHTML = '';
+    document.getElementById('runBtn').disabled = true;
+    const matchBy = document.getElementById('matchBy').value;
+    const target  = document.getElementById('targetInput').value.trim();
+
+    log('<span class="info">Fetching listings...</span>');
+    try {
+      let q;
+      if (matchBy === 'all' || !target) {
+        q = query(collection(db, 'marketListings'));
+      } else {
+        q = query(collection(db, 'marketListings'), where(matchBy, '==', target));
+      }
+      const snap = await getDocs(q);
+      if (snap.empty) { log('<span class="warn">No listings found.</span>'); return; }
+      snap.forEach(d => {
+        const data = d.data();
+        _toDelete.push(d.id);
+        log(`📦 [${d.id.slice(0,8)}] ${data.itemName} x${data.qty} @ ${data.pricePerUnit}💰 — ${data.sellerName}`);
+      });
+      log(`\n<span class="warn">Found ${_toDelete.length} listing(s). Click DELETE to remove them.</span>`);
+      document.getElementById('runBtn').disabled = false;
+    } catch(e) {
+      log(`<span class="err">Error: ${e.message}</span>`);
+    }
+  };
+
+  window.deleteListings = async function() {
+    if (!_toDelete.length) return;
+    document.getElementById('runBtn').disabled = true;
+    log('\n<span class="info">Deleting...</span>');
+    let ok = 0, fail = 0;
+    for (const id of _toDelete) {
+      try {
+        await deleteDoc(doc(db, 'marketListings', id));
+        ok++;
+      } catch(e) {
+        log(`<span class="err">Failed ${id}: ${e.message}</span>`);
+        fail++;
+      }
+    }
+    log(`\n✅ Deleted ${ok} listing(s). ${fail ? `<span class="err">${fail} failed.</span>` : ''}`);
+    _toDelete = [];
+  };
+</script>
+</body>
+</html>
