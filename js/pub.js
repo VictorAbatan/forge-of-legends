@@ -2370,6 +2370,16 @@ async function _dhRenderGameState(game, gameId) {
       await _awardGold(myUid, game.prize); // winner awards themselves
       _spawnCoinRain();
       window.logActivity?.('🃏', `<b>Pub Win!</b> Devil's Hand — Won <b>${game.prize}</b> 💰.`, '#4ec878');
+      // Clear any debt the winner had from loans during this game
+      const charDebt = (_charData?.debtGold || window._charData?.debtGold || 0);
+      if (charDebt > 0) {
+        try {
+          await updateDoc(doc(db, 'characters', myUid), { debtGold: 0, debtSource: null });
+          if (_charData) _charData.debtGold = 0;
+          if (window._charData) window._charData.debtGold = 0;
+          window.showToast?.('🎉 Debt cleared by your winnings!', 'success');
+        } catch(e) { console.warn('[DH] debt clear failed:', e); }
+      }
     }
     if (game.players.some(p => p.uid === myUid)) {
       setTimeout(() => {
@@ -2462,7 +2472,43 @@ window._dhRaise = async function() {
   const currentGold = (_charData?.gold || window._charData?.gold || 0);
   const willLoan = currentGold < raiseAmount;
   if (willLoan) {
-    window.showToast?.(`Raising on a loan — your balance will go negative.`, 'warning');
+    const shortfall = raiseAmount - currentGold;
+    const confirmed = await new Promise(resolve => {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9999;display:flex;align-items:center;justify-content:center';
+      overlay.innerHTML = `
+        <div style="background:var(--card-bg,#1a1a2e);border:1px solid var(--border,#333);border-radius:12px;padding:24px;max-width:320px;width:90%;text-align:center">
+          <div style="font-size:1.5rem;margin-bottom:8px">💸</div>
+          <div style="font-weight:700;margin-bottom:8px;color:var(--gold,#c9a84c)">Raise on Loan?</div>
+          <div style="font-size:0.9rem;color:var(--text-dim,#aaa);margin-bottom:16px">
+            You're short <b>${shortfall} 💰</b>.<br>
+            Raising will put you <b style="color:#e05555">−${shortfall} in debt</b>.<br>
+            You owe the house — pay it back or face consequences.
+          </div>
+          <div style="display:flex;gap:12px;justify-content:center">
+            <button id="_dh_loan_no"  style="padding:8px 20px;border-radius:8px;border:1px solid var(--border,#333);background:transparent;color:var(--text,#eee);cursor:pointer">Cancel</button>
+            <button id="_dh_loan_yes" style="padding:8px 20px;border-radius:8px;border:none;background:#c9a84c;color:#000;font-weight:700;cursor:pointer">Raise Anyway</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      overlay.querySelector('#_dh_loan_yes').onclick = () => { document.body.removeChild(overlay); resolve(true); };
+      overlay.querySelector('#_dh_loan_no').onclick  = () => { document.body.removeChild(overlay); resolve(false); };
+    });
+    if (!confirmed) {
+      if (btn) btn.disabled = false;
+      const foldBtn = document.getElementById('dh-fold-btn');
+      if (foldBtn) foldBtn.disabled = false;
+      return;
+    }
+    // Record the debt on the character doc
+    const existingDebt = (_charData?.debtGold || window._charData?.debtGold || 0);
+    const newDebt = existingDebt + shortfall;
+    try {
+      await updateDoc(doc(db, 'characters', _uid), { debtGold: newDebt, debtSource: "Devil's Hand" });
+      if (_charData) _charData.debtGold = newDebt;
+      if (window._charData) window._charData.debtGold = newDebt;
+    } catch(e) { console.warn('[DH] debt record failed:', e); }
+    window.showToast?.(`📜 Loan granted — you're ${shortfall} 💰 in debt. Gamble wisely.`, 'warning');
   }
 
   await _deductGold(raiseAmount);

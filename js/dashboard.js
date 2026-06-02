@@ -18,6 +18,31 @@ import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/
 import { getApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 
 // ═══════════════════════════════════════════════════
+//  INVENTORY WRITE QUEUE  (prevents race conditions)
+//  Usage: await _invWrite(uid, inv, extraFields?)
+//  All inventory writes should go through this so
+//  concurrent operations don't clobber each other.
+// ═══════════════════════════════════════════════════
+let _invWriteQueue = Promise.resolve();
+async function _invWrite(uid, inv, extra = {}) {
+  _invWriteQueue = _invWriteQueue.then(async () => {
+    try {
+      const charRef = doc(db, 'characters', uid);
+      await runTransaction(db, async tx => {
+        const snap = await tx.get(charRef);
+        if (!snap.exists()) throw new Error('Character not found');
+        tx.update(charRef, { inventory: inv, ...extra });
+      });
+    } catch(e) {
+      console.warn('[_invWrite] transaction failed, falling back to updateDoc:', e);
+      await updateDoc(doc(db, 'characters', uid), { inventory: inv, ...extra });
+    }
+  }).catch(e => console.warn('[_invWrite] queue error:', e));
+  return _invWriteQueue;
+}
+window._invWrite = _invWrite;
+
+// ═══════════════════════════════════════════════════
 //  WORLD DEVELOPMENT EVENTS (PLAYER VIEW)
 // ═══════════════════════════════════════════════════
 function loadWorldDevelopmentEventsForPlayers() {
@@ -101,7 +126,13 @@ window.showBossRaidArena = function(state) {
   }
   // Enable action buttons
   document.getElementById('btn-melee').onclick = function() { window.bossRaidTurn('melee'); };
-  document.getElementById('btn-skill').onclick = function() { window.showToast('Skill use coming soon!', 'info'); };
+  document.getElementById('btn-skill').onclick = function() {
+    if (typeof window.openRaidSkillMenu === 'function') {
+      window.openRaidSkillMenu();
+    } else {
+      window.openBattleSkillMenu?.();
+    }
+  };
   document.getElementById('btn-run').onclick = function() { window.showToast('Cannot run from a boss raid!', 'error'); };
 }
 // Boss Raid Turn Logic (basic solo test)
@@ -2467,7 +2498,7 @@ window._doShrineExplore = async function() {
     window._allInvItems = inv;
     window._refreshInvDisplay?.();
     try {
-      await updateDoc(doc(db, 'characters', _uid), { inventory: inv });
+      await _invWrite(_uid, inv);
     } catch(e) { console.warn('[Shrine] Inventory write failed:', e); }
     logActivity('⚗️', `<b>Temple Explore:</b> Found <b>${mat}</b> at <b>${shrineDeity}'s shrine</b>.`, '#c9a84c');
     await _incrementQuest('gather', 1);
@@ -2520,7 +2551,7 @@ window._doShrineSacrifice = async function() {
   const tieredUp = newTier.tier > prevTier.tier;
 
   try {
-    await updateDoc(doc(db, 'characters', _uid), { inventory: inv, faithLevel: newFaith });
+    await _invWrite(_uid, inv, { faithLevel: newFaith });
     Object.assign(c, { inventory: inv, faithLevel: newFaith });
     window._allInvItems = inv;
     window._refreshInvDisplay?.();
@@ -2939,7 +2970,7 @@ function populateDashboard(c) {
     if (w) {
       // Find enchant level from inventory item
       const wEnchant = (window._allInvItems || []).find(i => (i.name||'').replace(/\s*\+\d+$/,'').trim() === wBase)?.enchantLevel || 0;
-      for (const k in w) equipBonus[k] = (equipBonus[k]||0) + w[k] + wEnchant;
+      for (const k in w) equipBonus[k] = (equipBonus[k]||0) + w[k] + (w[k] ? wEnchant : 0);
     }
   }
   if (c.equipment?.armor) {
@@ -2947,7 +2978,7 @@ function populateDashboard(c) {
     const a = EQUIP_ARMOR_STATS[aBase];
     if (a) {
       const aEnchant = (window._allInvItems || []).find(i => (i.name||'').replace(/\s*\+\d+$/,'').trim() === aBase)?.enchantLevel || 0;
-      for (const k in a) equipBonus[k] = (equipBonus[k]||0) + a[k] + aEnchant;
+      for (const k in a) equipBonus[k] = (equipBonus[k]||0) + a[k] + (a[k] ? aEnchant : 0);
     }
   }
   // Race bonus
@@ -3827,7 +3858,7 @@ window.convertMaterialToGold = async function(itemName) {
   const goldVal = SELL_RATES[tier];
   if (item.qty > 1) item.qty--; else inv.splice(inv.indexOf(item), 1);
   const newGold = (_charData.gold || 0) + goldVal;
-  await updateDoc(doc(db, 'characters', _uid), { inventory: inv, gold: newGold });
+  await _invWrite(_uid, inv, { gold: newGold });
   _charData.inventory = inv; _charData.gold = newGold;
   window._allInvItems = inv;
   _syncAllDisplays(_charData);
@@ -3854,14 +3885,32 @@ window._refreshInvDisplay = function() {
   // Exclude currently-equipped items from inventory display (they show in the equip panel)
   const equippedWeapon = (window._charData?.equipment?.weapon || '').replace(/\s*\+\d+$/, '').trim().toLowerCase();
   const equippedArmor  = (window._charData?.equipment?.armor  || '').replace(/\s*\+\d+$/, '').trim().toLowerCase();
+  // Only hide ONE instance of each equipped item — if a player owns 2x Abjuration but
+  // has one equipped, the second should still appear in inventory.
+  let _weaponHidden = false;
+  let _armorHidden  = false;
   const withoutEquipped = all.filter(item => {
     const base = (item.name || '').replace(/\s*\+\d+$/, '').trim().toLowerCase();
-    if (equippedWeapon && base === equippedWeapon && getItemType(item.name) === 'equipment') return false;
-    if (equippedArmor  && base === equippedArmor  && getItemType(item.name) === 'equipment') return false;
+    if (!_weaponHidden && equippedWeapon && base === equippedWeapon && getItemType(item.name) === 'equipment') {
+      _weaponHidden = true;
+      return false;
+    }
+    if (!_armorHidden && equippedArmor && base === equippedArmor && getItemType(item.name) === 'equipment') {
+      _armorHidden = true;
+      return false;
+    }
     return true;
   });
   const filtered = type === "all" ? withoutEquipped : withoutEquipped.filter(item => getItemType(item.name) === type);
   window.renderInventory(filtered);
+  // Keep trade.js in sync — it holds its own charData reference which goes stale after
+  // any inventory/equip/craft/market change. Push the current snapshot every time the
+  // display refreshes so the item picker always shows the live inventory.
+  if (window._charData && window.updateTradeCharData) {
+    // Pass a charData snapshot with the FILTERED inventory (equipped items excluded)
+    // so trade shows the same items as inventory — not the raw Firestore array.
+    window.updateTradeCharData({ ...window._charData, inventory: withoutEquipped });
+  }
 };
 
 window.useItem = async function(itemName, kind) {
@@ -8611,8 +8660,10 @@ async function _clientBattleTurn(action, skillName) {
     const primary    = _getPrimaryStat(char.charClass, stats);
     // defBreak (Abyssal-touch) reduces monster DEF by defBreakAmt before applying
     const defBreakFactor = b.defBreak ? (1 - (b.defBreakAmt || 0)) : 1;
-    const effectiveDef = Math.floor(monster.def * defBreakFactor * 0.5);
-    let dmg = Math.max(1, primary - effectiveDef);
+    // Diminishing-returns mitigation: def never fully blocks (matches duel.js formula)
+    const rawEffDef = Math.floor(monster.def * defBreakFactor);
+    const defRatioM = rawEffDef / (rawEffDef + 50);
+    let dmg = Math.max(1, Math.round(primary * (1 - defRatioM)));
     if (b.defBreak) { battleUpdates.defBreak = false; battleUpdates.defBreakAmt = 0; }  // consume defBreak after 1 hit
     // Death Mark
     if (b.deathMark) { dmg = Math.round(dmg * (1 + (b.deathMarkBonus || 0.60))); battleUpdates.deathMark = false; log.push(`☠️ Death Mark triggered!`); }
@@ -8841,7 +8892,9 @@ async function _clientAutoBattle(grade, maxTurns=15, zoneName=null) {
       const dmgLabel = result.playerDmg > 0 ? `${result.playerDmg} dmg` : 'applied';
       log.push(`✨ Turn ${turn+1}: ${usedSkill.name} — ${dmgLabel}. MP: ${playerMana}`);
     } else {
-      dmg = Math.max(1, primary - Math.floor(monster.def*0.5));
+      // Diminishing-returns mitigation (same as manual fight)
+      const _abDefRatio = (monster.def||1) / ((monster.def||1) + 50);
+      dmg = Math.max(1, Math.round(primary * (1 - _abDefRatio)));
       monHp = Math.max(0, monHp - dmg);
       log.push(`⚔️ Turn ${turn+1}: Melee — ${dmg} dmg.`);
     }
@@ -9050,7 +9103,9 @@ function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stat
       const isFirst    = !b.backstabUsed;
       const mult       = isBackstab ? (isFirst ? sk.mult : sk.multAfter) : sk.mult;
       const defPen     = sk.defPen || 0;
-      const effectiveDef = Math.floor(monster.def * defBreakFactor * (1 - defPen) * 0.5);
+      const rawEffDefDP = Math.floor(monster.def * defBreakFactor * (1 - defPen));
+    const _dpDefRatio = rawEffDefDP / (rawEffDefDP + 50);
+    const effectiveDef = Math.round(primary * _dpDefRatio);
       dmg = Math.max(1, Math.round(primaryVal * mult) - effectiveDef);
       if (b.defBreak) updates.defBreak = false;  // consume after use
       // Echo-strike doubles the hit
@@ -9065,7 +9120,10 @@ function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stat
     case "execute": {
       const hpPct = monster.hp / (monster.maxHp || monster.hp);
       const mult  = hpPct <= sk.threshold ? sk.mult : 1.05;
-      const effectiveDef = Math.floor(monster.def * defBreakFactor * 0.5);
+      // Diminishing-returns mitigation for skill damage (prevents 1-damage at high rank)
+    const rawEffDefS = Math.floor(monster.def * defBreakFactor);
+    const _skillDefRatio = rawEffDefS / (rawEffDefS + 50);
+    const effectiveDef = Math.round(primary * _skillDefRatio);  // acts as mitigation amount for subtraction formula
       dmg = Math.max(1, Math.round(primaryVal * mult) - effectiveDef);
       monHp = Math.max(0, monHp - dmg);
       log.push(hpPct <= sk.threshold
@@ -9076,7 +9134,7 @@ function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stat
     case "multihit": {
       let total = 0;
       for (let i = 0; i < sk.hits; i++) {
-        const h = Math.max(1, Math.round(primaryVal * sk.multPerHit) - Math.floor(monster.def * defBreakFactor * 0.5));
+        const h = Math.max(1, Math.round(primaryVal * sk.multPerHit * (1 - (monster.def * defBreakFactor) / ((monster.def * defBreakFactor) + 50))));
         total += h; monHp = Math.max(0, monHp - h);
       }
       dmg = total;
@@ -9086,7 +9144,10 @@ function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stat
     case "condDamage": {
       const hasDebuff = b.dotActive || b.deathMark || b.defBreak;
       const mult      = hasDebuff ? sk.mult : 1.05;
-      const effectiveDef = Math.floor(monster.def * defBreakFactor * 0.5);
+      // Diminishing-returns mitigation for skill damage (prevents 1-damage at high rank)
+    const rawEffDefS = Math.floor(monster.def * defBreakFactor);
+    const _skillDefRatio = rawEffDefS / (rawEffDefS + 50);
+    const effectiveDef = Math.round(primary * _skillDefRatio);  // acts as mitigation amount for subtraction formula
       dmg = Math.max(1, Math.round(primaryVal * mult) - effectiveDef);
       monHp = Math.max(0, monHp - dmg);
       log.push(`🗡️ ${skillName}: ${dmg} damage${hasDebuff ? " (bonus vs debuffed!)" : ""}`);
@@ -9158,7 +9219,10 @@ function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stat
       break;
     }
     case "stun": {
-      const effectiveDef = Math.floor(monster.def * defBreakFactor * 0.5);
+      // Diminishing-returns mitigation for skill damage (prevents 1-damage at high rank)
+    const rawEffDefS = Math.floor(monster.def * defBreakFactor);
+    const _skillDefRatio = rawEffDefS / (rawEffDefS + 50);
+    const effectiveDef = Math.round(primary * _skillDefRatio);  // acts as mitigation amount for subtraction formula
       dmg = Math.max(1, Math.round(primaryVal * (sk.mult || 1.00)) - effectiveDef);
       monHp = Math.max(0, monHp - dmg);
       updates.monsterStunned = true;
@@ -9250,7 +9314,10 @@ function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stat
       updates.summonActive        = false;
       updates.summonTurns         = 0;
       updates.leviathanSummoned   = false;
-      const effectiveDef = Math.floor(monster.def * defBreakFactor * 0.5);
+      // Diminishing-returns mitigation for skill damage (prevents 1-damage at high rank)
+    const rawEffDefS = Math.floor(monster.def * defBreakFactor);
+    const _skillDefRatio = rawEffDefS / (rawEffDefS + 50);
+    const effectiveDef = Math.round(primary * _skillDefRatio);  // acts as mitigation amount for subtraction formula
       dmg = Math.max(1, Math.round(primaryVal * sk.mult) - effectiveDef);
       if (b.echoActive) { dmg *= 2; updates.echoActive = false; log.push(`🔁 Echo-strike doubles the hit!`); }
       monHp = Math.max(0, monHp - dmg);
@@ -9269,7 +9336,10 @@ function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stat
       break;
     }
     default: {
-      const effectiveDef = Math.floor(monster.def * defBreakFactor * 0.5);
+      // Diminishing-returns mitigation for skill damage (prevents 1-damage at high rank)
+    const rawEffDefS = Math.floor(monster.def * defBreakFactor);
+    const _skillDefRatio = rawEffDefS / (rawEffDefS + 50);
+    const effectiveDef = Math.round(primary * _skillDefRatio);  // acts as mitigation amount for subtraction formula
       dmg = Math.max(1, Math.round(primaryVal * 1.05) - effectiveDef);
       monHp = Math.max(0, monHp - dmg);
       log.push(`⚔️ ${skillName}: ${dmg} damage.`);
@@ -9646,6 +9716,67 @@ window._stopAutoBattle = function() {
   _stopAutoBattleCleanup(hp, mana);
 };
 
+// ── Save HP when player navigates away mid-battle ────────────────────────────
+// Without this, closing the tab or switching pages while auto-battle or a manual
+// fight is running leaves HP at full because the normal save only fires on
+// explicit stop/victory/defeat.  visibilitychange fires reliably on mobile too.
+(function _registerBattleExitSave() {
+  function _flushHp() {
+    try {
+      const uid = window._uid || _uid;
+      if (!uid) return;
+      // Auto-battle: live HP is tracked in _autoBattleLiveHp
+      const abHp   = window._autoBattleLiveHp;
+      const abMana = window._autoBattleLiveMana;
+      if (_autoBattleRunning && abHp !== undefined) {
+        // Use sendBeacon for reliability during page unload
+        const payload = JSON.stringify({ hp: abHp, mana: abMana ?? (_charData?.mana ?? 0) });
+        // Can't await here — best-effort via sendBeacon to a no-op endpoint isn't possible
+        // with Firestore SDK during unload. Instead we mark _charData and rely on the
+        // next session's refreshCharData to pick up the doc written by _stopAutoBattleCleanup.
+        // The real fix is: stop the loop cleanly and write synchronously.
+        _autoBattleRunning = false;
+        if (uid && window.db) {
+          import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js")
+            .then(({ doc, updateDoc }) => updateDoc(doc(window.db, 'characters', uid), { hp: abHp, mana: abMana ?? (_charData?.mana ?? 0) }))
+            .catch(() => {});
+        }
+      } else if (!_autoBattleRunning && window._charData) {
+        // Manual fight: save current HP from the battle doc (which has live playerHp)
+        // _charData.hp is only updated on victory/defeat, so read from battles doc instead.
+        const arena = document.getElementById('battle-arena');
+        if (arena && arena.style.display !== 'none') {
+          if (uid && window.db) {
+            import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js")
+              .then(async ({ doc, getDoc, updateDoc }) => {
+                try {
+                  const bSnap = await getDoc(doc(window.db, 'battles', uid));
+                  if (bSnap.exists() && bSnap.data().status === 'active') {
+                    const { playerHp, playerMana } = bSnap.data();
+                    if (playerHp !== undefined) {
+                      await updateDoc(doc(window.db, 'characters', uid), {
+                        hp: playerHp, mana: playerMana ?? (window._charData?.mana ?? 0)
+                      });
+                    }
+                  }
+                } catch(e2) { /* best-effort */ }
+              }).catch(() => {});
+          }
+        }
+      }
+    } catch(e) { /* best-effort */ }
+  }
+
+  // visibilitychange fires when the tab is hidden (switch tab, phone lock, app switch)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') _flushHp();
+  });
+  // pagehide fires on navigation away / back-forward cache
+  window.addEventListener('pagehide', _flushHp);
+  // beforeunload as final fallback (some browsers block async ops here)
+  window.addEventListener('beforeunload', _flushHp);
+})();
+
 async function _stopAutoBattleCleanup(playerHp, playerMana) {
   window._autoBattleLiveHp   = undefined;
   window._autoBattleLiveMana = undefined;
@@ -9780,17 +9911,62 @@ function showBattleArena(monster, playerHp, playerMana) {
           : '';
         return `
           <div class="skill-menu-item${usable ? '' : ' skill-locked-mana'}"
-               style="opacity:${usable?'1':'0.4'};cursor:${usable?'pointer':'not-allowed'}"
-               ${usable ? `onclick=\"doBattleTurn('skill','${s.replace(/'/g, "\\\\'")}');closeSkillMenu()\"` : ''}>
+               data-skill="${s}" data-usable="${usable}"
+               style="opacity:${usable?'1':'0.4'};cursor:${usable?'pointer':'not-allowed'}">
             <span class="skill-menu-item-name">${s}</span>
             <span style="display:flex;gap:6px;align-items:center">${manaLabel}${lockLabel}</span>
           </div>`;
       }).join('') || '<div style="color:var(--text-dim);font-style:italic;padding:12px;font-size:0.82rem">No skills in this stance. Edit it in the Skills panel.</div>';
+
+      // Wire tappable skill items via addEventListener (safe — avoids broken inline onclick)
+      menuList.querySelectorAll('.skill-menu-item[data-usable="true"]').forEach(el => {
+        el.addEventListener('click', () => {
+          window._battleTurn('skill', el.dataset.skill);
+          window.closeBattleSkillMenu?.();
+        });
+      });
     }
   }
   renderSkillMenu();
   // Expose for updates after each turn
   window._renderSkillMenu = renderSkillMenu;
+
+  // ── Open / close helpers for the manual battle skill panel ──
+  // Works whether the HTML uses id="skill-menu-wrap" or a parent div around skill-menu-list.
+  function _getSkillMenuContainer() {
+    // Try explicit wrapper first, then fall back to parent of the list
+    return document.getElementById('skill-menu-wrap')
+        || document.getElementById('skill-menu-list')?.parentElement
+        || null;
+  }
+  window.openBattleSkillMenu = function() {
+    const wrap = _getSkillMenuContainer();
+    if (!wrap) return;
+    wrap.style.display = 'block';
+    renderSkillMenu(); // refresh mana/rank state each open
+  };
+  window.closeBattleSkillMenu = function() {
+    const wrap = _getSkillMenuContainer();
+    if (wrap) wrap.style.display = 'none';
+  };
+
+  // ── Wire the SKILL button in the battle arena ──
+  const skillActionBtn = document.getElementById('btn-skill');
+  if (skillActionBtn) {
+    // Remove old listener by replacing element clone trick, then re-add
+    const newSkillBtn = skillActionBtn.cloneNode(true);
+    skillActionBtn.parentNode?.replaceChild(newSkillBtn, skillActionBtn);
+    newSkillBtn.addEventListener('click', () => {
+      const wrap = _getSkillMenuContainer();
+      if (!wrap) return;
+      const isOpen = wrap.style.display === 'block';
+      if (isOpen) {
+        window.closeBattleSkillMenu();
+      } else {
+        window.openBattleSkillMenu();
+      }
+    });
+  }
 
   addBattleLog(`⚔️ You encountered a ${monster.name}! (Grade ${monster.grade})`);
 }
@@ -10452,7 +10628,8 @@ function _calcEquipBonus(c) {
     if (w) {
       const wItem = rawInv.find(i => (i.name||'').replace(/\s*\+\d+$/,'').trim() === wBase);
       const wEnchant = wItem?.enchantLevel || parseInt((wItem?.name||'').match(/\+(\d+)$/)?.[1] || '0');
-      for (const k in w) bonus[k] = (bonus[k]||0) + w[k] + wEnchant;
+      // Enchant adds +1 per level only to stats the weapon/armor actually contributes (consistent with duel.js)
+      for (const k in w) bonus[k] = (bonus[k]||0) + w[k] + (w[k] ? wEnchant : 0);
     }
   }
   if (c.equipment?.armor) {
@@ -10461,7 +10638,7 @@ function _calcEquipBonus(c) {
     if (a) {
       const aItem = rawInv.find(i => (i.name||'').replace(/\s*\+\d+$/,'').trim() === aBase);
       const aEnchant = aItem?.enchantLevel || parseInt((aItem?.name||'').match(/\+(\d+)$/)?.[1] || '0');
-      for (const k in a) bonus[k] = (bonus[k]||0) + a[k] + aEnchant;
+      for (const k in a) bonus[k] = (bonus[k]||0) + a[k] + (a[k] ? aEnchant : 0);
     }
   }
   const racePct = getRaceEquipBonus(c.race);
@@ -10744,6 +10921,10 @@ const BOSS_MECHANIC_FNS = {
 };
 
 function _bossUseAbility(state) {
+  if (state.boss._stunned) {
+    state.boss._stunned = false;
+    return `💫 ${state.boss.name} is stunned — skips their turn!`;
+  }
   const abilities = state.boss.abilities || [];
   if (!abilities.length) return _bossBasicAttack(state);
 
@@ -10768,6 +10949,10 @@ function _bossUseAbility(state) {
 }
 
 function _bossBasicAttack(state, abilityName) {
+  if (state.boss._stunned) {
+    state.boss._stunned = false;
+    return `💫 ${state.boss.name} is stunned — skips their turn!`;
+  }
   // Target: front-line alive member (leaderIdx first, then next alive)
   let target = state.party[state.leaderIdx];
   if (!target || target.status === 'defeated') {
@@ -11034,6 +11219,12 @@ window.doRaidTurn = function(action, skillName) {
           s.boss._dotHealer  = me.uid || me.name; // track who applied it (for lifesteal)
           const dotAppliedLabel = `${Math.round((sk.dotPct||0.10)*100)}%×${sk.dotTurns||3} turns`;
           s.log.push(`🩸 ${me.name} uses ${skillName} — ${s.boss._dotLabel} applied! (${dotAppliedLabel})`);
+        } else if (sk.type === 'stun') {
+          const stat = me[sk.stat] || primary;
+          playerDmg = Math.max(1, Math.round(stat * (sk.mult||1)) - Math.floor((s.boss.def||10)*0.3));
+          s.boss.hp = Math.max(0, s.boss.hp - playerDmg);
+          s.boss._stunned = true;
+          s.log.push(`💫 ${me.name} uses ${skillName} for ${playerDmg} damage! ${s.boss.name} is stunned — will skip next attack!`);
         } else if (sk.type === 'heal' || sk.type === 'hot') {
           const _healPct = sk.healPct || 0.15;
           const _glimmerRaid = (me.companion || '').toLowerCase() === 'glimmer' ? 1.15 : 1;

@@ -277,9 +277,15 @@ export async function addTradeItem(tradeId, itemName, qty) {
     const npcDoc = await _getNpcDocData(trade.targetNpcId, trade.targetNpcLoc);
     allItems = (npcDoc?.inventory || []).map(i => ({ name: i.name, qty: i.qty ?? 1, icon: i.icon || '' }));
   } else {
-    allItems = _getTradableItems(charData);
+    // Use window._charData for live inventory (module charData may be stale)
+    allItems = _getTradableItems(window._charData || charData);
   }
-  const owned = allItems.find(i => i.name === itemName);
+  // Flexible name match: strip +N enchant so "Abjuration +3" matches the offered slot
+  const baseLookup = (itemName || '').replace(/\s*\+\d+$/, '').trim().toLowerCase();
+  const owned = allItems.find(i =>
+    i.name === itemName ||
+    (i.name || '').replace(/\s*\+\d+$/, '').trim().toLowerCase() === baseLookup
+  );
   if (!owned || owned.qty < qty) {
     window.showToast?.(`You don't have ${qty}× ${itemName}.`, 'error'); return;
   }
@@ -335,8 +341,9 @@ export async function setTradeGold(tradeId, amount) {
   if (!uid || !charData) return;
 
   amount = Math.max(0, parseInt(amount) || 0);
-  if (amount > (charData.gold || 0)) {
-    window.showToast?.(`You only have ${charData.gold || 0} gold.`, 'error'); return;
+  const liveData = window._charData || charData;
+  if (amount > (liveData.gold || 0)) {
+    window.showToast?.(`You only have ${liveData.gold || 0} gold.`, 'error'); return;
   }
 
   const tradeRef = doc(db, 'trades', tradeId);
@@ -387,12 +394,24 @@ export async function confirmTrade(tradeId) {
     verifyInv  = npcDoc?.inventory || [];
     verifyGold = npcDoc?.gold ?? 0;
   } else {
-    verifyInv  = charData.inventory || [];
-    verifyGold = charData.gold || 0;
+    // Always use the freshest available charData — window._charData is kept live by
+    // dashboard.js and updated on every inventory change; the module-level charData
+    // is only a snapshot from initTradeSystem time and may be stale.
+    const liveData = window._charData || charData;
+    verifyInv  = liveData.inventory || [];
+    verifyGold = liveData.gold || 0;
+  }
+  // Name-matching is flexible: strip +N enchant suffix so "Abjuration +3" matches "Abjuration"
+  function _invQty(inv, itemName) {
+    const baseName = (itemName || '').replace(/\s*\+\d+$/, '').trim().toLowerCase();
+    return inv.reduce((sum, i) => {
+      const iBase = (i.name || '').replace(/\s*\+\d+$/, '').trim().toLowerCase();
+      return (iBase === baseName || i.name === itemName) ? sum + (i.qty ?? 1) : sum;
+    }, 0);
   }
   for (const offered of (myItems || [])) {
-    const owned = verifyInv.find(i => i.name === offered.name);
-    if (!owned || (owned.qty ?? 1) < offered.qty) {
+    const qty = _invQty(verifyInv, offered.name);
+    if (qty < offered.qty) {
       window.showToast?.(`You no longer have ${offered.qty}× ${offered.name}.`, 'error'); return;
     }
   }
@@ -632,8 +651,13 @@ function _addToInv(inv, name, qty, icon) {
 }
 
 function _getIcon(name) {
+  // Prefer the full getItemIcon function exposed by dashboard.js (handles fuzzy matching,
+  // base-name stripping, etc.). Fall back to the raw ITEM_ICONS dict, then the box emoji.
+  if (window.getItemIcon) return window.getItemIcon(name);
   const icons = window.ITEM_ICONS || {};
-  return icons[name] || '📦';
+  // Strip enchant suffix for lookup
+  const base = (name || '').replace(/\s*\+\d+$/, '').trim();
+  return icons[name] || icons[base] || '📦';
 }
 
 function _buildTradeSummary(items, gold) {
@@ -1061,14 +1085,17 @@ function _renderTradeModal(trade, tradeId) {
 
 // ── Build full tradeable item list from charData ─────
 function _getTradableItems(charData) {
+  // Always prefer the live window._charData so the picker shows the current inventory
+  // (the module-level _charData is only updated at initTradeSystem time and can be stale).
+  const cd = window._charData || charData || {};
   const items = [];
   // Regular inventory
-  for (const i of (charData.inventory || [])) {
+  for (const i of (cd.inventory || [])) {
     if (i.name) items.push({ name: i.name, qty: i.qty ?? 1, icon: i.icon || _getIcon(i.name) });
   }
   // Equipped items: only add if NOT already in inventory (inventory filter excludes equipped items
   // on the dashboard side, so equipped items won't double-count here).
-  const eq = charData.equipment || {};
+  const eq = cd.equipment || {};
   if (eq.weapon) {
     const wBase = eq.weapon.replace(/\s*\+\d+$/, '').trim();
     const existing = items.find(i => i.name.replace(/\s*\+\d+$/, '').trim() === wBase);
@@ -1222,6 +1249,7 @@ export function renderTradeCard(trade, tradeId, el) {
 
 // ── Global bindings ────────────────────────────────
 window.initTradeSystem      = initTradeSystem;
+window.updateTradeCharData  = updateTradeCharData;   // called by dashboard._refreshInvDisplay to keep charData live
 window.acceptNpcTrade        = (id, npcUid) => acceptNpcTrade(id, npcUid).catch(e => window.showToast?.(e.message, 'error'));
 window.updateTradeContext   = updateTradeContext;
 window.initiateTrade        = initiateTrade;

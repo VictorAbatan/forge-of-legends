@@ -19,6 +19,9 @@ let _chatLocationId = null;
 // Active onSnapshot unsubs keyed by duelId
 const _duelUnsubs = {};
 
+// Per-duel action-in-flight lock — prevents double-tap / rapid-click duplicate submissions
+const _duelActionLocks = {};   // duelId → true while a turn write is in progress
+
 // ── Always-fresh uid/charData resolvers ───────────
 function _getUid() {
   return _uid || auth?.currentUser?.uid || window._uid || null;
@@ -349,6 +352,20 @@ export async function declineDuelChallenge(duelId) {
 
 // ── Take a turn ────────────────────────────────────
 export async function doDuelTurn(duelId, action, extraArg) {
+  // Prevent double-tap / race: only one turn write in flight per duel at a time
+  if (_duelActionLocks[duelId]) {
+    window.showToast?.('⏳ Processing your last action…', 'info');
+    return;
+  }
+  _duelActionLocks[duelId] = true;
+  try {
+    await _doDuelTurnInner(duelId, action, extraArg);
+  } finally {
+    delete _duelActionLocks[duelId];
+  }
+}
+
+async function _doDuelTurnInner(duelId, action, extraArg) {
   const uid = _getUid();
   if (!uid) {
     window.showToast?.('⚠️ Not logged in — cannot take turn. Please refresh.', 'error');
@@ -386,6 +403,16 @@ export async function doDuelTurn(duelId, action, extraArg) {
   const actingAsNpc = isNpcTurn;
   const isChallenger = actingAsNpc ? (duel.targetId === duel.currentTurnUid ? false : true)
     : (duel.challengerId === uid);
+
+  // Guard: if my state says I'm stunned, reject the action even if currentTurnUid somehow
+  // points to me (race condition between stun-apply write and snapshot delivery).
+  if (!actingAsNpc) {
+    const myStateKeyGuard = isChallenger ? 'challengerState' : 'targetState';
+    if (duel[myStateKeyGuard]?.stunned) {
+      window.showToast?.("💫 You are stunned and cannot act!", 'error');
+      return;
+    }
+  }
   // For NPC turns: NPC is always targetId (npc_xxx), human is challengerId
   const me  = actingAsNpc ? duel.targetData     : (isChallenger ? duel.challengerData : duel.targetData);
   const opp = actingAsNpc ? duel.challengerData : (isChallenger ? duel.targetData     : duel.challengerData);
@@ -984,6 +1011,20 @@ export function mountDuelCard(duelId, containerEl, fallbackSnapshot) {
         if (!window._duelStates) window._duelStates = {};
         window._duelStates[duelId] = snap.data();
         renderDuelCard(snap.data(), duelId, containerEl);
+
+        // Auto-fire stun skip: if it's MY turn but I'm flagged as stunned,
+        // automatically fire the skip action — buttons are hidden so there's no
+        // manual way to trigger it.
+        const duel  = snap.data();
+        const myUid = _getUid();
+        if (duel.status === 'active' && duel.currentTurnUid === myUid && !_duelActionLocks[duelId]) {
+          const amCh  = duel.challengerId === myUid;
+          const stKey = amCh ? 'challengerState' : 'targetState';
+          if (duel[stKey]?.stunned) {
+            // Small delay so the stunned announcement bubble renders first
+            setTimeout(() => doDuelTurn(duelId, 'melee'), 500);
+          }
+        }
       } else {
         unsub();
         delete _duelUnsubs[duelId];
@@ -1017,7 +1058,11 @@ export function renderDuelCard(duel, duelId, el) {
   const isNpcTurn    = isActive && duel.currentTurnUid?.startsWith('npc_');
   // It's "my turn" if it's literally my uid, OR it's an NPC's turn and I am a deity.
   // Players always wait when it's the NPC's turn — NPCs are deity-controlled.
-  const isMyTurn     = isActive && (
+  // Also suppress "my turn" if my state says I'm stunned — prevents the brief
+  // "YOUR TURN" flicker that appears while Firestore commits the stun-skip update.
+  const myDuelStateKey = amChallenger ? 'challengerState' : 'targetState';
+  const myDuelState    = duel[myDuelStateKey] || {};
+  const isMyTurn     = isActive && !myDuelState.stunned && (
     duel.currentTurnUid === myUid ||
     (isNpcTurn && _isDeity)
   );
