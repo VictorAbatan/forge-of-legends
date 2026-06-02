@@ -9102,7 +9102,7 @@ function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stat
       const defPen     = sk.defPen || 0;
       const rawEffDefDP = Math.floor(monster.def * defBreakFactor * (1 - defPen));
     const _dpDefRatio = rawEffDefDP / (rawEffDefDP + 50);
-    const effectiveDef = Math.round(primary * _dpDefRatio);
+    const effectiveDef = Math.round(primaryVal * _dpDefRatio);
       dmg = Math.max(1, Math.round(primaryVal * mult) - effectiveDef);
       if (b.defBreak) updates.defBreak = false;  // consume after use
       // Echo-strike doubles the hit
@@ -9120,7 +9120,7 @@ function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stat
       // Diminishing-returns mitigation for skill damage (prevents 1-damage at high rank)
     const rawEffDefS = Math.floor(monster.def * defBreakFactor);
     const _skillDefRatio = rawEffDefS / (rawEffDefS + 50);
-    const effectiveDef = Math.round(primary * _skillDefRatio);  // acts as mitigation amount for subtraction formula
+    const effectiveDef = Math.round(primaryVal * _skillDefRatio);
       dmg = Math.max(1, Math.round(primaryVal * mult) - effectiveDef);
       monHp = Math.max(0, monHp - dmg);
       log.push(hpPct <= sk.threshold
@@ -9144,7 +9144,7 @@ function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stat
       // Diminishing-returns mitigation for skill damage (prevents 1-damage at high rank)
     const rawEffDefS = Math.floor(monster.def * defBreakFactor);
     const _skillDefRatio = rawEffDefS / (rawEffDefS + 50);
-    const effectiveDef = Math.round(primary * _skillDefRatio);  // acts as mitigation amount for subtraction formula
+    const effectiveDef = Math.round(primaryVal * _skillDefRatio);
       dmg = Math.max(1, Math.round(primaryVal * mult) - effectiveDef);
       monHp = Math.max(0, monHp - dmg);
       log.push(`🗡️ ${skillName}: ${dmg} damage${hasDebuff ? " (bonus vs debuffed!)" : ""}`);
@@ -9219,7 +9219,7 @@ function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stat
       // Diminishing-returns mitigation for skill damage (prevents 1-damage at high rank)
     const rawEffDefS = Math.floor(monster.def * defBreakFactor);
     const _skillDefRatio = rawEffDefS / (rawEffDefS + 50);
-    const effectiveDef = Math.round(primary * _skillDefRatio);  // acts as mitigation amount for subtraction formula
+    const effectiveDef = Math.round(primaryVal * _skillDefRatio);
       dmg = Math.max(1, Math.round(primaryVal * (sk.mult || 1.00)) - effectiveDef);
       monHp = Math.max(0, monHp - dmg);
       updates.monsterStunned = true;
@@ -9314,7 +9314,7 @@ function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stat
       // Diminishing-returns mitigation for skill damage (prevents 1-damage at high rank)
     const rawEffDefS = Math.floor(monster.def * defBreakFactor);
     const _skillDefRatio = rawEffDefS / (rawEffDefS + 50);
-    const effectiveDef = Math.round(primary * _skillDefRatio);  // acts as mitigation amount for subtraction formula
+    const effectiveDef = Math.round(primaryVal * _skillDefRatio);
       dmg = Math.max(1, Math.round(primaryVal * sk.mult) - effectiveDef);
       if (b.echoActive) { dmg *= 2; updates.echoActive = false; log.push(`🔁 Echo-strike doubles the hit!`); }
       monHp = Math.max(0, monHp - dmg);
@@ -9336,7 +9336,7 @@ function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stat
       // Diminishing-returns mitigation for skill damage (prevents 1-damage at high rank)
     const rawEffDefS = Math.floor(monster.def * defBreakFactor);
     const _skillDefRatio = rawEffDefS / (rawEffDefS + 50);
-    const effectiveDef = Math.round(primary * _skillDefRatio);  // acts as mitigation amount for subtraction formula
+    const effectiveDef = Math.round(primaryVal * _skillDefRatio);
       dmg = Math.max(1, Math.round(primaryVal * 1.05) - effectiveDef);
       monHp = Math.max(0, monHp - dmg);
       log.push(`⚔️ ${skillName}: ${dmg} damage.`);
