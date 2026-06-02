@@ -103,6 +103,23 @@ async function getCharacter(uid) {
   return { id: snap.id, ...snap.data() };
 }
 
+// Safe read-modify-write for inventory (and any other char fields).
+// Retries automatically on contention. Use instead of getCharacter + .update()
+// whenever the write includes inventory to prevent race-condition clobbers.
+async function withCharTransaction(uid, fn) {
+  const charRef = db.collection("characters").doc(uid);
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(charRef);
+    if (!snap.exists) throw new HttpsError("not-found", "Character not found.");
+    const char = { id: snap.id, ...snap.data() };
+    const updates = await fn(char, tx);
+    if (updates && Object.keys(updates).length > 0) {
+      tx.update(charRef, updates);
+    }
+    return updates;
+  });
+}
+
 function getRankIdx(rank) {
   return Math.max(0, RANK_ORDER.indexOf(rank));
 }
@@ -684,34 +701,34 @@ exports.craftItem = onCall(CALL_OPTS, async (request) => {
 
   if (!recipe) throw new HttpsError("not-found", `Recipe not found: ${recipeName}`);
 
-  const char = await getCharacter(uid);
-  const inv  = [...(char.inventory||[])];
+  // Use a transaction so a simultaneous gather/battle victory can't clobber inventory
+  let craftedItem;
+  await withCharTransaction(uid, async (char) => {
+    const inv = [...(char.inventory||[])];
 
-  for (const req of recipe.requires) {
-    const owned = inv.find(i => i.name === req.name);
-    if (!owned || owned.qty < req.qty)
-      throw new HttpsError("failed-precondition", `Missing materials: need ${req.qty}x ${req.name}, have ${owned?.qty||0}`);
-  }
-  if ((char.gold||0) < (recipe.cost||0))
-    throw new HttpsError("failed-precondition", `Not enough gold. Need ${recipe.cost}, have ${char.gold||0}`);
+    for (const req of recipe.requires) {
+      const owned = inv.find(i => i.name === req.name);
+      if (!owned || owned.qty < req.qty)
+        throw new HttpsError("failed-precondition", `Missing materials: need ${req.qty}x ${req.name}, have ${owned?.qty||0}`);
+    }
+    if ((char.gold||0) < (recipe.cost||0))
+      throw new HttpsError("failed-precondition", `Not enough gold. Need ${recipe.cost}, have ${char.gold||0}`);
 
-  for (const req of recipe.requires) {
-    const item = inv.find(i => i.name === req.name);
-    item.qty -= req.qty;
-    if (item.qty <= 0) inv.splice(inv.indexOf(item), 1);
-  }
+    for (const req of recipe.requires) {
+      const item = inv.find(i => i.name === req.name);
+      item.qty -= req.qty;
+      if (item.qty <= 0) inv.splice(inv.indexOf(item), 1);
+    }
 
-  const typeIcons = { weapon:"⚔️", armor:"🛡️", consumable:"🧪" };
-  const crafted = { name: recipe.name, icon: recipe.icon || typeIcons[recipe.type] || "📦", type: recipe.type, qty: 1 };
-  if (isEquipmentType(recipe.type)) crafted.iid = makeIid();
-  const merged  = mergeInventory(inv, [crafted]);
+    const typeIcons = { weapon:"⚔️", armor:"🛡️", consumable:"🧪" };
+    craftedItem = { name: recipe.name, icon: recipe.icon || typeIcons[recipe.type] || "📦", type: recipe.type, qty: 1 };
+    if (isEquipmentType(recipe.type)) craftedItem.iid = makeIid();
+    const merged = mergeInventory(inv, [craftedItem]);
 
-  await db.collection("characters").doc(uid).update({
-    inventory: merged,
-    gold:      (char.gold||0) - (recipe.cost||0),
+    return { inventory: merged, gold: (char.gold||0) - (recipe.cost||0) };
   });
 
-  return { success: true, item: crafted, message: `${recipe.name} crafted successfully!` };
+  return { success: true, item: craftedItem, message: `${craftedItem.name} crafted successfully!` };
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -732,41 +749,44 @@ exports.enchantItem = onCall(CALL_OPTS, async (request) => {
   const successRate   = rates[currentEnchantLevel];
   const runestoneName = `${itemGrade}-grade Runestone`;
 
-  const char = await getCharacter(uid);
-  const inv  = [...(char.inventory||[])];
+  // Transaction prevents race condition where another op overwrites inventory mid-enchant
+  let result;
+  await withCharTransaction(uid, async (char) => {
+    const inv = [...(char.inventory||[])];
 
-  const runeItem = inv.find(i => i.name === runestoneName);
-  if (!runeItem || runeItem.qty < reqs.stones)
-    throw new HttpsError("failed-precondition", `Need ${reqs.stones}x ${runestoneName}. Have ${runeItem?.qty||0}.`);
-  if ((char.gold||0) < reqs.coins)
-    throw new HttpsError("failed-precondition", `Need ${reqs.coins} gold. Have ${char.gold||0}.`);
+    const runeItem = inv.find(i => i.name === runestoneName);
+    if (!runeItem || runeItem.qty < reqs.stones)
+      throw new HttpsError("failed-precondition", `Need ${reqs.stones}x ${runestoneName}. Have ${runeItem?.qty||0}.`);
+    if ((char.gold||0) < reqs.coins)
+      throw new HttpsError("failed-precondition", `Need ${reqs.coins} gold. Have ${char.gold||0}.`);
 
-  // Match by iid (unique instance id) — unambiguous regardless of duplicates
-  const targetItem = inv.find(i => i.iid === iid);
-  if (!targetItem) throw new HttpsError("not-found", `Item not found in inventory.`);
+    const targetItem = inv.find(i => i.iid === iid);
+    if (!targetItem) throw new HttpsError("not-found", `Item not found in inventory.`);
 
-  runeItem.qty -= reqs.stones;
-  if (runeItem.qty <= 0) inv.splice(inv.indexOf(runeItem), 1);
-  const newGold = (char.gold||0) - reqs.coins;
+    runeItem.qty -= reqs.stones;
+    if (runeItem.qty <= 0) inv.splice(inv.indexOf(runeItem), 1);
+    const newGold = (char.gold||0) - reqs.coins;
 
-  const success = Math.random() < successRate;
-  let message, newEnchantLevel = currentEnchantLevel;
+    const success = Math.random() < successRate;
+    let message, newEnchantLevel = currentEnchantLevel;
 
-  if (success) {
-    newEnchantLevel = currentEnchantLevel + 1;
-    const baseName = itemName.replace(/\s*\+\d+$/, "");
-    targetItem.enchantLevel = newEnchantLevel;
-    targetItem.name = `${baseName} +${newEnchantLevel}`;
-    if (["A","S"].includes(itemGrade) && (newEnchantLevel === 3 || newEnchantLevel === 5)) {
-      targetItem.bonusEffect = newEnchantLevel === 3 ? "Minor Effect Unlocked" : "Major Effect Unlocked";
+    if (success) {
+      newEnchantLevel = currentEnchantLevel + 1;
+      const baseName = itemName.replace(/\s*\+\d+$/, "");
+      targetItem.enchantLevel = newEnchantLevel;
+      targetItem.name = `${baseName} +${newEnchantLevel}`;
+      if (["A","S"].includes(itemGrade) && (newEnchantLevel === 3 || newEnchantLevel === 5)) {
+        targetItem.bonusEffect = newEnchantLevel === 3 ? "Minor Effect Unlocked" : "Major Effect Unlocked";
+      }
+      message = `✨ Enchantment succeeded! ${targetItem.name}`;
+    } else {
+      message = `💔 Enchantment failed. ${reqs.stones}x ${runestoneName} and ${reqs.coins} gold were consumed.`;
     }
-    message = `✨ Enchantment succeeded! ${targetItem.name}`;
-  } else {
-    message = `💔 Enchantment failed. ${reqs.stones}x ${runestoneName} and ${reqs.coins} gold were consumed.`;
-  }
 
-  await db.collection("characters").doc(uid).update({ inventory: inv, gold: newGold });
-  return { success, message, newEnchantLevel, successRate: Math.round(successRate * 100), item: targetItem };
+    result = { success, message, newEnchantLevel, successRate: Math.round(successRate * 100), item: targetItem };
+    return { inventory: inv, gold: newGold };
+  });
+  return result;
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -996,14 +1016,13 @@ exports.bestowResources = onCall(CALL_OPTS, async (request) => {
   await requireDeity(uid);
 
   const { targetUid, items, gold } = request.data;
-  const targetChar = await getCharacter(targetUid);
-  const inv        = mergeInventory(targetChar.inventory||[], items||[]);
-
-  await db.collection("characters").doc(targetUid).update({
-    inventory: inv,
-    gold:      (targetChar.gold||0) + (gold||0),
+  let targetName;
+  await withCharTransaction(targetUid, async (targetChar) => {
+    targetName = targetChar.name;
+    const inv = mergeInventory(targetChar.inventory||[], items||[]);
+    return { inventory: inv, gold: (targetChar.gold||0) + (gold||0) };
   });
-  return { success:true, message:`Resources bestowed upon ${targetChar.name}.` };
+  return { success:true, message:`Resources bestowed upon ${targetName}.` };
 });
 
 exports.createWorldEvent = onCall(CALL_OPTS, async (request) => {
@@ -1075,21 +1094,18 @@ exports.claimQuestReward = onCall(CALL_OPTS, async (request) => {
   const claimed = questData.claimed || [];
   if (claimed.includes(questKey)) throw new HttpsError("already-exists", "Reward already claimed.");
 
-  const char = await getCharacter(uid);
-  const inv  = mergeInventory(char.inventory||[], reward.items);
-  const { newXp, newLevel, newRank, leveledUp, xpMax } = processExp(
-    char.xp||0, char.xpMax||100, char.level||1, char.rank||"Wanderer", reward.exp
-  );
-
-  await Promise.all([
-    db.collection("characters").doc(uid).update({
-      gold:(char.gold||0)+reward.gold, inventory:inv,
-      xp:newXp, xpMax, level:newLevel, rank:newRank,
-    }),
-    db.collection("dailyQuests").doc(uid).update({ claimed: FieldValue.arrayUnion(questKey) }),
-  ]);
-
-  return { success:true, reward, newGold:(char.gold||0)+reward.gold, leveledUp, newLevel, newRank };
+  let claimResult;
+  await withCharTransaction(uid, async (char) => {
+    const inv = mergeInventory(char.inventory||[], reward.items);
+    const { newXp, newLevel, newRank, leveledUp, xpMax } = processExp(
+      char.xp||0, char.xpMax||100, char.level||1, char.rank||"Wanderer", reward.exp
+    );
+    claimResult = { success:true, reward, newGold:(char.gold||0)+reward.gold, leveledUp, newLevel, newRank };
+    return { gold:(char.gold||0)+reward.gold, inventory:inv, xp:newXp, xpMax, level:newLevel, rank:newRank };
+  });
+  // Mark quest as claimed outside the char transaction (different collection, no race risk)
+  await db.collection("dailyQuests").doc(uid).update({ claimed: FieldValue.arrayUnion(questKey) });
+  return claimResult;
 });
 
 // ═══════════════════════════════════════════════════════════════

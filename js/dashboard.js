@@ -2086,9 +2086,7 @@ function updateQuotaProgress(submit=false) {
       progress.completed = true; progress.bonus = true; progress.penalty = false;
 
       try {
-        await updateDoc(doc(db, "characters", _uid), {
-          inventory: finalInv, quotaProgress: progress, professionLuckBonus: true
-        });
+        await _invWrite(_uid, finalInv, { quotaProgress: progress, professionLuckBonus: true });
         _charData.inventory           = finalInv;
         _charData.quotaProgress       = progress;
         _charData.professionLuckBonus = true;
@@ -5954,14 +5952,14 @@ async function sellItem() {
       listedAt:    serverTimestamp(),
     });
 
-    // Deduct listed qty from player inventory
-    const inv = _charData.inventory || [];
+    // Deduct listed qty from player inventory — use _invWrite to prevent race clobbers
+    const inv = [...(_charData.inventory || [])];
     const invIdx = inv.findIndex(i => i.name === item.name);
     if (invIdx !== -1) {
       inv[invIdx].qty -= qty;
       if (inv[invIdx].qty <= 0) inv.splice(invIdx, 1);
     }
-    await updateDoc(doc(db, "characters", _uid), { inventory: inv });
+    await _invWrite(_uid, inv);
     _charData.inventory = inv;
     window._allInvItems = inv;
     window._refreshInvDisplay?.();
@@ -6874,9 +6872,8 @@ window._doGather = async function() {
         console.warn('[PET GROWTH DEBUG] No companion assigned to character.');
       }
 
-      // Save all updates
+      // Save all updates — use _invWrite queue so concurrent ops don't clobber inventory
       const updates = {
-        inventory: inv,
         professionXp: newProfXp,
         professionLvl: newProfLvl
       };
@@ -6884,8 +6881,8 @@ window._doGather = async function() {
         updates.companionExp = companionExp;
         updates.companionLevel = companionLevel;
       }
-      await updateDoc(doc(db,"characters",_uid), updates);
-      Object.assign(_charData, updates);
+      await _invWrite(_uid, inv, updates);
+      Object.assign(_charData, { inventory: inv, ...updates });
       showActiveProfession(_charData);
       // Force companion UI refresh after EXP update
       if (_charData.companion) {
@@ -13487,11 +13484,11 @@ const _RANDOM_EVENTS = {
         const inv   = [...(_charData.inventory||[])];
         const ex    = inv.find(i=>i.name===item);
         if (ex) ex.qty++; else inv.push({name:item,qty:1,type:getItemType(item)});
-        const updates = { inventory:inv, gold:(_charData.gold||0)+gold };
-        await updateDoc(doc(db,'characters',_uid), updates);
-        Object.assign(_charData, updates);
+        await _invWrite(_uid, inv, { gold:(_charData.gold||0)+gold });
+        _charData.inventory = inv;
+        _charData.gold = (_charData.gold||0)+gold;
         set('stat-gold',_charData.gold); set('s-gold',_charData.gold);
-        window._refreshInvDisplay();
+        window._allInvItems = inv; window._refreshInvDisplay();
         window.showToast(`A Kind Stranger gifted you ${gold} coins and a ${item}!`, 'success');
         logActivity('🤝', `<b>A Kind Stranger</b> crossed your path and left you <b>${gold} coins</b> and a <b>${item}</b>.`, '#70c090');
       }
@@ -13522,7 +13519,7 @@ const _RANDOM_EVENTS = {
         const inv   = [...(_charData.inventory||[])];
         const ex    = inv.find(i=>i.name===item);
         if (ex) ex.qty+=bonus; else inv.push({name:item,qty:bonus,type:'material'});
-        await updateDoc(doc(db,'characters',_uid),{inventory:inv});
+        await _invWrite(_uid, inv);
         _charData.inventory=inv; window._allInvItems=inv; window._refreshInvDisplay();
         window.showToast(`Rich Vein Found! +${bonus} ${item}`, 'success');
         logActivity('⛏️', `<b>Rich Vein Found!</b> Your pick struck an exposed vein — bonus <b>x${bonus} ${item}</b> extracted.`, '#c9a84c');
@@ -13534,7 +13531,7 @@ const _RANDOM_EVENTS = {
         const inv   = [...(_charData.inventory||[])];
         const ex    = inv.find(i=>i.name===item);
         if (ex) ex.qty+=2; else inv.push({name:item,qty:2,type:'material'});
-        await updateDoc(doc(db,'characters',_uid),{inventory:inv});
+        await _invWrite(_uid, inv);
         _charData.inventory=inv; window._allInvItems=inv; window._refreshInvDisplay();
         window.showToast(`Golden Catch! Reeled in a rare ${item}!`, 'success');
         logActivity('🎣', `<b>Golden Catch!</b> Your line pulled taut — a rare <b>${item}</b> surfaced from the deep.`, '#e8d070');
@@ -13546,7 +13543,7 @@ const _RANDOM_EVENTS = {
         const inv   = [...(_charData.inventory||[])];
         const ex    = inv.find(i=>i.name===item);
         if (ex) ex.qty+=3; else inv.push({name:item,qty:3,type:'material'});
-        await updateDoc(doc(db,'characters',_uid),{inventory:inv});
+        await _invWrite(_uid, inv);
         _charData.inventory=inv; window._allInvItems=inv; window._refreshInvDisplay();
         window.showToast(`Bloom Surge! Triple ${item} found!`, 'success');
         logActivity('🌸', `<b>Bloom Surge!</b> The area burst with growth — you collected triple <b>${item}</b>.`, '#70c090');
@@ -13558,7 +13555,7 @@ const _RANDOM_EVENTS = {
         const inv   = [...(_charData.inventory||[])];
         const ex    = inv.find(i=>i.name===item);
         if (ex) ex.qty+=2; else inv.push({name:item,qty:2,type:'material'});
-        await updateDoc(doc(db,'characters',_uid),{inventory:inv});
+        await _invWrite(_uid, inv);
         _charData.inventory=inv; window._allInvItems=inv; window._refreshInvDisplay();
         window.showToast(`Rare Herb Patch! Bonus ${item} gathered.`, 'success');
         logActivity('🌿', `<b>Rare Patch!</b> You spotted a hidden cluster — bonus <b>x2 ${item}</b> gathered.`, '#70c090');
