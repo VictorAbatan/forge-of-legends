@@ -337,7 +337,7 @@ window.createParty = async function() {
       id: partyDoc.id, code,
       leader: _uid,
       createdAt: serverTimestamp(),
-      members: [{ uid: _uid, name: _charData.name, avatar: _charData.avatarUrl }],
+      members: [{ uid: _uid, name: _charData.name, avatar: _charData.avatarUrl, rank: _charData.rank || 'Wanderer', level: _charData.level || 1 }],
       raid: null
     };
     await setDoc(partyDoc, partyData);
@@ -363,7 +363,7 @@ window.joinParty = async function(code) {
     snap.forEach(docSnap => { const d = docSnap.data(); if (d.code === code) found = d; });
     if (!found) { window.showToast('Party not found.', 'error'); window._raidState = 'init'; window.showBossSelect(); return; }
     await updateDoc(doc(db, 'parties', found.id), {
-      members: arrayUnion({ uid: _uid, name: _charData.name, avatar: _charData.avatarUrl })
+      members: arrayUnion({ uid: _uid, name: _charData.name, avatar: _charData.avatarUrl, rank: _charData.rank || 'Wanderer', level: _charData.level || 1 })
     });
     _partyId = found.id;
     subscribeParty(_partyId);
@@ -405,9 +405,10 @@ window.leaveParty = async function() {
     if (chosen === null) return; // cancelled
 
     const partyDoc = doc(db, 'parties', _partyId);
+    const selfMember = (_party.members || []).find(m => m.uid === _charData.uid) || { uid: _charData.uid, name: _charData.name, avatar: _charData.avatarUrl, rank: _charData.rank || 'Wanderer', level: _charData.level || 1 };
     await updateDoc(partyDoc, {
       leader: chosen.uid,
-      members: arrayRemove({ uid: _charData.uid, name: _charData.name, avatar: _charData.avatarUrl }),
+      members: arrayRemove(selfMember),
     });
     await updateDoc(doc(db, 'characters', _charData.uid), { gold: (_charData.gold || 0) - 2000 });
     _partyId = null; _party = null;
@@ -422,8 +423,9 @@ window.leaveParty = async function() {
   if (!confirmed) return;
 
   const partyDoc = doc(db, 'parties', _partyId);
+  const selfMember = (_party.members || []).find(m => m.uid === _charData.uid) || { uid: _charData.uid, name: _charData.name, avatar: _charData.avatarUrl, rank: _charData.rank || 'Wanderer', level: _charData.level || 1 };
   await updateDoc(partyDoc, {
-    members: arrayRemove({ uid: _charData.uid, name: _charData.name, avatar: _charData.avatarUrl }),
+    members: arrayRemove(selfMember),
   });
   await updateDoc(doc(db, 'characters', _charData.uid), { gold: (_charData.gold || 0) - 2000 });
   _partyId = null; _party = null;
@@ -843,7 +845,7 @@ window.showJoinPartyModal = function() {
         }
         const partyDoc = doc(db, 'parties', found.id);
         await updateDoc(partyDoc, {
-          members: arrayUnion({ uid: _charData.uid, name: _charData.name, avatar: _charData.avatarUrl })
+          members: arrayUnion({ uid: _charData.uid, name: _charData.name, avatar: _charData.avatarUrl, rank: _charData.rank || 'Wanderer', level: _charData.level || 1 })
         });
         _partyId = found.id;
         subscribeParty(_partyId);
@@ -5898,38 +5900,63 @@ async function sellItem() {
   if (!price||price<1){ errEl.textContent = "Enter a valid price.";       return; }
   if (qty > item.qty){ errEl.textContent = "Not enough of that item.";    return; }
 
-  // Enforce min/max price brackets — equipment grade takes priority over material rarity
-  const priceBrackets = {
-    // Materials by rarity
-    common:      [8,   12],
-    uncommon:    [18,  25],
-    rare:        [45,  65],
-    legendary:   [120, 180],
-    mythic:      [350, 500],
-    // Consumables
-    food:        [25,  1200],
-    potion:      [40,  400],
-    // Equipment by grade (wide ranges to reflect actual crafting costs)
-    equip_E:     [30,   300],
-    equip_D:     [100,  800],
-    equip_C:     [300,  2000],
-    equip_B:     [800,  5000],
-    equip_A:     [2000, 10000],
-    equip_S:     [5000, 30000],
+  // Enforce min/max price brackets — derived from crafting costs per item/tier
+  // Equipment: limits based on per-grade craft cost ranges (lower ≈ cost×0.90, upper ≈ cost×1.35)
+  const equipGradeBrackets = { E:[170,320], D:[370,650], C:[740,1300], B:[1950,3300], A:[4800,7900], S:[9200,14500] };
+  // Food: limits by grade (craft costs: Common 30, Uncommon 60, Rare 140, Legendary 350, Mythic 900)
+  const foodGradeBrackets = { Common:[25,45], Uncommon:[50,85], Rare:[120,190], Legendary:[300,480], Mythic:[800,1200] };
+  // Potions: limits by specific item name (craft costs reflected directly)
+  const potionNameBrackets = {
+    "Minor HP Potion":[25,45],   "Standard HP Potion":[65,105],   "Greater HP Potion":[175,270],
+    "Minor Mana Potion":[25,45], "Standard Mana Potion":[65,105], "Greater Mana Potion":[175,270],
+    "Minor Luck Potion":[25,45], "Standard Luck Potion":[65,105], "Greater Luck Potion":[175,270],
+    "Minor EXP Potion":[25,45],  "Standard EXP Potion":[65,105],  "Greater EXP Potion":[175,270],
+    "Stat Reset Potion":[1800,2700],
+    "Class Reset Potion":[4500,6500],
+    "Companion Change Potion":[5400,8000],
+    "Resurrection Potion":[4500,6500],
+    "Race Rebirth Potion":[9000,13000],
+    "Divine Shift Potion":[13500,20000],
   };
-  // Determine bracket — check equipment grade first
-  let bracket = "common";
+  // Materials: limits by rarity (not crafted, so rarity-based is appropriate)
+  const materialRarityBrackets = {
+    Common:[8,15], Uncommon:[18,30], Rare:[45,70], Legendary:[120,200], Mythic:[350,550], Deity:[500,1200],
+  };
+
+  // Determine bracket — equipment grade first, then food grade, then potion name, then material rarity
+  let minP, maxP;
   const n = item.name.toLowerCase();
-  if (getItemType(item.name) === 'equipment') {
-    const gradeMap = { E:'equip_E', D:'equip_D', C:'equip_C', B:'equip_B', A:'equip_A', S:'equip_S' };
-    bracket = gradeMap[item.grade] || 'equip_D';
-  } else if (["silver","bronze","obsidian","marble","quartz","golden pears","moon grapes","sunfruit","crystal berries","bitter root","silverfin","glowfish","spotted eel","coral snapper","red minnow","silverleaf","goldroot","nightshade","glowleaf","lotus","leather","fangs","fur","horns","claws"].some(x=>n.includes(x))) bracket = "uncommon";
-  else if (["gold","mythril","palladium","spirit plum","frost apples","ember fruit","shadowfish","flamefish","ying koi","spirit herb","jade vine","ghost root","spirit venison","shadow hide","drake meat"].some(x=>n.includes(x))) bracket = "rare";
-  else if (["titanium","adamantium","celestial fig","dragonfruit","celestial whale","black unagi","phoenix bloom","middlemist","cyclops eye","dragon scales"].some(x=>n.includes(x))) bracket = "legendary";
-  else if (["aetherium","eden's tear","cosmic leviathan","void orchid","titan heart"].some(x=>n.includes(x))) bracket = "mythic";
-  else if (["skewer","soup","carp","sardine","meat","food","herb fish","grilled","roasted","fried"].some(x=>n.includes(x))) bracket = "food";
-  else if (["potion","elixir"].some(x=>n.includes(x))) bracket = "potion";
-  const [minP, maxP] = priceBrackets[bracket];
+  const itemType = getItemType(item.name);
+  if (itemType === 'equipment') {
+    const g = item.grade || 'D';
+    [minP, maxP] = equipGradeBrackets[g] || equipGradeBrackets['D'];
+  } else if (itemType === 'consumable' && potionNameBrackets[item.name]) {
+    [minP, maxP] = potionNameBrackets[item.name];
+  } else if (itemType === 'consumable' && ["potion","elixir"].some(x=>n.includes(x))) {
+    // Generic potion fallback
+    [minP, maxP] = [25, 270];
+  } else if (itemType === 'consumable') {
+    // Food — determine grade from CANONICAL_FOOD_RECIPES
+    let foodGrade = 'Common';
+    if (window.CANONICAL_FOOD_RECIPES) {
+      for (const recipes of Object.values(window.CANONICAL_FOOD_RECIPES)) {
+        const found = recipes.find(r => r.name === item.name);
+        if (found?.grade) { foodGrade = found.grade; break; }
+      }
+    }
+    [minP, maxP] = foodGradeBrackets[foodGrade] || foodGradeBrackets['Common'];
+  } else {
+    // Material — use rarity field if available, else detect from name
+    let rarity = item.rarity || 'Common';
+    if (!item.rarity) {
+      if (["aetherium","titan heart","void crystal","eden's tear","cosmic leviathan"].some(x=>n.includes(x))) rarity = 'Mythic';
+      else if (["adamantium","titanium","dragon scales","cyclops eye","phoenix feather"].some(x=>n.includes(x))) rarity = 'Legendary';
+      else if (["gold","palladium","mythril","shadow hide","spirit venison","drake meat"].some(x=>n.includes(x))) rarity = 'Rare';
+      else if (["bronze","silver","obsidian","marble","tough hide","fangs","claws","horns","fire essence","water essence","earth essence","wind essence"].some(x=>n.includes(x))) rarity = 'Uncommon';
+      else if (["ephemeral","oil-stained","whispering","void-eye","orb of silence","magic crystal"].some(x=>n.includes(x))) rarity = 'Deity';
+    }
+    [minP, maxP] = materialRarityBrackets[rarity] || materialRarityBrackets['Common'];
+  }
   if (price < minP || price > maxP) {
     errEl.textContent = `Price for this item must be between ${minP} and ${maxP} coins.`;
     return;
@@ -6840,12 +6867,20 @@ window._doGather = async function() {
     // Veil blessing: +X% EXP from all activities including gathering
     const _veilGatherBonus = _charData?.deity === 'Veil' ? (1 + _getFaithBlessingPct(_charData)) : 1;
     const xpGainFinal = Math.round(xpGain * _veilGatherBonus);
-    const newProfXp  = (_charData.professionXp||0) + xpGainFinal;
-    // Use canonical PROF_EXP_TABLE (tripled values) — do NOT use the old inline table
-    const xpNeeded   = PROF_EXP_TABLE[Math.min(lvl, PROF_EXP_TABLE.length-2)] || 300;
-    let newProfLvl   = lvl;
-    let leveledProf  = false;
-    if (newProfXp >= xpNeeded && lvl < 10) { newProfLvl = lvl+1; leveledProf=true; }
+    let newProfXp  = (_charData.professionXp||0) + xpGainFinal;
+    let newProfLvl = lvl;
+    let leveledProf = false;
+    // Use a while loop so overflow XP carries forward and multi-level gains are handled
+    while (newProfLvl < 10) {
+      const xpNeeded = PROF_EXP_TABLE[Math.min(newProfLvl, PROF_EXP_TABLE.length-2)] || 300;
+      if (newProfXp >= xpNeeded) {
+        newProfXp -= xpNeeded; // subtract threshold so XP resets cleanly
+        newProfLvl++;
+        leveledProf = true;
+      } else {
+        break;
+      }
+    }
 
       // ── PET GROWTH SYSTEM ──
       // Updated Companion EXP/level curve
