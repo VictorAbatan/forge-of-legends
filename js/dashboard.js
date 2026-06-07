@@ -7338,9 +7338,9 @@ window._doGather = async function() {
   const PROF_ZONES = {
     Miner:     ["hobbit_cave","suldan_mine","argent_grotto","shiny_cavern","hobbit cave","suldan mine","argent grotto","shiny cavern"],
     Angler:    ["silver_lake","dream_river","moss_stream","golden_river","silver lake","dream river","moss stream","golden river"],
-    Forager:   ["wisteria","arctic_willow","arctic_willow_west","asahi","wisteria forest","arctic willow","asahi valley"],
-    Herbalist: ["wisteria","arctic_willow","arctic_willow_west","asahi","wisteria forest","arctic willow","asahi valley"],
-    Hunter:    ["wisteria","asahi","wisteria forest","asahi valley"],
+    Forager:   ["wisteria","arctic_willow","arctic_willow_west","asahi","summer_willow","wisteria forest","arctic willow","asahi valley","summer willow"],
+    Herbalist: ["wisteria","arctic_willow","arctic_willow_west","asahi","summer_willow","wisteria forest","arctic willow","asahi valley","summer willow"],
+    Hunter:    ["wisteria","asahi","summer_willow","wisteria forest","asahi valley","summer willow"],
   };
   const validZones = PROF_ZONES[prof] || [];
   const isAtResourceZone = validZones.some(z => loc.includes(z));
