@@ -300,8 +300,9 @@ export async function acceptDuelChallenge(duelId) {
     `⚔️ <b>${duel.challengerName}</b> vs <b>${me.name}</b> — the duel has begun! <b>${duel.challengerName}</b> takes the first move.`,
     '🔔'));
 
-  // Post the opening snapshot card
-  writes.push(_postDuelSnapshot(duelId, tab, locId, newSnapshot));
+  // NOTE: No _postDuelSnapshot here — the live card (patched above) already
+  // shows current state via its Firestore listener. Posting a snapshot here
+  // would create a duplicate static card directly below the live one.
 
   await Promise.all(writes);
 
@@ -404,15 +405,9 @@ async function _doDuelTurnInner(duelId, action, extraArg) {
   const isChallenger = actingAsNpc ? (duel.targetId === duel.currentTurnUid ? false : true)
     : (duel.challengerId === uid);
 
-  // Guard: if my state says I'm stunned, reject the action even if currentTurnUid somehow
-  // points to me (race condition between stun-apply write and snapshot delivery).
-  if (!actingAsNpc) {
-    const myStateKeyGuard = isChallenger ? 'challengerState' : 'targetState';
-    if (duel[myStateKeyGuard]?.stunned) {
-      window.showToast?.("💫 You are stunned and cannot act!", 'error');
-      return;
-    }
-  }
+  // Note: stunned check is handled inside _doDuelTurnInner after state is loaded,
+  // so that the stun-skip auto-fire (which calls doDuelTurn) can process correctly.
+  // Do NOT reject here — the stun-skip block below handles it.
   // For NPC turns: NPC is always targetId (npc_xxx), human is challengerId
   const me  = actingAsNpc ? duel.targetData     : (isChallenger ? duel.challengerData : duel.targetData);
   const opp = actingAsNpc ? duel.challengerData : (isChallenger ? duel.targetData     : duel.challengerData);
@@ -446,21 +441,30 @@ async function _doDuelTurnInner(duelId, action, extraArg) {
     return Math.max(0, damage - blocked);
   };
 
-  // If I am stunned this turn, skip my action and pass the turn back
+  // If I am stunned this turn, skip my action and pass the turn back.
+  // This fires for both the auto-fire 'stun_skip' action AND any other
+  // action the player somehow submits while stunned.
   if (myState.stunned) {
-    const hadAnnounced = !!myState.stunAnnounced;
     myState = { ...myState, stunned: false, stunAnnounced: false };
     const stunNextUid  = actingAsNpc ? duel.challengerId   : (isChallenger ? duel.targetId    : duel.challengerId);
     const stunNextName = actingAsNpc ? duel.challengerName : (isChallenger ? duel.targetName  : duel.challengerName);
-    // Advance the round when the stunned player's turn is consumed
+    // Round increments: only the NON-challenger's turn ending advances the round.
+    // When challenger is stunned and their turn is skipped, that counts as their turn ending,
+    // so we DO increment. When target is stunned and their turn is skipped, same logic.
+    // Result: always increment on stun-skip so round numbers stay consistent.
     const stunRound = duel.round + 1;
     await updateDoc(duelRef, { round: stunRound, currentTurnUid: stunNextUid, [myStateKey]: myState });
-    if (!hadAnnounced) {
-      await _postEventBubble(tab, locId, duelId,
-        `💫 <b>${meDisplayName}</b> is stunned and loses their turn!`, '💫');
-    }
+    // The stun announcement was already posted when the stun was applied — don't double-post.
+    await _postEventBubble(tab, locId, duelId,
+      `💫 <b>${meDisplayName}</b> is stunned and loses their turn!`, '💫');
     await _postEventBubble(tab, locId, duelId,
       `🔔 Round ${stunRound} — <b>${stunNextName}</b>'s turn!`, '🔔');
+    return;
+  }
+
+  // Reject any non-stun_skip action if somehow triggered while stunned (safety net)
+  if (action === 'stun_skip') {
+    // If we reach here without being stunned, it's a stale fire — ignore silently
     return;
   }
 
@@ -555,7 +559,7 @@ async function _doDuelTurnInner(duelId, action, extraArg) {
 
   // ── Resolve action ──────────────────────────────
   if (action === 'melee') {
-    dmg = _calcDamage(me, opp);
+    dmg = _calcDamage(me, opp, null, myState);
     oppHp = Math.max(0, oppHp - dmg);
     eventIcon = '⚔️';
     eventText = `<b>${meDisplayName}</b> strikes <b>${oppDisplayName}</b> for <span class="duel-dmg">${dmg}</span> damage!${skillLockNote}`;
@@ -616,31 +620,31 @@ async function _doDuelTurnInner(duelId, action, extraArg) {
 
 
     if (sk.type === 'damage') {
-      applyDamage(_calcDamage(me, opp) * (sk.mult || 1.0));
+      applyDamage(_calcDamage(me, opp, null, myState) * (sk.mult || 1.0));
       eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> for <span class="duel-dmg">${dmg}</span> damage!`;
     } else if (sk.type === 'backstab') {
       const firstHit = !myState.backstabUsed;
       const mult = firstHit ? (sk.mult || 1.75) : (sk.multAfter || 0.95);
-      applyDamage(_calcDamage(me, opp) * mult);
+      applyDamage(_calcDamage(me, opp, null, myState) * mult);
       myStateUpd.backstabUsed = true;
       eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> for <span class="duel-dmg">${dmg}</span> damage${firstHit ? ' (critical backstab!)' : ''}!`;
     } else if (sk.type === 'execute') {
-      const effective = _calcDamage(me, opp) * ((oppHp / (opp.maxHp || oppHp)) <= (sk.threshold || 0.35) ? (sk.mult || 1.8) : 1.05);
+      const effective = _calcDamage(me, opp, null, myState) * ((oppHp / (opp.maxHp || oppHp)) <= (sk.threshold || 0.35) ? (sk.mult || 1.8) : 1.05);
       applyDamage(effective);
       eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> for <span class="duel-dmg">${dmg}</span> damage!`;
     } else if (sk.type === 'priority') {
-      applyDamage(_calcDamage(me, opp) * ((sk.mult || 1.1)));
+      applyDamage(_calcDamage(me, opp, null, myState) * ((sk.mult || 1.1)));
       eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — a swift strike for <span class="duel-dmg">${dmg}</span> damage!`;
     } else if (sk.type === 'condDamage') {
       const hasDebuff = oppState.dotActive || oppState.deathMark || oppState.defBreak;
       const mult = hasDebuff ? (sk.mult || 1.25) : 1.05;
-      applyDamage(_calcDamage(me, opp) * mult);
+      applyDamage(_calcDamage(me, opp, null, myState) * mult);
       eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> for <span class="duel-dmg">${dmg}</span> damage${hasDebuff ? ' (bonus vs debuffed target)' : ''}!`;
     } else if (sk.type === 'multihit') {
       const hits = sk.hits || 2;
       let total = 0;
       for (let h = 0; h < hits; h++) {
-        total += Math.max(1, Math.round(_calcDamage(me, opp) * (sk.multPerHit || 0.60)));
+        total += Math.max(1, Math.round(_calcDamage(me, opp, null, myState) * (sk.multPerHit || 0.60)));
       }
       applyDamage(total);
       eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — ${hits} hits for <span class="duel-dmg">${dmg}</span> total damage!`;
@@ -658,14 +662,27 @@ async function _doDuelTurnInner(duelId, action, extraArg) {
       myStateUpd.shieldPct = sk.shieldPct || 0.20;
       eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — a protective shield is up!`;
     } else if (sk.type === 'buff') {
-      const buffKey = `buff_${sk.stat}`;
-      const cap = 1.60;
-      const nextVal = Math.min(cap, (myState[buffKey] || 0) + (sk.buffMult || 0));
-      myStateUpd[buffKey] = nextVal;
-      if (sk.hpBonus) {
-        myHp = Math.min(me.maxHp, myHp + Math.round(me.maxHp * sk.hpBonus));
+      if (sk.stat === 'all') {
+        // Buff all stats (Divine Ascension, Neptune's Embrace)
+        const cap = 1.60;
+        let added = 0;
+        for (const s of ['str','int','def','dex']) {
+          const bk = `buff_${s}`;
+          const next = Math.min(cap, (myState[bk] || 0) + (sk.buffMult || 0));
+          myStateUpd[bk] = next;
+          added = sk.buffMult || 0;
+        }
+        eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — ALL stats +${Math.round((sk.buffMult||0)*100)}%!`;
+      } else {
+        const buffKey = `buff_${sk.stat}`;
+        const cap = 1.60;
+        const nextVal = Math.min(cap, (myState[buffKey] || 0) + (sk.buffMult || 0));
+        myStateUpd[buffKey] = nextVal;
+        if (sk.hpBonus) {
+          myHp = Math.min(me.maxHp, myHp + Math.round(me.maxHp * sk.hpBonus));
+        }
+        eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — +${Math.round((nextVal - (myState[buffKey] || 0)) * 100)}% ${sk.stat.toUpperCase()}!`;
       }
-      eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — +${Math.round((nextVal - (myState[buffKey] || 0)) * 100)}% ${sk.stat.toUpperCase()}!`;
     } else if (sk.type === 'dot') {
       oppStateUpd.dotActive    = true;
       oppStateUpd.dotPct       = sk.dotPct   || 0.10;
@@ -674,14 +691,9 @@ async function _doDuelTurnInner(duelId, action, extraArg) {
       oppStateUpd.dotLifesteal = sk.lifesteal || false;
       eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — ${oppStateUpd.dotLabel} applied!`;
     } else if (sk.type === 'stun') {
-      applyDamage(_calcDamage(me, opp) * (sk.mult || 1.0));
+      applyDamage(_calcDamage(me, opp, null, myState) * (sk.mult || 1.0));
       oppStateUpd.stunned = true;
-      oppStateUpd.stunAnnounced = true;
       eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — <span class="duel-dmg">${dmg}</span> damage and <b>${oppDisplayName}</b> is stunned!`;
-      try {
-        await _postEventBubble(tab, locId, duelId,
-          `💫 <b>${oppDisplayName}</b> is stunned and will lose their next turn!`, '💫');
-      } catch (e) { console.warn('[Duel] could not post stun announcement:', e); }
     } else if (sk.type === 'skillock') {
       oppStateUpd.skillLocked = true;
       eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — ${oppDisplayName}'s special skills are locked for 1 turn!`;
@@ -712,7 +724,7 @@ async function _doDuelTurnInner(duelId, action, extraArg) {
     } else if (sk.type === 'summon') {
       const summonBuff = myState.summonBuff || 0;
       const dmgPct = (sk.summonDmgPct || 0.35) * (1 + summonBuff);
-      applyDamage(_calcDamage(me, opp) * dmgPct);
+      applyDamage(_calcDamage(me, opp, null, myState) * dmgPct);
       myStateUpd.summonActive = true;
       myStateUpd.summonDmgPct = dmgPct;
       myStateUpd.summonTurns = sk.unique ? 999 : (sk.summonTurns || 3);
@@ -752,21 +764,29 @@ async function _doDuelTurnInner(duelId, action, extraArg) {
         myStateUpd.summonActive = false;
         myStateUpd.summonTurns = 0;
         myStateUpd.leviathanSummoned = false;
-        applyDamage(_calcDamage(me, opp) * (sk.mult || 2.0));
+        applyDamage(_calcDamage(me, opp, null, myState) * (sk.mult || 2.0));
         eventText = `<b>${meDisplayName}</b> destroys all summons for <span class="duel-dmg">${dmg}</span> damage!`;
       }
     } else if (sk.type === 'sacrificial') {
       const selfCost = Math.round(me.maxHp * (sk.selfHpCost || 0.15));
       myHp = Math.max(1, myHp - selfCost);
-      const buffKey = `buff_${sk.buffStat}`;
-      myStateUpd[buffKey] = Math.min(1.60, (myState[buffKey] || 0) + (sk.buffMult || 0));
-      if (sk.buffStat2) {
-        const buffKey2 = `buff_${sk.buffStat2}`;
-        myStateUpd[buffKey2] = Math.min(1.60, (myState[buffKey2] || 0) + (sk.buffMult2 || 0));
+      if (sk.buffStat === 'all') {
+        for (const s of ['str','int','def','dex']) {
+          const bk = `buff_${s}`;
+          myStateUpd[bk] = Math.min(1.60, (myState[bk] || 0) + (sk.buffMult || 0));
+        }
+        eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — sacrifices <span class="duel-dmg">${selfCost} HP</span> for ALL stats +${Math.round((sk.buffMult||0)*100)}%!`;
+      } else {
+        const buffKey = `buff_${sk.buffStat}`;
+        myStateUpd[buffKey] = Math.min(1.60, (myState[buffKey] || 0) + (sk.buffMult || 0));
+        if (sk.buffStat2) {
+          const buffKey2 = `buff_${sk.buffStat2}`;
+          myStateUpd[buffKey2] = Math.min(1.60, (myState[buffKey2] || 0) + (sk.buffMult2 || 0));
+        }
+        eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — sacrifices <span class="duel-dmg">${selfCost} HP</span> for power!`;
       }
-      eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — sacrifices <span class="duel-dmg">${selfCost} HP</span> for power!`;
     } else {
-      applyDamage(_calcDamage(me, opp) * (sk.mult || 1.0));
+      applyDamage(_calcDamage(me, opp, null, myState) * (sk.mult || 1.0));
       eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> for <span class="duel-dmg">${dmg}</span> damage!`;
     }
 
@@ -828,41 +848,67 @@ async function _doDuelTurnInner(duelId, action, extraArg) {
       `🔔 Round ${newRound} — <b>${nextName}</b>'s turn!`, '🔔');
   }
 
-  // 2. Post updated snapshot card (always lands after the alerts)
-  const postSnap = {
+  // 2. Roll the live card forward:
+  //    a) Demote the OLD live card to a static historical record (no buttons, no listener).
+  //    b) Post a NEW live card at the bottom of chat so players see action buttons
+  //       right where they are without scrolling up.
+  //    c) Update duel.messageId to point to the new card for the next turn.
+  const newCardSnapshot = {
     challengerId:       duel.challengerId,
     challengerName:     duel.challengerName,
-    challengerHp:       updates.challengerHp ?? duel.challengerHp,
+    challengerHp:       updates.challengerHp   ?? duel.challengerHp,
     challengerMana:     updates.challengerMana ?? duel.challengerMana,
-    challengerMaxHp:    duel.challengerData?.maxHp ?? 100,
-    challengerMaxMana:  duel.challengerData?.maxMana ?? 50,
+    challengerMaxHp:    duel.challengerData?.maxHp   ?? duel.challengerMaxHp   ?? 100,
+    challengerMaxMana:  duel.challengerData?.maxMana ?? duel.challengerMaxMana ?? 50,
     challengerStance:   duel.challengerStance,
     challengerSkills:   duel.challengerSkills  || [],
     challengerRank:     duel.challengerData?.rank,
     challengerLevel:    duel.challengerData?.level,
     challengerAvatar:   duel.challengerData?.avatarUrl,
+    challengerState:    updates.challengerState ?? duel.challengerState ?? {},
     targetId:           duel.targetId,
     targetName:         duel.targetName,
-    targetHp:           updates.targetHp ?? duel.targetHp,
+    targetHp:           updates.targetHp   ?? duel.targetHp,
     targetMana:         updates.targetMana ?? duel.targetMana,
-    targetMaxHp:        duel.targetData?.maxHp ?? 100,
-    targetMaxMana:      duel.targetData?.maxMana ?? 50,
+    targetMaxHp:        duel.targetData?.maxHp   ?? duel.targetMaxHp   ?? 100,
+    targetMaxMana:      duel.targetData?.maxMana ?? duel.targetMaxMana ?? 50,
     targetStance:       duel.targetStance,
     targetSkills:       duel.targetSkills      || [],
     targetRank:         duel.targetData?.rank,
     targetLevel:        duel.targetData?.level,
     targetAvatar:       duel.targetData?.avatarUrl,
-    status:             updates.status ?? duel.status,
-    round:              updates.round ?? duel.round,
+    targetState:        updates.targetState ?? duel.targetState ?? {},
+    status:             updates.status        ?? duel.status,
+    round:              updates.round         ?? duel.round,
     currentTurnUid:     updates.currentTurnUid ?? duel.currentTurnUid,
     winnerId:           updates.winnerId   ?? duel.winnerId   ?? null,
     winnerName:         updates.winnerName ?? duel.winnerName ?? null,
     loserName:          updates.loserName  ?? duel.loserName  ?? null,
-    forfeit:            updates.forfeit    ?? duel.forfeit    ?? false,
+    forfeit:            false,
     chatTab:            tab,
     chatLocationId:     locId,
   };
-  await _postDuelSnapshot(duelId, tab, locId, postSnap);
+
+  // a) Demote old live card to frozen historical record.
+  if (duel.messageId) {
+    const oldLabel = isDuelOver
+      ? `🏆 ${meDisplayName} defeats ${oppDisplayName}! (Round ${duel.round})`
+      : `⚔️ ${duel.challengerName} vs ${duel.targetName} — Round ${duel.round}`;
+    await _demoteDuelCard(duel.messageId, tab, locId, newCardSnapshot, oldLabel);
+  }
+
+  if (!isDuelOver) {
+    // b) Post fresh live card at the bottom so players don't need to scroll up.
+    const newCardLabel = `⚔️ ${duel.challengerName} vs ${duel.targetName} — Round ${newRound}`;
+    const newCardRef = await _postDuelCard(duelId, tab, locId,
+      duel.challengerName, duel.targetName,
+      { ...newCardSnapshot, text: newCardLabel });
+
+    // c) Update messageId so the NEXT turn demotes this new card.
+    if (newCardRef?.id) {
+      await updateDoc(duelRef, { messageId: newCardRef.id });
+    }
+  }
 }
 
 // ── Forfeit ────────────────────────────────────────
@@ -897,17 +943,16 @@ export async function forfeitChatDuel(duelId) {
   writes.push(_postEventBubble(tab, locId, duelId,
     `🏳️ <b>${forfeitName}</b> forfeits! <b>${winnerName}</b> wins the duel!`, '🏳️'));
 
-  const forfeitSnap = {
-    challengerId: duel.challengerId, challengerName: duel.challengerName,
-    challengerHp: duel.challengerHp, challengerMana: duel.challengerMana, challengerMaxHp: duel.challengerData?.maxHp ?? 100, challengerMaxMana: duel.challengerData?.maxMana ?? 50, challengerStance: duel.challengerStance, challengerRank: duel.challengerData?.rank, challengerLevel: duel.challengerData?.level, challengerAvatar: duel.challengerData?.avatarUrl,
-    targetId: duel.targetId, targetName: duel.targetName,
-    targetHp: duel.targetHp, targetMana: duel.targetMana, targetMaxHp: duel.targetData?.maxHp ?? 100, targetMaxMana: duel.targetData?.maxMana ?? 50, targetStance: duel.targetStance, targetRank: duel.targetData?.rank, targetLevel: duel.targetData?.level, targetAvatar: duel.targetData?.avatarUrl,
-    status: 'complete', winnerId, winnerName, loserName: forfeitName, forfeit: true,
-    round: duel.round, currentTurnUid: null, chatTab: tab, chatLocationId: locId
-  };
-  writes.push(_postDuelSnapshot(duelId, tab, locId, forfeitSnap));
-
+  // Patch the live card to show the forfeit result — no new snapshot card.
   if (duel.messageId) {
+    const forfeitSnap = {
+      challengerId: duel.challengerId, challengerName: duel.challengerName,
+      challengerHp: duel.challengerHp, challengerMana: duel.challengerMana, challengerMaxHp: duel.challengerData?.maxHp ?? 100, challengerMaxMana: duel.challengerData?.maxMana ?? 50, challengerStance: duel.challengerStance, challengerRank: duel.challengerData?.rank, challengerLevel: duel.challengerData?.level, challengerAvatar: duel.challengerData?.avatarUrl,
+      targetId: duel.targetId, targetName: duel.targetName,
+      targetHp: duel.targetHp, targetMana: duel.targetMana, targetMaxHp: duel.targetData?.maxHp ?? 100, targetMaxMana: duel.targetData?.maxMana ?? 50, targetStance: duel.targetStance, targetRank: duel.targetData?.rank, targetLevel: duel.targetData?.level, targetAvatar: duel.targetData?.avatarUrl,
+      status: 'complete', winnerId, winnerName, loserName: forfeitName, forfeit: true,
+      round: duel.round, currentTurnUid: null, chatTab: tab, chatLocationId: locId
+    };
     writes.push(_patchDuelCard(duel.messageId, tab, locId, forfeitSnap,
       `🏳️ ${forfeitName} forfeits! ${winnerName} wins the duel!`));
   }
@@ -1022,7 +1067,7 @@ export function mountDuelCard(duelId, containerEl, fallbackSnapshot) {
           const stKey = amCh ? 'challengerState' : 'targetState';
           if (duel[stKey]?.stunned) {
             // Small delay so the stunned announcement bubble renders first
-            setTimeout(() => doDuelTurn(duelId, 'melee'), 500);
+            setTimeout(() => doDuelTurn(duelId, 'stun_skip'), 500);
           }
         }
       } else {
@@ -1043,7 +1088,9 @@ export function mountDuelCard(duelId, containerEl, fallbackSnapshot) {
 }
 
 // ── Render the duel card HTML ──────────────────────
-export function renderDuelCard(duel, duelId, el) {
+// Pass isStaticSnapshot=true for historical/past turn cards so they never
+// show action buttons — only the live card (isLiveDuelCard=true) should be interactive.
+export function renderDuelCard(duel, duelId, el, isStaticSnapshot = false) {
   if (!el || !duel) return;
 
   const myUid = _getUid();
@@ -1062,7 +1109,7 @@ export function renderDuelCard(duel, duelId, el) {
   // "YOUR TURN" flicker that appears while Firestore commits the stun-skip update.
   const myDuelStateKey = amChallenger ? 'challengerState' : 'targetState';
   const myDuelState    = duel[myDuelStateKey] || {};
-  const isMyTurn     = isActive && !myDuelState.stunned && (
+  const isMyTurn     = !isStaticSnapshot && isActive && !myDuelState.stunned && (
     duel.currentTurnUid === myUid ||
     (isNpcTurn && _isDeity)
   );
@@ -1152,7 +1199,7 @@ export function renderDuelCard(duel, duelId, el) {
       </div>`;
   }
 
-  const canForfeit = isActive && (amTarget || amChallenger || _isDeity);
+  const canForfeit = !isStaticSnapshot && isActive && (amTarget || amChallenger || _isDeity);
   const forfeitBtn = canForfeit
     ? `<div class="duel-forfeit-row"><button class="duel-forfeit-btn" onclick="window.forfeitChatDuel('${duelId}')">🏳️ Forfeit</button></div>`
     : '';
@@ -1483,7 +1530,7 @@ export async function acceptNpcDuelChallenge(duelId, npcUid) {
   writes.push(_postEventBubble(tab, locId, duelId,
     `⚔️ <b>${duel.challengerName}</b> vs <b>${duel.targetName}</b> — the duel has begun! <b>${duel.challengerName}</b> takes the first move.`,
     '🔔'));
-  writes.push(_postDuelSnapshot(duelId, tab, locId, newSnapshot));
+  // NOTE: No _postDuelSnapshot here — live card handles display.
   await Promise.all(writes);
 
   window.showToast?.(`⚔️ ${duel.targetName} accepts the challenge!`, '');
@@ -1537,21 +1584,42 @@ async function _postDuelCard(duelId, tab, locId, challengerName, targetName, sna
   });
 }
 
-// Patch the initial duel card (used for accept/decline only)
+// Patch an existing duel card message.
+// snapshot=null  -> text-only update (e.g. during live turns — card re-renders via onSnapshot).
+// snapshot!=null -> full snapshot + isLiveDuelCard flag update (accept/decline/forfeit).
 async function _patchDuelCard(messageId, tab, locId, snapshot, text = null) {
   if (!messageId) return;
   const ref = _msgRef(tab, locId);
   if (!ref) return;
+  const updateData = { timestamp: serverTimestamp() };
+  if (snapshot !== null) {
+    updateData.duelSnapshot   = snapshot;
+    updateData.isLiveDuelCard = snapshot.status === 'active' || snapshot.status === 'pending';
+  }
+  if (text !== null) updateData.text = text;
+  try {
+    await updateDoc(doc(ref, messageId), updateData);
+  } catch (e) {
+    console.error('[Duel] _patchDuelCard failed:', e.code, e.message);
+  }
+}
+
+// Demote a live card to a static historical record.
+// Writes isLiveDuelCard:false + frozen snapshot so dashboard stops mounting a listener on it.
+async function _demoteDuelCard(messageId, tab, locId, snapshot, text = null) {
+  if (!messageId) return;
+  const ref = _msgRef(tab, locId);
+  if (!ref) return;
   const updateData = {
+    isLiveDuelCard: false,
     duelSnapshot:   snapshot,
-    isLiveDuelCard: snapshot.status === 'active' || snapshot.status === 'pending',
     timestamp:      serverTimestamp(),
   };
   if (text !== null) updateData.text = text;
   try {
     await updateDoc(doc(ref, messageId), updateData);
   } catch (e) {
-    console.error('[Duel] _patchDuelCard failed:', e.code, e.message);
+    console.error('[Duel] _demoteDuelCard failed:', e.code, e.message);
   }
 }
 
@@ -1610,12 +1678,26 @@ async function _postDuelSnapshot(duelId, tab, locId, snapshot) {
 //   scaled ≈ 150 × min(5, 20/1) = 150 × 5 = 750 (hits are massive)
 //   Rank 0 maxHp ≈ 110 → instant KO ✓
 // Two equal players (same rank/level) land balanced ~20–40% max HP hits.
-function _calcDamage(me, opp, skillType = null) {
+function _calcDamage(me, opp, skillType = null, myState = null) {
   const RANK_ORDER = ['Wanderer','Follower','Disciple','Master','Exalted','Crown','Supreme','Legend','Myth','Eternal'];
 
-  // Determine attacker's primary stat
+  // Determine attacker's primary stat with active buffs applied
   let primary = _getPrimary(me);
   if (skillType && skillType.includes('Magic')) primary = me.int || 10;
+
+  // Apply buff multipliers from state (Battle Cry, Iron Momentum, etc.)
+  if (myState) {
+    const cls = me.charClass || '';
+    if (['Arcanist','Cleric','Summoner'].includes(cls)) {
+      primary = Math.round(primary * (1 + (myState.buff_int || 0)));
+    } else if (['Hunter','Assassin'].includes(cls)) {
+      primary = Math.round(primary * (1 + (myState.buff_dex || 0)));
+    } else if (cls === 'Guardian') {
+      primary = Math.round(primary * (1 + (myState.buff_def || 0)));
+    } else {
+      primary = Math.round(primary * (1 + (myState.buff_str || 0)));
+    }
+  }
 
   // Level scaling: attacker level / defender level, clamped 0.5–5.0
   const atkLevel = (RANK_ORDER.indexOf(me.rank || 'Wanderer') * 10) + (me.level || 1);
@@ -1635,6 +1717,7 @@ function _calcDamage(me, opp, skillType = null) {
   const rawDmg = base * variance * critMult;
 
   // Defender mitigation: diminishing returns so def never blocks 100%
+  // Apply defBreak on the defender's side
   const effDef   = opp.def || 5;
   const defRatio = effDef / (effDef + 25);
   const mitigated = rawDmg * (1 - defRatio);
@@ -1717,7 +1800,7 @@ const SKILL_DATA = {
   "Battle Cry":        { mana:10, type:"buff",         stat:"str",  buffMult:0.20 },
   "Crushing Blow":     { mana:0,  type:"damage",      mult:1.10, stat:"str", defPen:0.10 },
   "War Stomp":         { mana:0,  type:"stun",         mult:1.00, stat:"str" },
-  "Bleeding Edge":     { mana:20, type:"dot",          dotPct:0.15, dotTurns:3, stat:"str" },
+  "Bleeding Edge":     { mana:20, type:"dot",          dotPct:0.15, dotTurns:3, dotLabel:"Bleed", stat:"str" },
   "Iron Momentum":     { mana:20, type:"buff",         stat:"str",  buffMult:0.30 },
   "Blood Gamble":      { mana:25, type:"sacrificial",  selfHpCost:0.15, buffStat:"str", buffMult:0.50 },
   "Titan Breaker":     { mana:50, type:"damage",      mult:1.70, stat:"str", defPen:0.50 },
@@ -1739,17 +1822,17 @@ const SKILL_DATA = {
   "Mana Pulse":        { mana:0,  type:"damage",      mult:1.00, stat:"int" },
   "Robust Mind":       { mana:10, type:"buff",         stat:"int",  buffMult:0.20 },
   "Astral Lance":      { mana:25, type:"damage",      mult:1.40, stat:"int" },
-  "Mind Burn":         { mana:20, type:"dot",          dotPct:0.15, dotTurns:3, stat:"int" },
+  "Mind Burn":         { mana:20, type:"dot",          dotPct:0.15, dotTurns:3, dotLabel:"Mind Burn", stat:"int" },
   "Echo-strike":       { mana:25, type:"echo" },
   "Rune Sacrifice":    { mana:20, type:"sacrificial",  selfHpCost:0.20, buffStat:"int", buffMult:0.50 },
   "Meteorfall":        { mana:50, type:"damage",      mult:1.80, stat:"int" },
   "Arcane Shower":     { mana:50, type:"buff",         stat:"int",  buffMult:0.80 },
-  "Hex":               { mana:50, type:"dot",          dotPct:0.05, dotTurns:5, stat:"int" },
+  "Hex":               { mana:50, type:"dot",          dotPct:0.05, dotTurns:5, dotLabel:"Hex Curse", stat:"int" },
   // ── Hunter ──
   "Pierce":            { mana:0,  type:"damage",      mult:1.05, stat:"dex" },
-  "Hunter's Poison":   { mana:10, type:"dot",          dotPct:0.10, dotTurns:3, stat:"dex" },
+  "Hunter's Poison":   { mana:10, type:"dot",          dotPct:0.10, dotTurns:3, dotLabel:"Poison", stat:"dex" },
   "Quick Shot":        { mana:0,  type:"priority" },
-  "Split Arrow":       { mana:20, type:"dot",          dotPct:0.15, dotTurns:3, stat:"dex" },
+  "Split Arrow":       { mana:20, type:"dot",          dotPct:0.15, dotTurns:3, dotLabel:"Bleeding", stat:"dex" },
   "Ensnare":           { mana:0,  type:"stun",         mult:0.80, stat:"dex" },
   "Falcon Sight":      { mana:20, type:"buff",         stat:"dex",  buffMult:0.30 },
   "Vital Shot":        { mana:0,  type:"damage",      mult:1.35, stat:"dex" },
@@ -1776,19 +1859,19 @@ const SKILL_DATA = {
   "Radiant Pulse":     { mana:20, type:"hot",          hotPct:0.10, hotTurns:3 },
   "Life Exchange":     { mana:20, type:"sacrificial",  selfHpCost:0.15, buffStat:"all", buffMult:0.20 },
   "Sanctuary":         { mana:40, type:"hpbuff",       hpMult:0.50 },
-  "Divine Ascension":  { mana:50, type:"buff",         stat:"int",  buffMult:0.60 },
+  "Divine Ascension":  { mana:50, type:"buff",         stat:"all",  buffMult:0.60 },
   "Lazarus":           { mana:50, type:"heal",         healPct:0.50 },
   // ── Summoner ──
   "Lashing":           { mana:5,  type:"damage",      mult:1.05, stat:"int" },
   "Soul Bind":         { mana:10, type:"stun",         mult:1.00, stat:"int" },
-  "Essence Sap":       { mana:10, type:"dot",          dotPct:0.10, dotTurns:4, stat:"int" },
+  "Essence Sap":       { mana:10, type:"dot",          dotPct:0.10, dotTurns:4, dotLabel:"Essence Drain", stat:"int" },
   "Beastmaster":       { mana:25, type:"summon",       summonDmgPct:0.40, summonTurns:3 },
   "Beast Empowerment": { mana:25, type:"summonbuff",   summonBuffMult:0.30 },
-  "Usurper":           { mana:25, type:"dot",          dotPct:0.05, dotTurns:4, lifesteal:true, stat:"int" },
-  "Offering":          { mana:20, type:"heal",         healPct:0.20 },
+  "Usurper":           { mana:25, type:"dot",          dotPct:0.05, dotTurns:4, dotLabel:"Life Sap", lifesteal:true, stat:"int" },
+  "Offering":          { mana:20, type:"offering",     healPct:0.20 },
   "Leviathan":         { mana:50, type:"summon",       summonDmgPct:1.20, stat:"int", unique:true },
   "Abyssal-touch":     { mana:50, type:"debuff",       debuffType:"defbreak", defReduce:0.40 },
-  "Profane Lord":      { mana:50, type:"damage",      mult:2.00, stat:"int" },
+  "Profane Lord":      { mana:50, type:"profanelord",  mult:2.00, stat:"int" },
 };
 
 // Skills per class for in-battle menu (keep for menu building)
@@ -1933,7 +2016,7 @@ window.forfeitChatDuel      = forfeitChatDuel;
 window.clearAllChatDuels    = clearAllChatDuels;
 window.clearAllDuelData     = clearAllDuelData;
 window.mountDuelCard        = mountDuelCard;
-window.renderDuelCard       = renderDuelCard;
+window.renderDuelCard       = (duel, duelId, el, isStaticSnapshot) => renderDuelCard(duel, duelId, el, isStaticSnapshot);
 window.openDuelStancePicker  = openDuelStancePicker;
 window.closeDuelSkillPicker  = () => { const e = document.getElementById('duel-skill-overlay'); if (e) e.style.display = 'none'; };
 window.acceptNpcDuelChallenge = acceptNpcDuelChallenge;

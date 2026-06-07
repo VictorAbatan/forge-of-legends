@@ -1,7 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script>window.location.replace("../index.html");</script>
   <link rel="stylesheet" href="../css/quest-reward-picker.css">
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
@@ -324,14 +323,19 @@
 <!-- ══ BESTOW MODAL ══ -->
 <div class="deity-modal" id="bestow-modal" style="display:none">
   <div class="deity-modal-box">
-    <div class="deity-modal-title">✦ BESTOW INGREDIENTS</div>
-    <p class="deity-modal-desc">Bestow advancement ingredients to a worshipper.</p>
+    <div class="deity-modal-title">✦ BESTOW RESOURCES</div>
+    <p class="deity-modal-desc">Bestow gold, items, equipment, potions, food, materials, or sacred advancement ingredients to a worshipper.</p>
     <div class="field-group" style="margin-bottom:12px">
       <label class="field-label">Recipient</label>
       <div id="bestow-target-display" class="modal-recipient-display"></div>
       <input type="hidden" id="bestow-target"/>
     </div>
+    <div class="field-group" style="margin-bottom:12px">
+      <label class="field-label">Gold</label>
+      <input class="field-input" type="number" id="bestow-gold" min="0" value="0" placeholder="0"/>
+    </div>
     <div class="field-group" style="margin-bottom:16px">
+      <label class="field-label">Items</label>
       <div id="bestow-item-picker"></div>
       <textarea id="bestow-items" style="display:none"></textarea>
     </div>
@@ -468,7 +472,7 @@
         <div class="card-title">QUICK ACTIONS</div>
         <div class="deity-action-grid">
           <div class="deity-action-card" onclick="openDeityModal('vision-modal')"> <div class="deity-action-icon">👁️</div><div class="deity-action-name">Send Vision</div>   <div class="deity-action-desc">Send a divine vision to a worshipper</div></div>
-          <div class="deity-action-card" onclick="window.switchDeityPanel('bestow')"> <div class="deity-action-icon">🎁</div><div class="deity-action-name">Bestow Ingredients</div><div class="deity-action-desc">Grant advancement ingredients via a player's profile</div></div>
+          <div class="deity-action-card" onclick="window.switchDeityPanel('bestow')"> <div class="deity-action-icon">🎁</div><div class="deity-action-name">Bestow Resources</div><div class="deity-action-desc">Grant items, gold, or ingredients to a worshipper</div></div>
           <!-- Create Event action card removed -->
           <div class="deity-action-card" onclick="openDeityModal('faith-modal')">  <div class="deity-action-icon">✨</div><div class="deity-action-name">Update Faith</div>   <div class="deity-action-desc">Adjust a worshipper's faith level</div></div>
           <div class="deity-action-card" onclick="openDeityModal('quest-modal')">  <div class="deity-action-icon">📜</div><div class="deity-action-name">Drop Quest</div>     <div class="deity-action-desc">Issue a story quest into the world</div></div>
@@ -494,6 +498,25 @@
         <input class="field-input" type="text" id="worshipper-search" placeholder="Search by name..." oninput="filterWorshippers(this.value)" style="max-width:320px"/>
       </div>
       <div id="worshipper-list"><p style="color:var(--text-dim);font-style:italic">Loading...</p></div>
+
+      <!-- Faith level-up notifications -->
+      <div class="card" style="margin-top:24px">
+        <div class="card-title" style="display:flex;align-items:center;gap:8px">
+          ⬆️ FAITH LEVEL-UP NOTIFICATIONS
+          <span style="font-size:0.72rem;color:var(--text-dim);font-family:var(--font-mono);font-weight:400;letter-spacing:0">Live — updates in real-time</span>
+        </div>
+        <div id="deity-faith-notif-list">
+          <p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">No faith level-ups yet this session.</p>
+        </div>
+      </div>
+
+      <!-- Worshipper activity log -->
+      <div class="card" style="margin-top:16px">
+        <div class="card-title">WORSHIPPER ACTIVITY LOG</div>
+        <div id="worshipper-activity-log">
+          <p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">Loading activity...</p>
+        </div>
+      </div>
     </div>
 
     <!-- DIVINE VISIONS -->
@@ -508,7 +531,7 @@
 
     <!-- BESTOW -->
     <div class="deity-panel" id="deity-panel-bestow">
-      <div class="panel-header"><h2>BESTOW INGREDIENTS</h2><p>Grant advancement ingredients to your worshippers</p></div>
+      <div class="panel-header"><h2>BESTOW RESOURCES</h2><p>Grant gold, items, or sacred ingredients to your worshippers</p></div>
       <div class="bestow-warning">⚠️ You are a god — bestow fairly and sparingly.</div>
       <div class="card" style="margin-bottom:20px">
         <div class="card-title">SELECT WORSHIPPER</div>
@@ -516,7 +539,7 @@
           <select id="bestow-panel-target" class="field-input" style="flex:1;cursor:pointer">
             <option value="">Choose a worshipper...</option>
           </select>
-          <button class="btn-primary" style="width:auto;padding:10px 22px;white-space:nowrap" onclick="(function(){var sel=document.getElementById('bestow-panel-target');if(!sel.value){window.showToast('Select a worshipper first.','');return;}var name=sel.options[sel.selectedIndex].text;window._openModalForWorshipper('bestow',sel.value,name);})()">✶ Bestow Ingredient</button>
+          <button class="btn-primary" style="width:auto;padding:10px 22px;white-space:nowrap" onclick="(function(){var sel=document.getElementById('bestow-panel-target');if(!sel.value){window.showToast('Select a worshipper first.','');return;}var name=sel.options[sel.selectedIndex].text;window._openModalForWorshipper('bestow',sel.value,name);})()">✶ Bestow Resources</button>
         </div>
       </div>
       <div style="margin-top:8px">
@@ -611,6 +634,22 @@
         <div>
           <div class="card-title" style="margin-bottom:12px">COMPLETED / ENDED</div>
           <div id="faction-quests-done"><p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">None yet.</p></div>
+        </div>
+      </div>
+
+      <!-- Faction members list -->
+      <div class="card" style="margin-top:24px">
+        <div class="card-title">FACTION MEMBERS</div>
+        <div id="faction-members-list">
+          <p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">Claim a faction to view members.</p>
+        </div>
+      </div>
+
+      <!-- Faction member activity log -->
+      <div class="card" style="margin-top:24px">
+        <div class="card-title">FACTION MEMBER ACTIVITY LOG</div>
+        <div id="faction-activity-log">
+          <p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">Loading faction activity...</p>
         </div>
       </div>
     </div>

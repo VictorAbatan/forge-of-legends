@@ -1745,3 +1745,74 @@ button,
   #deity-panel-chat.active .dchat-players-bar { margin: 0 10px 4px; }
   #deity-panel-chat.active .dchat-tabs      { margin: 6px 10px 0; }
 }
+/* ═══════════════════════════════════════════════════
+   BATCH 4–8 ADDITIONS
+   ═══════════════════════════════════════════════════ */
+
+/* ── Activity log entries (worshipper + faction logs) ── */
+.activity-log-entry {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  line-height: 1.5;
+}
+.activity-log-entry:last-child { border-bottom: none; }
+
+/* ── Faith notifications list ── */
+#deity-faith-notif-list {
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+/* ── Bestow modal — gold input row ── */
+#bestow-gold {
+  max-width: 160px;
+}
+
+/* ── Bestow item picker (full-width picker in modal) ── */
+#bestow-item-picker .reward-picker-tabs {
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* ── Party arrange modal rows ── */
+._arrange-row {
+  transition: background 0.15s, border-color 0.15s;
+}
+._arrange-row:hover {
+  background: rgba(201,168,76,0.06) !important;
+  border-color: var(--gold-dim) !important;
+}
+._arrange-row[draggable="true"] { cursor: grab; }
+._arrange-row button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* ── Worshipper / Faction activity log cards ── */
+#worshipper-activity-log,
+#faction-activity-log {
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* Scrollbar styling for log areas */
+#worshipper-activity-log::-webkit-scrollbar,
+#faction-activity-log::-webkit-scrollbar,
+#deity-faith-notif-list::-webkit-scrollbar {
+  width: 4px;
+}
+#worshipper-activity-log::-webkit-scrollbar-track,
+#faction-activity-log::-webkit-scrollbar-track,
+#deity-faith-notif-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+#worshipper-activity-log::-webkit-scrollbar-thumb,
+#faction-activity-log::-webkit-scrollbar-thumb,
+#deity-faith-notif-list::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
+}

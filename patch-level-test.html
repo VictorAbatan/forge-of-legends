@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Patch Tool — Level/Rank Tester · Forge of Legends</title>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Share+Tech+Mono&family=Raleway:wght@300;400;500&display=swap" rel="stylesheet"/>
+<style>
+  :root {
+    --gold: #c9a84c;
+    --gold-dim: #7a6020;
+    --gold-bright: #f0c060;
+    --bg: #0d0c0a;
+    --surface: #141210;
+    --surface2: #1c1a16;
+    --surface3: #242018;
+    --border: #2e2a1e;
+    --text: #e8dcc8;
+    --text-dim: #7a7060;
+    --ash: #5a5040;
+    --red: #c0392b;
+    --green: #2ecc71;
+    --green-dim: #1a7a40;
+    --blue: #3498db;
+    --rank-wanderer: #888880;
+    --rank-follower: #6aaa6a;
+    --rank-disciple: #4a90d9;
+    --rank-master: #c9a84c;
+    --rank-exalted: #b44fc0;
+    --rank-crown: #e05050;
+    --rank-supreme: #e07830;
+    --rank-legend: #50c8e8;
+    --rank-myth: #e8a040;
+    --rank-eternal: #f0f0ff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Raleway', sans-serif;
+    font-weight: 300;
+    min-height: 100vh;
+    background-image:
+      radial-gradient(ellipse at 20% 0%, rgba(201,168,76,0.06) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 100%, rgba(201,168,76,0.04) 0%, transparent 50%);
+  }
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 18px 32px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    background: rgba(20,18,16,0.9);
+    position: sticky; top: 0; z-index: 50;
+    backdrop-filter: blur(8px);
+  }
+  header .forge-logo {
+    font-family: 'Cinzel', serif;
+    font-size: 0.7rem;
+    letter-spacing: 0.25em;
+    color: var(--gold);
+    text-transform: uppercase;
+    line-height: 1.4;
+  }
+  header .divider { width: 1px; height: 32px; background: var(--border); }
+  header h1 {
+    font-family: 'Cinzel', serif;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: 0.1em;
+  }
+  header .badge {
+    margin-left: auto;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--gold-dim);
+    border: 1px solid var(--border);
+    padding: 3px 8px;
+    border-radius: 3px;
+  }
+
+  .container { max-width: 1100px; margin: 0 auto; padding: 32px 24px; }
+
+  /* ── Config panel ── */
+  .config-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 24px;
+    margin-bottom: 28px;
+  }
+  .config-panel h2 {
+    font-family: 'Cinzel', serif;
+    font-size: 0.75rem;
+    letter-spacing: 0.2em;
+    color: var(--gold);
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+  .config-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  label { font-size: 0.7rem; letter-spacing: 0.12em; color: var(--text-dim); text-transform: uppercase; display: block; margin-bottom: 5px; }
+  input[type=text] {
+    width: 100%; background: var(--surface2); border: 1px solid var(--border);
+    color: var(--text); font-family: 'Share Tech Mono', monospace; font-size: 0.85rem;
+    padding: 10px 12px; border-radius: 4px; outline: none; transition: border-color 0.2s;
+  }
+  input[type=text]:focus { border-color: var(--gold-dim); }
+
+  /* ── Rank selector ── */
+  .rank-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 10px;
+    margin-bottom: 28px;
+  }
+  .rank-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 10px;
+    cursor: pointer;
+    transition: all 0.18s;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .rank-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    transition: opacity 0.18s;
+    background: linear-gradient(135deg, currentColor 0%, transparent 100%);
+  }
+  .rank-card:hover { transform: translateY(-2px); }
+  .rank-card.selected { border-color: currentColor; }
+  .rank-card.selected::before { opacity: 0.08; }
+  .rank-name {
+    font-family: 'Cinzel', serif;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .rank-idx {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.6rem;
+    color: var(--text-dim);
+  }
+
+  /* ── Level selector within rank ── */
+  .level-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 20px 24px;
+    margin-bottom: 28px;
+  }
+  .level-section h2 {
+    font-family: 'Cinzel', serif;
+    font-size: 0.75rem;
+    letter-spacing: 0.2em;
+    color: var(--gold);
+    text-transform: uppercase;
+    margin-bottom: 14px;
+  }
+  .level-quick {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .lvl-btn {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.72rem;
+    padding: 6px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .lvl-btn:hover { border-color: var(--gold-dim); color: var(--text); }
+  .lvl-btn.active { background: var(--gold-dim); border-color: var(--gold); color: var(--bg); font-weight: 600; }
+  .level-custom { display: flex; gap: 10px; align-items: center; }
+  .level-custom input[type=range] { flex: 1; accent-color: var(--gold); cursor: pointer; }
+  .level-custom .level-val {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 1rem;
+    color: var(--gold);
+    min-width: 36px;
+    text-align: right;
+  }
+
+  /* ── Stats preview ── */
+  .stats-preview {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 28px;
+  }
+  .stat-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px;
+  }
+  .stat-box .stat-label {
+    font-size: 0.62rem;
+    letter-spacing: 0.18em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .stat-box .stat-val {
+    font-family: 'Cinzel', serif;
+    font-size: 1.4rem;
+    color: var(--gold-bright);
+    line-height: 1;
+  }
+  .stat-box .stat-sub {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  /* ── Mode toggle ── */
+  .mode-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 28px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .mode-label {
+    font-size: 0.65rem;
+    letter-spacing: 0.15em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    margin-right: 4px;
+  }
+  .mode-btn {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.72rem;
+    padding: 7px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .mode-btn:hover { border-color: var(--gold-dim); color: var(--text); }
+  .mode-btn.active { background: var(--surface3); border-color: var(--gold); color: var(--gold); }
+
+  /* ── Action buttons ── */
+  .action-row { display: flex; gap: 12px; margin-bottom: 28px; flex-wrap: wrap; }
+  .btn-primary {
+    background: linear-gradient(135deg, #7a5f10, #c9a84c);
+    border: none;
+    color: #0d0c0a;
+    font-family: 'Cinzel', serif;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    padding: 12px 28px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.18s;
+    text-transform: uppercase;
+  }
+  .btn-primary:hover { filter: brightness(1.15); transform: translateY(-1px); }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; filter: none; }
+  .btn-danger {
+    background: linear-gradient(135deg, #6a1010, #c0392b);
+    border: none; color: #fff;
+    font-family: 'Cinzel', serif; font-size: 0.8rem; font-weight: 700;
+    letter-spacing: 0.12em; padding: 12px 28px; border-radius: 4px;
+    cursor: pointer; transition: all 0.18s; text-transform: uppercase;
+  }
+  .btn-danger:hover { filter: brightness(1.15); transform: translateY(-1px); }
+  .btn-ghost {
+    background: transparent; border: 1px solid var(--border); color: var(--text-dim);
+    font-family: 'Cinzel', serif; font-size: 0.8rem;
+    letter-spacing: 0.1em; padding: 12px 20px; border-radius: 4px;
+    cursor: pointer; transition: all 0.18s; text-transform: uppercase;
+  }
+  .btn-ghost:hover { border-color: var(--gold-dim); color: var(--text); }
+
+  /* ── Log panel ── */
+  .log-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0;
+    overflow: hidden;
+  }
+  .log-header {
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 20px;
+    font-family: 'Cinzel', serif;
+    font-size: 0.7rem;
+    letter-spacing: 0.2em;
+    color: var(--gold);
+    text-transform: uppercase;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .log-clear {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    background: none; border: none;
+    cursor: pointer; padding: 2px 6px;
+  }
+  .log-clear:hover { color: var(--text); }
+  #log {
+    padding: 16px 20px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.75rem;
+    line-height: 1.8;
+    max-height: 320px;
+    overflow-y: auto;
+    min-height: 80px;
+  }
+  .log-info  { color: var(--text-dim); }
+  .log-ok    { color: var(--green); }
+  .log-err   { color: var(--red); }
+  .log-warn  { color: var(--gold); }
+  .log-head  { color: var(--gold-bright); font-weight: bold; }
+
+  /* ── Full sweep section ── */
+  .sweep-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 20px 24px;
+    margin-bottom: 28px;
+  }
+  .sweep-section h2 {
+    font-family: 'Cinzel', serif;
+    font-size: 0.75rem;
+    letter-spacing: 0.2em;
+    color: var(--gold);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .sweep-section p {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    margin-bottom: 14px;
+    line-height: 1.6;
+  }
+
+  .section-title {
+    font-family: 'Cinzel', serif;
+    font-size: 0.75rem;
+    letter-spacing: 0.2em;
+    color: var(--gold);
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+
+  /* rank colors via data attr */
+  [data-rank="Wanderer"] { color: var(--rank-wanderer); }
+  [data-rank="Follower"] { color: var(--rank-follower); }
+  [data-rank="Disciple"] { color: var(--rank-disciple); }
+  [data-rank="Master"]   { color: var(--rank-master); }
+  [data-rank="Exalted"]  { color: var(--rank-exalted); }
+  [data-rank="Crown"]    { color: var(--rank-crown); }
+  [data-rank="Supreme"]  { color: var(--rank-supreme); }
+  [data-rank="Legend"]   { color: var(--rank-legend); }
+  [data-rank="Myth"]     { color: var(--rank-myth); }
+  [data-rank="Eternal"]  { color: var(--rank-eternal); }
+
+  @media (max-width: 700px) {
+    .rank-grid { grid-template-columns: repeat(2, 1fr); }
+    .stats-preview { grid-template-columns: repeat(2, 1fr); }
+    .config-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="forge-logo">Forge of<br>Legends</div>
+  <div class="divider"></div>
+  <h1>Level &amp; Rank Patch Tool</h1>
+  <div class="badge">DEV ONLY</div>
+</header>
+
+<div class="container">
+
+  <!-- Auth -->
+  <div class="config-panel" id="auth-panel">
+    <h2>Sign In (Deity Account Required)</h2>
+    <div class="config-grid">
+      <div>
+        <label>Email</label>
+        <input type="text" id="auth-email" placeholder="your@email.com" autocomplete="username"/>
+      </div>
+      <div>
+        <label>Password</label>
+        <input type="text" id="auth-password" placeholder="password" autocomplete="current-password"/>
+      </div>
+    </div>
+    <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button class="btn-primary" onclick="doSignIn()">&#128272; Sign In</button>
+      <button class="btn-ghost" onclick="doSignOut()" style="display:none" id="signout-btn">Sign Out</button>
+      <span id="auth-status" style="font-family:'Share Tech Mono',monospace;font-size:0.72rem;color:var(--text-dim)">Not signed in — actions are blocked.</span>
+    </div>
+  </div>
+
+  <!-- Config -->
+  <div class="config-panel">
+    <h2>Firebase Config</h2>
+    <div class="config-grid">
+      <div>
+        <label>Player UID</label>
+        <input type="text" id="uid-input" value="X2byuIk2lVZVyV0lYbWMrYVteAs1" placeholder="Firebase UID"/>
+      </div>
+      <div>
+        <label>Display Name (for log)</label>
+        <input type="text" id="name-input" value="Odin" placeholder="Character name"/>
+      </div>
+    </div>
+  </div>
+
+  <!-- Rank selector -->
+  <div class="section-title">Select Target Rank</div>
+  <div class="rank-grid" id="rank-grid"></div>
+
+  <!-- Level selector -->
+  <div class="level-section">
+    <h2>Select Level Within Rank</h2>
+    <div class="level-quick" id="level-quick">
+      <!-- quick level buttons injected by JS -->
+    </div>
+    <div class="level-custom">
+      <span style="font-size:0.7rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.1em">Custom:</span>
+      <input type="range" id="level-range" min="1" max="100" value="20"/>
+      <span class="level-val" id="level-display">20</span>
+    </div>
+  </div>
+
+  <!-- Mode: XP position within level -->
+  <div class="mode-row">
+    <span class="mode-label">XP Position:</span>
+    <button class="mode-btn active" data-mode="start" onclick="setXpMode(this)">Start of Level (xp=0)</button>
+    <button class="mode-btn" data-mode="mid"   onclick="setXpMode(this)">Midpoint</button>
+    <button class="mode-btn" data-mode="edge"  onclick="setXpMode(this)">Near Max (xp=xpMax-1)</button>
+  </div>
+
+  <!-- Stats preview -->
+  <div class="section-title">Calculated Stats Preview</div>
+  <div class="stats-preview">
+    <div class="stat-box">
+      <div class="stat-label">HP Max</div>
+      <div class="stat-val" id="prev-hpmax">—</div>
+      <div class="stat-sub" id="prev-hpmax-formula">—</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-label">Mana Max</div>
+      <div class="stat-val" id="prev-manamax">—</div>
+      <div class="stat-sub" id="prev-manamax-formula">—</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-label">XP Threshold</div>
+      <div class="stat-val" id="prev-xpmax">—</div>
+      <div class="stat-sub" id="prev-xp-sub">—</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-label">Stat Points (min earned)</div>
+      <div class="stat-val" id="prev-statpts">—</div>
+      <div class="stat-sub">20 base + 3×lvl + 25×rankIdx</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-label">Global Level</div>
+      <div class="stat-val" id="prev-level">—</div>
+      <div class="stat-sub" id="prev-rank-label">—</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-label">XP Set To</div>
+      <div class="stat-val" id="prev-xp">—</div>
+      <div class="stat-sub" id="prev-xp-mode">start of level</div>
+    </div>
+  </div>
+
+  <!-- Single patch -->
+  <div class="action-row">
+    <button class="btn-primary" id="patch-btn" onclick="doPatch()">⚡ Patch This State</button>
+    <button class="btn-ghost" onclick="doRead()">📖 Read Current Data</button>
+    <button class="btn-danger" onclick="doHardReset()">🔄 Reset to Correct Master Lv.20</button>
+  </div>
+
+  <!-- Full sweep -->
+  <div class="sweep-section">
+    <h2>Full Advancement Sweep</h2>
+    <p>Patches each rank sequentially at a chosen level, pausing between writes. Useful to confirm that level-up and rank display logic all work end-to-end. Each step writes, then you can verify in-game before continuing.</p>
+    <div class="mode-row" style="margin-bottom:12px">
+      <span class="mode-label">Test Level per Rank:</span>
+      <button class="mode-btn active" data-sweep="1"   onclick="setSweepLevel(this)">Lv. 1</button>
+      <button class="mode-btn" data-sweep="50"  onclick="setSweepLevel(this)">Lv. 50</button>
+      <button class="mode-btn" data-sweep="99"  onclick="setSweepLevel(this)">Lv. 99</button>
+      <button class="mode-btn" data-sweep="100" onclick="setSweepLevel(this)">Lv. 100 (pre-ascension)</button>
+    </div>
+    <div class="action-row" style="margin-bottom:0">
+      <button class="btn-primary" onclick="doSweep()">🔁 Run Full Sweep (all 10 ranks)</button>
+      <button class="btn-ghost" id="stop-btn" onclick="stopSweep()" style="display:none">⛔ Stop Sweep</button>
+    </div>
+  </div>
+
+  <!-- Log -->
+  <div class="log-panel">
+    <div class="log-header">
+      <span>Patch Log</span>
+      <button class="log-clear" onclick="clearLog()">clear</button>
+    </div>
+    <div id="log"><span class="log-info">Awaiting action…</span></div>
+  </div>
+
+</div>
+
+<!-- Firebase (module) bootstrap via importmap -->
+<script type="importmap">
+{
+  "imports": {
+    "firebase/app":       "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js",
+    "firebase/firestore": "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js",
+    "firebase/auth":      "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js"
+  }
+}
+</script>
+
+<script type="module">
+import { initializeApp }                     from "firebase/app";
+import { getFirestore, doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
+
+// ── Firebase config ──
+const firebaseConfig = {
+  apiKey:            "AIzaSyCUmdWY9OfzQgOPv-4KgOlBfO76c0toxYQ",
+  authDomain:        "inkcraftrp.firebaseapp.com",
+  projectId:         "inkcraftrp",
+  storageBucket:     "inkcraftrp.firebasestorage.app",
+  messagingSenderId: "125564034696",
+  appId:             "1:125564034696:web:0b09ed319024309ad2493d"
+};
+const app  = initializeApp(firebaseConfig);
+const db   = getFirestore(app);
+const auth = getAuth(app);
+
+// ── Auth state ──
+onAuthStateChanged(auth, user => {
+  const statusEl   = document.getElementById('auth-status');
+  const signoutBtn = document.getElementById('signout-btn');
+  if (user) {
+    statusEl.textContent   = `✓ Signed in as ${user.email}`;
+    statusEl.style.color   = 'var(--green)';
+    signoutBtn.style.display = '';
+  } else {
+    statusEl.textContent   = 'Not signed in — actions are blocked.';
+    statusEl.style.color   = 'var(--text-dim)';
+    signoutBtn.style.display = 'none';
+  }
+});
+
+window.doSignIn = async () => {
+  const email = document.getElementById('auth-email').value.trim();
+  const pass  = document.getElementById('auth-password').value;
+  const statusEl = document.getElementById('auth-status');
+  if (!email || !pass) { statusEl.textContent = '⚠ Enter email and password.'; statusEl.style.color = 'var(--gold)'; return; }
+  statusEl.textContent = 'Signing in…'; statusEl.style.color = 'var(--text-dim)';
+  try {
+    await signInWithEmailAndPassword(auth, email, pass);
+    window.log('✓ Signed in successfully. You can now patch.', 'log-ok');
+  } catch(e) {
+    statusEl.textContent = '✗ ' + e.message; statusEl.style.color = 'var(--red)';
+    window.log('✗ Sign-in failed: ' + e.message, 'log-err');
+  }
+};
+window.doSignOut = async () => {
+  await signOut(auth);
+  window.log('Signed out.', 'log-info');
+};
+
+// ── Game constants (mirrored from dashboard.js) ──
+const RANK_ORDER    = ["Wanderer","Follower","Disciple","Master","Exalted","Crown","Supreme","Legend","Myth","Eternal"];
+const RANK_BASE_EXP = [100, 150, 225, 340, 500, 750, 1100, 1600, 2300, 3200];
+const RANK_EXP_MULT = 1.10;
+
+function calcXpMax(rankIdx, level) {
+  const lvlInRank = ((level - 1) % 100) + 1;
+  const base      = RANK_BASE_EXP[Math.min(rankIdx, 9)];
+  return Math.round(base * Math.pow(RANK_EXP_MULT, Math.max(0, lvlInRank - 1)));
+}
+function calcHpMax(rankIdx, lvlInRank)   { return 100 + (lvlInRank * 10) + (rankIdx * 150); }
+function calcManaMax(rankIdx, lvlInRank) { return 50  + (lvlInRank * 5)  + (rankIdx * 75);  }
+function calcStatPts(rankIdx, lvlInRank) { return 20  + (lvlInRank * 3)  + (rankIdx * 25);  }
+// Global level: ranks 0–9, each 100 levels
+function globalLevel(rankIdx, lvlInRank) { return rankIdx * 100 + lvlInRank; }
+
+// ── State ──
+let selectedRankIdx = 3;  // default Master
+let selectedLevel   = 20; // level within rank
+let xpMode          = 'start'; // 'start' | 'mid' | 'edge'
+let sweepLevel      = 1;
+let sweepStop       = false;
+
+// ── Expose to non-module onclick handlers ──
+window._db          = db;
+window._doc         = doc;
+window._getDoc      = getDoc;
+window._updateDoc   = updateDoc;
+window.RANK_ORDER   = RANK_ORDER;
+window.calcXpMax    = calcXpMax;
+window.calcHpMax    = calcHpMax;
+window.calcManaMax  = calcManaMax;
+window.calcStatPts  = calcStatPts;
+window.globalLevel  = globalLevel;
+
+window._getState    = () => ({ selectedRankIdx, selectedLevel, xpMode, sweepLevel });
+window._setState    = (s) => {
+  selectedRankIdx = s.rankIdx ?? selectedRankIdx;
+  selectedLevel   = s.level   ?? selectedLevel;
+  xpMode          = s.mode    ?? xpMode;
+  updatePreview();
+};
+
+window._getSweepStop = () => sweepStop;
+window._setSweepStop = (v) => { sweepStop = v; };
+window._setSweepLevel = (v) => { sweepLevel = v; };
+window._getSweepLevel = () => sweepLevel;
+
+window._buildPayload = (rankIdx, level, mode) => {
+  const lvlInRank = ((level - 1) % 100) + 1;
+  const hpMax     = calcHpMax(rankIdx, lvlInRank);
+  const manaMax   = calcManaMax(rankIdx, lvlInRank);
+  const xpMax     = calcXpMax(rankIdx, level);
+  const statPts   = calcStatPts(rankIdx, lvlInRank);
+  const rank      = RANK_ORDER[rankIdx];
+  let xp = 0;
+  if (mode === 'mid')  xp = Math.floor(xpMax / 2);
+  if (mode === 'edge') xp = xpMax - 1;
+  const glevel = globalLevel(rankIdx, lvlInRank);
+  return { rank, level: glevel, xp, xpMax, hp: hpMax, hpMax, mana: manaMax, manaMax, statPoints: statPts };
+};
+
+window.updatePreview = () => {
+  const ri  = selectedRankIdx;
+  const lv  = selectedLevel;
+  const lvr = ((lv - 1) % 100) + 1;
+  const hpm = calcHpMax(ri, lvr);
+  const mm  = calcManaMax(ri, lvr);
+  const xm  = calcXpMax(ri, lv);
+  const sp  = calcStatPts(ri, lvr);
+  const gl  = globalLevel(ri, lvr);
+  const rn  = RANK_ORDER[ri];
+
+  let xp = 0;
+  if (xpMode === 'mid')  xp = Math.floor(xm / 2);
+  if (xpMode === 'edge') xp = xm - 1;
+
+  document.getElementById('prev-hpmax').textContent         = hpm.toLocaleString();
+  document.getElementById('prev-hpmax-formula').textContent = `100 + ${lvr}×10 + ${ri}×150`;
+  document.getElementById('prev-manamax').textContent       = mm.toLocaleString();
+  document.getElementById('prev-manamax-formula').textContent = `50 + ${lvr}×5 + ${ri}×75`;
+  document.getElementById('prev-xpmax').textContent         = xm.toLocaleString();
+  document.getElementById('prev-xp-sub').textContent        = `base ${RANK_BASE_EXP[ri]} × 1.10^${lvr-1}`;
+  document.getElementById('prev-statpts').textContent       = sp.toLocaleString();
+  document.getElementById('prev-level').textContent         = gl;
+  document.getElementById('prev-rank-label').textContent    = `${rn} · Lv.${lvr} within rank`;
+  document.getElementById('prev-xp').textContent            = xp.toLocaleString();
+  document.getElementById('prev-xp-mode').textContent       = xpMode === 'start' ? 'start of level' : xpMode === 'mid' ? 'midpoint' : 'near max (xpMax-1)';
+};
+
+// initial render
+window.updatePreview();
+
+// ── Log util ──
+window.log = (msg, cls='log-info') => {
+  const el = document.getElementById('log');
+  const line = document.createElement('div');
+  line.className = cls;
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+};
+window.clearLog = () => { document.getElementById('log').innerHTML = ''; };
+
+// ── Read ──
+// ── Auth guard ──
+window._requireAuth = () => {
+  if (!auth.currentUser) {
+    window.log('✗ Not signed in. Sign in with your deity account first.', 'log-err');
+    return false;
+  }
+  return true;
+};
+
+window.doRead = async () => {
+  if (!window._requireAuth()) return;
+  const uid  = document.getElementById('uid-input').value.trim();
+  const name = document.getElementById('name-input').value.trim() || uid;
+  if (!uid) { log('⚠ No UID entered.', 'log-warn'); return; }
+  log(`Reading Firestore data for ${name} (${uid})…`, 'log-info');
+  try {
+    const snap = await window._getDoc(window._doc(window._db, 'characters', uid));
+    if (!snap.exists()) { log('✗ No character document found at characters/' + uid, 'log-err'); return; }
+    const d = snap.data();
+    log(`── ${name} ──`, 'log-head');
+    log(`rank=${d.rank||'?'} | level=${d.level||'?'} | xp=${d.xp??'?'} / ${d.xpMax??'?'}`, 'log-ok');
+    log(`hp=${d.hp??'?'}/${d.hpMax??'?'} | mana=${d.mana??'?'}/${d.manaMax??'?'} | statPoints=${d.statPoints??'?'}`, 'log-ok');
+  } catch(e) { log('✗ Error: ' + e.message, 'log-err'); }
+};
+
+// ── Hard reset to correct Master Lv.20 ──
+window.doHardReset = async () => {
+  if (!window._requireAuth()) return;
+  const uid  = document.getElementById('uid-input').value.trim();
+  const name = document.getElementById('name-input').value.trim() || uid;
+  if (!uid) { log('⚠ No UID entered.', 'log-warn'); return; }
+  // Master = rankIdx 3, level 20 within rank → globalLevel = 320
+  const p = window._buildPayload(3, 20, 'start');
+  log(`Hard-resetting ${name} → Master Lv.20 (global ${p.level})…`, 'log-warn');
+  log(`  hp=${p.hpMax} | mana=${p.manaMax} | xpMax=${p.xpMax} | statPts=${p.statPoints}`, 'log-info');
+  try {
+    await window._updateDoc(window._doc(window._db, 'characters', uid), p);
+    log(`✓ Hard reset complete. ${name} is now correctly Master Lv.20.`, 'log-ok');
+  } catch(e) { log('✗ Error: ' + e.message, 'log-err'); }
+};
+
+// ── Patch single state ──
+window.doPatch = async () => {
+  if (!window._requireAuth()) return;
+  const uid  = document.getElementById('uid-input').value.trim();
+  const name = document.getElementById('name-input').value.trim() || uid;
+  if (!uid) { log('⚠ No UID entered.', 'log-warn'); return; }
+  const { selectedRankIdx: ri, selectedLevel: lv, xpMode: mode } = window._getState();
+  const p = window._buildPayload(ri, lv, mode);
+  log(`Patching ${name} → ${p.rank} Lv.${((lv-1)%100)+1} (global ${p.level}) [xp=${p.xp}/${p.xpMax}]`, 'log-warn');
+  log(`  hp=${p.hpMax} | mana=${p.manaMax} | statPts=${p.statPoints}`, 'log-info');
+  try {
+    await window._updateDoc(window._doc(window._db, 'characters', uid), p);
+    log(`✓ Patch applied. Reload the dashboard to verify.`, 'log-ok');
+  } catch(e) { log('✗ Error: ' + e.message, 'log-err'); }
+};
+
+// ── Full sweep ──
+window.doSweep = async () => {
+  if (!window._requireAuth()) return;
+  const uid  = document.getElementById('uid-input').value.trim();
+  const name = document.getElementById('name-input').value.trim() || uid;
+  if (!uid) { log('⚠ No UID entered.', 'log-warn'); return; }
+  window._setSweepStop(false);
+  document.getElementById('stop-btn').style.display = '';
+  const sl = window._getSweepLevel();
+  log(`═══ FULL SWEEP STARTING — ${name} — ${RANK_ORDER.length} ranks at Lv.${sl} ═══`, 'log-head');
+  for (let ri = 0; ri < RANK_ORDER.length; ri++) {
+    if (window._getSweepStop()) { log('⛔ Sweep stopped by user.', 'log-warn'); break; }
+    const p = window._buildPayload(ri, sl, 'start');
+    log(`[${ri+1}/10] → ${p.rank} Lv.${sl} (global ${p.level}) | hp=${p.hpMax} mana=${p.manaMax} xpMax=${p.xpMax}`, 'log-warn');
+    try {
+      await window._updateDoc(window._doc(window._db, 'characters', uid), p);
+      log(`    ✓ Written. Open dashboard and verify, then wait 2s…`, 'log-ok');
+    } catch(e) { log('    ✗ Error: ' + e.message, 'log-err'); break; }
+    await new Promise(r => setTimeout(r, 2000));
+  }
+  document.getElementById('stop-btn').style.display = 'none';
+  if (!window._getSweepStop()) log('═══ SWEEP COMPLETE ═══', 'log-head');
+};
+window.stopSweep = () => {
+  window._setSweepStop(true);
+  document.getElementById('stop-btn').style.display = 'none';
+};
+
+</script>
+
+<script>
+// ── Non-module UI logic ──
+
+const RANKS = ["Wanderer","Follower","Disciple","Master","Exalted","Crown","Supreme","Legend","Myth","Eternal"];
+const RANK_COLORS = {
+  Wanderer:'#888880', Follower:'#6aaa6a', Disciple:'#4a90d9', Master:'#c9a84c',
+  Exalted:'#b44fc0', Crown:'#e05050', Supreme:'#e07830', Legend:'#50c8e8',
+  Myth:'#e8a040', Eternal:'#f0f0ff'
+};
+
+let _selectedRankIdx = 3;
+let _selectedLevel   = 20;
+let _xpMode          = 'start';
+let _sweepLevel      = 1;
+
+// Build rank cards
+const rankGrid = document.getElementById('rank-grid');
+RANKS.forEach((r, i) => {
+  const card = document.createElement('div');
+  card.className = 'rank-card' + (i === 3 ? ' selected' : '');
+  card.dataset.rank = r;
+  card.style.color  = RANK_COLORS[r];
+  card.style.borderColor = i === 3 ? RANK_COLORS[r] : '';
+  card.innerHTML = `<div class="rank-name">${r}</div><div class="rank-idx">Rank ${i}</div>`;
+  card.onclick = () => {
+    document.querySelectorAll('.rank-card').forEach(c => {
+      c.classList.remove('selected');
+      c.style.borderColor = '';
+    });
+    card.classList.add('selected');
+    card.style.borderColor = RANK_COLORS[r];
+    _selectedRankIdx = i;
+    window._setState({ rankIdx: i });
+    buildQuickLevels();
+  };
+  rankGrid.appendChild(card);
+});
+
+// Quick level buttons
+const QUICK_LEVELS = [1, 10, 20, 50, 75, 99, 100];
+function buildQuickLevels() {
+  const el = document.getElementById('level-quick');
+  el.innerHTML = '';
+  QUICK_LEVELS.forEach(lv => {
+    const b = document.createElement('button');
+    b.className = 'lvl-btn' + (lv === _selectedLevel ? ' active' : '');
+    b.textContent = `Lv. ${lv}`;
+    if (lv === 100) {
+      const ri = _selectedRankIdx;
+      const nextRank = RANKS[ri + 1] || 'MAX';
+      b.title = `Pre-ascension — final level of ${RANKS[ri]}. Next: ${nextRank}`;
+      b.style.borderColor = ri < 9 ? RANK_COLORS[RANKS[ri+1]] : '#888';
+    }
+    b.onclick = () => {
+      document.querySelectorAll('.lvl-btn').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      _selectedLevel = lv;
+      document.getElementById('level-range').value = lv;
+      document.getElementById('level-display').textContent = lv;
+      window._setState({ level: lv });
+    };
+    el.appendChild(b);
+  });
+}
+buildQuickLevels();
+
+// Range slider
+document.getElementById('level-range').addEventListener('input', function() {
+  _selectedLevel = +this.value;
+  document.getElementById('level-display').textContent = this.value;
+  document.querySelectorAll('.lvl-btn').forEach(b => {
+    b.classList.toggle('active', parseInt(b.textContent.replace('Lv. ','')) === _selectedLevel);
+  });
+  window._setState({ level: _selectedLevel });
+});
+
+window.setXpMode = (btn) => {
+  document.querySelectorAll('[data-mode]').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  _xpMode = btn.dataset.mode;
+  window._setState({ mode: _xpMode });
+};
+
+window.setSweepLevel = (btn) => {
+  document.querySelectorAll('[data-sweep]').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  _sweepLevel = +btn.dataset.sweep;
+  window._setSweepLevel(_sweepLevel);
+};
+</script>
+</body>
+</html>

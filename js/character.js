@@ -120,8 +120,13 @@ const KINGDOM_DATA = {
 };
 
 // ── Base stats (doc: Character Template) ──────────────────────────────────────
-// Base = 10 each. Welcome bonus = 20 points for allocation (stored separately)
-// Stats: STR, INT, DEF, DEX (doc confirmed — no MAG/SPD/LCK as separate stats)
+// Base = 10 each (immutable floor — can never go below this).
+// Stat point sources:
+//   • Welcome bonus: 20 points on character creation
+//   • Level-up:      +3 points per level gained
+//   • Rank ascension: +25 points per rank
+// On Stat Reset Potion: all points refunded = 20 + (level-1)*3 + rankIdx*25
+// Stats: STR, INT, DEF, DEX (no MAG/SPD/LCK as separate stats)
 const BASE_STATS = { str: 10, int: 10, def: 10, dex: 10 };
 const WELCOME_STAT_POINTS = 20;
 
@@ -264,7 +269,7 @@ async function createCharacter() {
     statPoints: WELCOME_STAT_POINTS, // 20 unallocated welcome points
 
     // Economy
-    gold: 500, // Starting gold
+    gold: 2000, // Starting gold
 
     // Progression
     titles:       ["Wanderer"],

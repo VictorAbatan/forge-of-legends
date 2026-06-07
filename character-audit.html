@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Forge of Legends — Character Audit</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #1a1a2e;
+      color: #e0e0e0;
+      padding: 2rem;
+      margin: 0;
+    }
+    h1 { color: #f0a500; margin-bottom: 0.25rem; }
+    p.sub { color: #aaa; margin-bottom: 1.5rem; font-size: 0.9rem; }
+
+    /* ── Login panel ── */
+    #login-panel {
+      background: #16213e;
+      border: 1px solid #f0a500;
+      border-radius: 10px;
+      padding: 1.8rem 2rem;
+      max-width: 380px;
+    }
+    #login-panel h2 { color: #f0a500; margin-top: 0; }
+    #login-panel label { display: block; margin-bottom: 0.3rem; font-size: 0.85rem; color: #aaa; }
+    #login-panel input {
+      width: 100%;
+      padding: 0.5rem 0.75rem;
+      border-radius: 6px;
+      border: 1px solid #444;
+      background: #0f3460;
+      color: #fff;
+      font-size: 0.95rem;
+      margin-bottom: 1rem;
+    }
+    #login-error { color: #ff6b6b; font-size: 0.85rem; min-height: 1.2rem; margin-bottom: 0.5rem; }
+
+    /* ── Main panel ── */
+    #main-panel { display: none; }
+    #status { margin-bottom: 1rem; font-size: 0.95rem; color: #7ec8e3; }
+    #user-bar { font-size: 0.85rem; color: #aaa; margin-bottom: 1rem; }
+    #user-bar span { color: #f0a500; }
+
+    button {
+      background: #f0a500;
+      color: #1a1a2e;
+      border: none;
+      padding: 0.6rem 1.4rem;
+      font-size: 1rem;
+      font-weight: bold;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-bottom: 1.5rem;
+      margin-right: 0.5rem;
+    }
+    button:hover { background: #ffc200; }
+    button:disabled { background: #666; cursor: not-allowed; }
+    #logout-btn { background: #444; color: #ccc; font-size: 0.85rem; padding: 0.4rem 1rem; }
+    #logout-btn:hover { background: #555; }
+    #copy-btn { background: #2a9d8f; color: #fff; display: none; }
+    #copy-btn:hover { background: #21867a; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    thead tr { background: #f0a500; color: #1a1a2e; }
+    th, td { padding: 0.55rem 0.8rem; text-align: left; border-bottom: 1px solid #333; }
+    tbody tr:nth-child(even) { background: #16213e; }
+    tbody tr:hover { background: #0f3460; }
+  </style>
+</head>
+<body>
+
+<h1>⚔️ Forge of Legends — Character Audit</h1>
+<p class="sub">Sign in with your deity/admin account, then load all characters.</p>
+
+<!-- Login -->
+<div id="login-panel">
+  <h2>🔐 Sign In</h2>
+  <label>Email</label>
+  <input type="email" id="email" placeholder="you@example.com" />
+  <label>Password</label>
+  <input type="password" id="password" placeholder="••••••••" />
+  <div id="login-error"></div>
+  <button id="login-btn">Sign In</button>
+</div>
+
+<!-- Main -->
+<div id="main-panel">
+  <div id="user-bar">Signed in as: <span id="user-email"></span> <button id="logout-btn">Sign out</button></div>
+  <div id="status">Ready. Click the button to load characters.</div>
+  <button id="load-btn">Load Characters</button>
+  <button id="copy-btn">Copy as CSV</button>
+
+  <table id="char-table" style="display:none;">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Name</th>
+        <th>Deity</th>
+        <th>Level</th>
+        <th>Profession</th>
+        <th>Profession Lvl</th>
+        <th>UID</th>
+      </tr>
+    </thead>
+    <tbody id="char-body"></tbody>
+  </table>
+</div>
+
+<script type="module">
+  import { initializeApp }          from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged }
+                                    from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+  import { getFirestore, collection, getDocs }
+                                    from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey:            "AIzaSyCUmdWY9OfzQgOPv-4KgOlBfO76c0toxYQ",
+    authDomain:        "inkcraftrp.firebaseapp.com",
+    projectId:         "inkcraftrp",
+    storageBucket:     "inkcraftrp.firebasestorage.app",
+    messagingSenderId: "125564034696",
+    appId:             "1:125564034696:web:0b09ed319024309ad2493d"
+  };
+
+  const app  = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db   = getFirestore(app);
+
+  // ── Elements ──
+  const loginPanel  = document.getElementById('login-panel');
+  const mainPanel   = document.getElementById('main-panel');
+  const emailInput  = document.getElementById('email');
+  const passInput   = document.getElementById('password');
+  const loginBtn    = document.getElementById('login-btn');
+  const loginError  = document.getElementById('login-error');
+  const logoutBtn   = document.getElementById('logout-btn');
+  const userEmail   = document.getElementById('user-email');
+  const loadBtn     = document.getElementById('load-btn');
+  const copyBtn     = document.getElementById('copy-btn');
+  const status      = document.getElementById('status');
+  const table       = document.getElementById('char-table');
+  const tbody       = document.getElementById('char-body');
+
+  let allChars = [];
+
+  // ── Auth state ──
+  onAuthStateChanged(auth, user => {
+    if (user) {
+      loginPanel.style.display = 'none';
+      mainPanel.style.display  = 'block';
+      userEmail.textContent    = user.email;
+    } else {
+      loginPanel.style.display = 'block';
+      mainPanel.style.display  = 'none';
+    }
+  });
+
+  // ── Login ──
+  loginBtn.addEventListener('click', async () => {
+    loginError.textContent = '';
+    loginBtn.disabled = true;
+    loginBtn.textContent = 'Signing in…';
+    try {
+      await signInWithEmailAndPassword(auth, emailInput.value.trim(), passInput.value);
+    } catch (err) {
+      loginError.textContent = '❌ ' + friendlyAuthError(err.code);
+      loginBtn.disabled = false;
+      loginBtn.textContent = 'Sign In';
+    }
+  });
+
+  // Allow Enter key on password field
+  passInput.addEventListener('keydown', e => { if (e.key === 'Enter') loginBtn.click(); });
+
+  logoutBtn.addEventListener('click', () => signOut(auth));
+
+  function friendlyAuthError(code) {
+    const map = {
+      'auth/invalid-email':       'Invalid email address.',
+      'auth/user-not-found':      'No account found with that email.',
+      'auth/wrong-password':      'Incorrect password.',
+      'auth/invalid-credential':  'Invalid email or password.',
+      'auth/too-many-requests':   'Too many attempts. Try again later.',
+    };
+    return map[code] || code;
+  }
+
+  // ── Load characters ──
+  loadBtn.addEventListener('click', async () => {
+    loadBtn.disabled = true;
+    status.textContent = '⏳ Fetching characters from Firestore…';
+    tbody.innerHTML = '';
+    table.style.display = 'none';
+    copyBtn.style.display = 'none';
+    allChars = [];
+
+    try {
+      const snapshot = await getDocs(collection(db, 'characters'));
+
+      if (snapshot.empty) {
+        status.textContent = '⚠️ No characters found in the "characters" collection.';
+        loadBtn.disabled = false;
+        return;
+      }
+
+      snapshot.forEach(doc => {
+        const d = doc.data();
+        allChars.push({
+          index:         allChars.length + 1,
+          name:          d.name          ?? '—',
+          deity:         d.deity         ?? '—',
+          level:         d.level         ?? 0,
+          profession:    d.profession    ?? '—',
+          professionLvl: d.professionLvl ?? 0,
+          uid:           d.uid           ?? doc.id,
+        });
+      });
+
+      // Sort by level descending
+      allChars.sort((a, b) => b.level - a.level);
+
+      // Console output
+      console.group('📋 Forge of Legends — Character Audit');
+      console.log(`Total: ${allChars.length} characters`);
+      console.table(allChars.map(r => ({
+        Name: r.name, Deity: r.deity, Level: r.level,
+        Profession: r.profession, 'Profession Lvl': r.professionLvl, UID: r.uid,
+      })));
+      console.groupEnd();
+
+      // Table output
+      allChars.forEach(r => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${r.index}</td>
+          <td>${r.name}</td>
+          <td>${r.deity}</td>
+          <td>${r.level}</td>
+          <td>${r.profession}</td>
+          <td>${r.professionLvl}</td>
+          <td style="font-size:0.75rem;color:#888;">${r.uid}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      table.style.display  = 'table';
+      copyBtn.style.display = 'inline-block';
+      status.textContent   = `✅ Loaded ${allChars.length} characters (sorted by level). Press F12 for console table.`;
+
+    } catch (err) {
+      console.error('Firestore error:', err);
+      status.textContent = `❌ Error: ${err.message}`;
+    }
+
+    loadBtn.disabled = false;
+  });
+
+  // ── CSV copy ──
+  copyBtn.addEventListener('click', () => {
+    const header = 'Name,Deity,Level,Profession,Profession Lvl,UID';
+    const rows   = allChars.map(r =>
+      `"${r.name}","${r.deity}",${r.level},"${r.profession}",${r.professionLvl},"${r.uid}"`
+    );
+    navigator.clipboard.writeText([header, ...rows].join('\n'))
+      .then(() => { copyBtn.textContent = '✅ Copied!'; setTimeout(() => copyBtn.textContent = 'Copy as CSV', 2000); })
+      .catch(() => { copyBtn.textContent = '❌ Failed — try F12 console instead'; });
+  });
+</script>
+</body>
+</html>

@@ -1,3 +1,77 @@
+/* ═══════════════════════════════════════════════════════════════
+   PLAYER DASHBOARD — BRIGHTENED THEME
+   Overrides global.css root vars with lighter, more vivid values.
+   Deity dashboard is unaffected (loads its own CSS).
+   ═══════════════════════════════════════════════════════════════ */
+:root {
+  /* Backgrounds — lifted from near-black to rich dark charcoal/brown */
+  --ink:  #1C1812;       /* was #0D0B08 — page body bg */
+  --ink2: #252118;       /* was #1A1712 — cards, sidebar */
+  --ink3: #2E2920;       /* was #242018 — hover states, inputs */
+
+  /* Gold — fully saturated, brighter accent */
+  --gold:       #E8C558;   /* was #C9A84C — primary gold */
+  --gold-light: #F5DC7A;   /* was #E8C97A — hover/highlight gold */
+  --gold-dim:   #A07E38;   /* was #7A6230 — subdued gold, borders */
+
+  /* Text — brighter, higher contrast */
+  --text:     #F5EDD8;   /* was #E8DCC8 — body text */
+  --text-dim: #B8A888;   /* was #9A8E7A — secondary text */
+  --parchment-dim: #D8CAA8; /* was #C8BA9A */
+
+  /* Ash — lighter greys */
+  --ash:       #5A534C;   /* was #4A4540 */
+  --ash-light: #7E766E;   /* was #6B6560 */
+
+  /* Borders — more visible */
+  --border:        rgba(232,197,88,0.28);   /* was 0.2 */
+  --border-bright: rgba(232,197,88,0.65);   /* was 0.5 */
+
+  /* Status colours — punchier */
+  --red-bright:   #D94535;   /* was #C0392B */
+  --teal-bright:  #2EC4A3;   /* was #27AE8F */
+  --green-bright: #2EC46A;   /* was #27AE60 */
+}
+
+/* Sidebar and main content area — slightly lighter base */
+.sidebar       { background: #201D15 !important; }
+.main-content  { background: #1C1812 !important; }
+
+/* Cards — warmer, visible separation from page bg */
+.card,
+.stat-card,
+.faction-quest-item,
+.event-card,
+.crafting-card,
+.inv-item,
+.profession-card,
+.market-item,
+.trade-card,
+.companion-card,
+.duel-card-wrapper {
+  background: #2A2418 !important;
+}
+
+/* Hardcoded background overrides — lift the darkest spots */
+/* battle log: win/loss backgrounds */
+
+/* Stat alloc panel background override */
+.profile-right .card { background: #272218 !important; }
+
+/* Chat panel */
+.chat-container { background: #1E1A12 !important; }
+.chat-input-row  { background: #252118 !important; }
+
+/* Nav active state — more visible highlight */
+.nav-item.active { background: rgba(232,197,88,0.10) !important; }
+.nav-item:hover  { background: rgba(255,255,255,0.05) !important; }
+
+/* Scrollbar — themed */
+::-webkit-scrollbar              { width: 6px; }
+::-webkit-scrollbar-track        { background: #1C1812; }
+::-webkit-scrollbar-thumb        { background: var(--gold-dim); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover  { background: var(--gold); }
+
 /* Faction Quest Card Styles */
 .faction-quest-item {
   background: var(--ink2);
@@ -96,7 +170,7 @@
   display: flex;
   align-items: stretch;
   justify-content: stretch;
-  background: #181818;
+  background: #2A2418;
   border-radius: 18px 18px 0 0;
   overflow: hidden;
   padding: 0;
@@ -156,72 +230,12 @@
 /* DEBUG: Ensure companion panel content is always visible */
 #companion-panel-content {
   min-height: 120px;
-  background: #222 !important;
+  background: #2A2418 !important;
   color: #ffe066 !important;
   border: 2px dashed #c9a84c;
   font-size: 1.1rem;
   padding: 32px 0;
   text-align: center;
-}
-/* Custom stepper styles for sell modal */
-.stepper-group {
-  display: flex;
-  align-items: center;
-  position: relative;
-  width: 100%;
-}
-.stepper-input {
-  width: 100%;
-  padding-right: 38px !important;
-  appearance: textfield;
-  -moz-appearance: textfield;
-}
-.stepper-input::-webkit-outer-spin-button,
-.stepper-input::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-.stepper-btns {
-  display: flex;
-  flex-direction: column;
-  position: absolute;
-  right: 6px;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 2;
-}
-.stepper-btn {
-  background: var(--ink3);
-  color: var(--gold);
-  border: 1px solid var(--gold-dim);
-  border-radius: 4px;
-  width: 22px;
-  height: 18px;
-  font-size: 0.95rem;
-  line-height: 1;
-  padding: 0;
-  margin: 0;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s, border 0.15s;
-  box-shadow: 0 1px 4px #0003;
-}
-.stepper-btn:active, .stepper-btn:focus {
-  background: var(--gold);
-  color: #222;
-  border-color: var(--gold);
-}
-.stepper-btn + .stepper-btn {
-  margin-top: 2px;
-}
-@media (max-width: 600px) {
-  .stepper-btn {
-    width: 22px;
-    height: 18px;
-    font-size: 0.95rem;
-  }
-  .stepper-input {
-    font-size: 1.1rem;
-  }
 }
 /* Themed player market search bar */
 .market-search-themed {
@@ -330,7 +344,7 @@
 }
 .faction-leave-btn {
   margin-top: 24px;
-  background: #2a1111;
+  background: #3A1A18;
   color: #e66;
   border: 1.5px solid #a13b3b;
   font-size: 1rem;
@@ -359,7 +373,7 @@
 }
 .faction-leave-btn, .faction-join-btn {
   margin-top: 10px;
-  background: #222a22;
+  background: #1E2E20;
   color: #c9a84c;
   border: 1px solid #c9a84c;
   padding: 7px 18px;
@@ -369,7 +383,7 @@
   transition: background 0.2s, color 0.2s;
 }
 .faction-leave-btn {
-  background: #2a1111;
+  background: #3A1A18;
   color: #e66;
   border: 1px solid #a13b3b;
 }
@@ -554,7 +568,7 @@
   margin-bottom: 20px;
   border-radius: var(--radius);
   border: 1px solid var(--border);
-  background: #1a1208;
+  background: #252018;
   position: relative;
   /* Prevent map interaction from bubbling to page scroll */
   touch-action: none;
@@ -570,7 +584,7 @@
   cursor: grab;
   user-select: none;
   line-height: 0;
-  background: #1a1208;
+  background: #252018;
   border-radius: var(--radius) var(--radius) 0 0;
   touch-action: none;
   overscroll-behavior: none;
@@ -611,7 +625,7 @@
 }
 .map-zoom-btn {
   width: 36px; height: 36px;
-  background: rgba(13,11,8,0.9);
+  background: rgba(30,26,18,0.9);
   border: 1px solid var(--gold-dim);
   border-radius: 8px;
   color: var(--gold);
@@ -666,7 +680,7 @@
 /* ── Fullscreen Map Modal ── */
 .map-fullscreen-modal {
   position: fixed; inset: 0; z-index: 300;
-  background: rgba(8,7,5,0.98);
+  background: rgba(30,26,18,0.98);
   display: flex; flex-direction: column;
   animation: fadeIn 0.2s ease;
 }
@@ -758,7 +772,7 @@
   bottom: calc(100% + 10px);
   left: 50%;
   transform: translateX(-50%);
-  background: #130f0a;
+  background: #252018;
   border: 1px solid rgba(201,168,76,0.9);
   border-radius: var(--radius);
   padding: 14px 16px;
@@ -850,7 +864,7 @@
   order: 1;
   position: relative;
   margin-bottom: 8px;
-  background: rgba(8,7,5,0.92);
+  background: rgba(30,26,18,0.92);
   border: 1px solid #4ade80;
   border-radius: 4px;
   padding: 2px 7px;
@@ -928,6 +942,69 @@
 .inv-item-qty  { font-family: var(--font-mono); font-size: 0.62rem; color: var(--gold-dim); }
 .inv-empty     { grid-column: 1/-1; text-align: center; padding: 40px 20px; color: var(--text-dim); font-style: italic; font-size: 0.9rem; }
 .inv-empty-sub { margin-top: 8px; font-family: var(--font-mono); font-size: 0.6rem; color: var(--ash-light); }
+/* Inventory search bar */
+.inv-search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.inv-search-icon {
+  position: absolute;
+  left: 12px;
+  font-size: 0.85rem;
+  pointer-events: none;
+  opacity: 0.5;
+}
+.inv-search-input {
+  width: 100%;
+  background: var(--ink2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  padding: 9px 36px 9px 36px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.inv-search-input::placeholder { color: var(--ash); }
+.inv-search-input:focus { border-color: var(--gold-dim); }
+.inv-search-clear {
+  position: absolute;
+  right: 10px;
+  background: none;
+  border: none;
+  color: var(--ash-light);
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 4px 6px;
+  line-height: 1;
+  transition: color 0.15s;
+}
+.inv-search-clear:hover { color: var(--gold); }
+/* Equipment count header row */
+.inv-equip-count-row {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.inv-equip-count-badge {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  background: var(--ink3);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 3px 10px;
+}
+.inv-equip-count-num { color: var(--gold-dim); font-weight: 600; }
 
 @media (max-width: 900px) {
   .sidebar { width: 190px; }
@@ -1199,7 +1276,7 @@
   animation: fadeIn 0.15s ease;
 }
 .equip-boost-box {
-  background: #13100a;
+  background: #252018;
   border: 1px solid rgba(201,168,76,0.5);
   border-radius: var(--radius);
   padding: 24px 20px;
@@ -1392,6 +1469,10 @@
 .stat-btn:hover { background: rgba(201,168,76,0.18); border-color: var(--border-bright); }
 @media (max-width: 768px) { .stat-btn { width: 44px; height: 44px; font-size: 1.1rem; } }
 .stat-alloc-val { font-family: var(--font-display); font-size: 1.1rem; color: var(--gold); min-width: 28px; text-align: center; }
+.stat-direct-input { width: 56px; height: 36px; background: rgba(201,168,76,0.07); border: 1px solid var(--border); border-radius: 8px; color: var(--gold); font-family: var(--font-mono); font-size: 0.82rem; text-align: center; padding: 0 6px; outline: none; -moz-appearance: textfield; }
+.stat-direct-input::-webkit-inner-spin-button, .stat-direct-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.stat-direct-input:focus { border-color: var(--border-bright); background: rgba(201,168,76,0.13); }
+.stat-direct-input::placeholder { color: var(--text-dim); font-size: 0.72rem; }
 
 /* ── Deity ingredients ── */
 .ingredient-list { display: flex; flex-direction: column; }
@@ -1581,7 +1662,7 @@
 .prof-exp-level { font-family: var(--font-mono); font-size: 0.7rem; color: var(--gold-dim); }
 .prof-exp-bar-wrap { margin-bottom: 8px; }
 .prof-exp-bar { height: 6px; background: var(--ink3); border-radius: 4px; overflow: hidden; }
-.prof-exp-fill { height: 100%; background: linear-gradient(90deg, var(--gold-dim), var(--gold)); border-radius: 4px; transition: width 0.5s ease; }
+.prof-exp-fill { height: 100%; background: linear-gradient(90deg, var(--gold-dim), var(--gold)); border-radius: 4px; transition: width 0.15s ease-out; }
 .prof-exp-label { font-family: var(--font-mono); font-size: 0.6rem; color: var(--text-dim); display: flex; justify-content: space-between; margin-top: 4px; }
 .prof-find-rates { margin-top: 16px; }
 .prof-find-rates-title { font-family: var(--font-mono); font-size: 0.6rem; letter-spacing: 0.12em; color: var(--text-dim); text-transform: uppercase; margin-bottom: 10px; }
@@ -2010,8 +2091,26 @@
 .listing-empty { grid-column: 1/-1; text-align: center; padding: 48px 20px; color: var(--text-dim); font-style: italic; }
 
 .sell-modal { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.75); display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); animation: fadeIn 0.2s ease; }
-.sell-modal-box { background: var(--ink2); border: 1px solid var(--border-bright); border-radius: var(--radius); padding: 28px; width: 360px; max-width: 90vw; }
-.sell-modal-title { font-family: var(--font-display); font-size: 0.88rem; letter-spacing: 0.12em; color: var(--gold); margin-bottom: 20px; }
+.sell-modal-box { background: var(--ink2); border: 1px solid var(--border-bright); border-radius: var(--radius); padding: 28px; width: 380px; max-width: 92vw; max-height: 90vh; overflow-y: auto; }
+.sell-modal-title { font-family: var(--font-display); font-size: 0.88rem; letter-spacing: 0.12em; color: var(--gold); margin-bottom: 16px; }
+
+/* ── Market Listing Pricing Guide ────────────────────────────────────── */
+.mkt-guide { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 18px; overflow: hidden; }
+.mkt-guide-toggle { width: 100%; background: rgba(201,168,76,0.07); border: none; color: var(--gold); font-family: var(--font-display); font-size: 0.68rem; letter-spacing: 0.14em; padding: 9px 14px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 8px; transition: background 0.15s; }
+.mkt-guide-toggle:hover { background: rgba(201,168,76,0.13); }
+.mkt-guide-chevron { display: inline-block; font-size: 0.65rem; transition: transform 0.2s ease; }
+.mkt-guide-body { padding: 14px 14px 10px; background: rgba(0,0,0,0.22); }
+.mkt-guide-heading { font-family: var(--font-mono); font-size: 0.58rem; letter-spacing: 0.16em; color: var(--gold-dim); text-transform: uppercase; border-top: 1px solid var(--border); padding-top: 10px; margin: 10px 0 6px; }
+.mkt-guide-heading:first-of-type { border-top: none; padding-top: 0; margin-top: 6px; }
+.mkt-guide-tbl { width: 100%; border-collapse: collapse; font-size: 0.79rem; margin-bottom: 2px; }
+.mkt-guide-tbl td { padding: 2px 4px; color: var(--text-dim); }
+.mkt-guide-tbl td:first-child { color: var(--text); width: 52%; }
+.mkt-guide-tbl td:last-child { text-align: right; font-family: var(--font-mono); font-size: 0.7rem; color: var(--gold-dim); }
+.mkt-guide-formula { background: rgba(201,168,76,0.04); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; margin-top: 10px; }
+.mkt-guide-note { font-size: 0.77rem; color: var(--text-dim); line-height: 1.5; margin-bottom: 3px; }
+.mkt-guide-note b { color: var(--text); font-weight: 600; }
+.mkt-guide-note.mgt-sub { margin-bottom: 6px; }
+.mkt-guide-note.mgt-example { color: var(--ash-light); font-size: 0.72rem; }
 
 /* Buy confirm modal (reused) */
 .confirm-modal { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.75); display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); animation: fadeIn 0.2s ease; }
@@ -2245,6 +2344,37 @@
 }
 .zone-cont-danger  { color: #e07060; background: rgba(224,112,96,0.07); border-color: rgba(224,112,96,0.25); }
 .zone-cont-endgame { color: #b88fe0; background: rgba(184,143,224,0.07); border-color: rgba(184,143,224,0.25); }
+
+/* ── Collapsible region dropdowns ── */
+.zone-region { margin-bottom: 6px; }
+.zone-region-toggle {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; background: none; border: none; cursor: pointer;
+  padding: 6px 4px; margin-bottom: 8px;
+  font-family: var(--font-mono); font-size: 0.6rem;
+  color: var(--gold-dim); letter-spacing: 0.12em;
+  opacity: 0.85; transition: opacity 0.15s;
+}
+.zone-region-toggle:hover { opacity: 1; }
+.zone-region-label { flex: 1; text-align: left; }
+.zone-region-range {
+  font-size: 0.55rem; color: var(--text-dim);
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border); border-radius: 3px;
+  padding: 1px 6px; letter-spacing: 0.06em;
+}
+.zone-region-arrow {
+  font-size: 0.75rem; color: var(--gold-dim);
+  transition: transform 0.2s ease;
+  display: inline-block;
+}
+.zone-region.collapsed .zone-region-arrow { transform: rotate(-90deg); }
+.zone-region-body {
+  display: block;
+}
+.zone-region.collapsed .zone-region-body {
+  display: none;
+}
 .zone-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin-bottom: 16px; }
 .zone-card {
   border: 1px solid var(--border); border-radius: var(--radius);
@@ -2312,8 +2442,39 @@
 .auto-battle-progress { height: 6px; background: var(--ink3); border-radius: 4px; overflow: hidden; }
 .auto-battle-fill { height: 100%; background: linear-gradient(90deg, var(--gold-dim), var(--gold)); border-radius: 4px; transition: width 0.1s linear; }
 
-.battle-result { text-align: center; padding: 32px 20px; background: var(--ink2); border: 1px solid var(--border); border-radius: var(--radius); }
-.battle-result-icon  { font-size: 2.4rem; margin-bottom: 8px; }
+/* ── Battle Arena — fullscreen overlay while fighting ───────────────────── */
+#battle-arena {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 850 !important;
+  background: var(--ink1, #0a0a0f) !important;
+  overflow-y: auto !important;
+  padding: 20px 16px 40px !important;
+  display: none;
+}
+
+/* ── Battle Result — fullscreen overlay after battle ends ───────────────── */
+.battle-result {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 860 !important;
+  background: rgba(8, 8, 12, 0.72) !important;
+  backdrop-filter: blur(10px) !important;
+  -webkit-backdrop-filter: blur(10px) !important;
+  display: none;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  text-align: center;
+  padding: 40px 24px !important;
+  border: none !important;
+  border-radius: 0 !important;
+}
+.battle-result[style*="display: block"],
+.battle-result[style*="display:block"] {
+  display: flex !important;
+}
+.battle-result-icon  { font-size: 3.5rem; margin-bottom: 14px; }
 .battle-result-title { font-family: var(--font-display); font-size: 1.1rem; color: var(--gold); letter-spacing: 0.12em; margin-bottom: 16px; }
 .battle-result-log   { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
 .battle-result-log-line { font-size: 0.85rem; color: var(--text-dim); }
@@ -3599,15 +3760,36 @@
   font-style: italic;
 }
 
-/* Start Raid button */
+/* Start Raid button + Arrange Order button */
 .party-start-raid-wrap {
   margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 .party-start-raid-btn {
   width: 100% !important;
   padding: 14px !important;
   font-size: 0.85rem !important;
   letter-spacing: 0.15em !important;
+}
+.party-arrange-btn {
+  width: 100%;
+  font-size: 0.82rem;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  padding: 10px 14px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  letter-spacing: 0.06em;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.party-arrange-btn:hover {
+  background: rgba(201,168,76,0.08);
+  border-color: var(--gold-dim);
+  color: var(--gold);
 }
 
 /* ── Raid setup card (init / boss select) ── */
@@ -6407,3 +6589,37 @@ button, [role="button"], input[type="button"], input[type="submit"] {
 
 /* Prevent the 300ms click delay on the whole app */
 html { touch-action: manipulation; }
+/* ═══════════════════════════════════════════════════
+   BATCH 4 ADDITIONS — Party Arrange Modal
+   ═══════════════════════════════════════════════════ */
+
+/* Party arrange modal overlay */
+#_party-arrange-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.78);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Arrange rows — hover handled inline, but ensure tap is friendly on mobile */
+._arrange-row {
+  transition: background 0.15s, border-color 0.15s;
+  touch-action: manipulation;
+}
+
+/* Up/down reorder buttons inside arrange modal */
+._arrange-row button {
+  min-height: 28px;
+  min-width: 28px;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (max-width: 480px) {
+  #_party-arrange-modal > div {
+    padding: 20px 14px;
+  }
+}

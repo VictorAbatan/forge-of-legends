@@ -476,6 +476,8 @@ const ITEMS = [
   { name:"Bone Fragments",   icon:"🦴",  type:"material", rarity:"Common" },
   { name:"Animal Fat",       icon:"🫙",  type:"material", rarity:"Common" },
   { name:"Meat",             icon:"🥩",  type:"material", rarity:"Common" },
+  { name:"Wood",             icon:"🪵",  type:"material", rarity:"Common" },
+  { name:"Stone",            icon:"🪨",  type:"material", rarity:"Common" },
   // Uncommon
   { name:"Bronze",           icon:"🔶",  type:"material", rarity:"Uncommon" },
   { name:"Silver",           icon:"⚪",  type:"material", rarity:"Uncommon" },
@@ -486,6 +488,10 @@ const ITEMS = [
   { name:"Fangs",            icon:"🦷",  type:"material", rarity:"Uncommon" },
   { name:"Claws",            icon:"🦾",  type:"material", rarity:"Uncommon" },
   { name:"Horns",            icon:"🦌",  type:"material", rarity:"Uncommon" },
+  { name:"Fire Essence",     icon:"🔥",  type:"material", rarity:"Uncommon" },
+  { name:"Water Essence",    icon:"💧",  type:"material", rarity:"Uncommon" },
+  { name:"Earth Essence",    icon:"🌱",  type:"material", rarity:"Uncommon" },
+  { name:"Wind Essence",     icon:"🌬️", type:"material", rarity:"Uncommon" },
   // Rare
   { name:"Gold",             icon:"🟡",  type:"material", rarity:"Rare" },
   { name:"Palladium",        icon:"🔵",  type:"material", rarity:"Rare" },
@@ -498,10 +504,13 @@ const ITEMS = [
   { name:"Titanium",         icon:"⬜",  type:"material", rarity:"Legendary" },
   { name:"Dragon Scales",    icon:"🐲",  type:"material", rarity:"Legendary" },
   { name:"Cyclops Eye",      icon:"👁️", type:"material", rarity:"Legendary" },
+  { name:"Phoenix Feather",  icon:"🔥",  type:"material", rarity:"Legendary" },
   // Mythic
   { name:"Aetherium",        icon:"🌟",  type:"material", rarity:"Mythic" },
   { name:"Titan Heart",      icon:"❤️‍🔥", type:"material", rarity:"Mythic" },
-  // Deity-specific
+  { name:"Void Crystal",     icon:"🌌",  type:"material", rarity:"Mythic" },
+  { name:"Eden's Tear",      icon:"💎",  type:"material", rarity:"Mythic" },
+  // Deity-specific worship materials
   { name:"Ephemeral Footprints",    icon:"✨", type:"material", rarity:"Deity" },
   { name:"Oil-stained Feathers",    icon:"✨", type:"material", rarity:"Deity" },
   { name:"Whispering Purple Sands", icon:"✨", type:"material", rarity:"Deity" },
@@ -714,6 +723,7 @@ function renderQuestRewardPicker() {
   updateSelectedDisplay();
 }
 // Faction quest reward picker — same logic, separate picker/hidden element IDs
+// NOTE: ingredient/sacred items excluded here — faction leaders cannot reward advancement ingredients
 function renderFactionQuestRewardPicker() {
   const picker = document.getElementById("fq-reward-picker");
   if (!picker) return;
@@ -722,9 +732,12 @@ function renderFactionQuestRewardPicker() {
   let currentCat = "weapon";
   let searchQuery = "";
 
+  // Exclude 'ingredient' (advancement/sacred items) from faction rewards
+  const FQ_CATEGORIES = ITEM_CATEGORIES.filter(c => c.key !== "ingredient");
+
   picker.innerHTML = `
     <div class="reward-picker-tabs">
-      ${ITEM_CATEGORIES.map(cat => `<button class="reward-picker-tab${cat.key === currentCat ? ' active' : ''}" data-cat="${cat.key}">${cat.label}</button>`).join("")}
+      ${FQ_CATEGORIES.map(cat => `<button class="reward-picker-tab${cat.key === currentCat ? ' active' : ''}" data-cat="${cat.key}">${cat.label}</button>`).join("")}
     </div>
     <input type="text" id="fq-reward-search" class="field-input" placeholder="🔍 Search items..." style="margin:8px 0;padding:6px 10px;font-size:0.82rem"/>
     <div class="reward-picker-list"></div>
@@ -845,11 +858,156 @@ function renderFactionQuestRewardPicker() {
   updateSelectedDisplay();
 }
 
-// Render picker when quest modal opens
-const origOpenDeityModal = window.openDeityModal;
+// ═══════════════════════════════════════════════════
+//  BESTOW ITEM PICKER — full game-wide item browser
+// ═══════════════════════════════════════════════════
+function renderBestowItemPicker() {
+  const picker = document.getElementById("bestow-item-picker");
+  if (!picker) return;
+
+  let selected = [];
+  let currentCat = "weapon";
+  let searchQuery = "";
+
+  // All categories available for bestow — EVERYTHING including ingredients/sacred items
+  const BESTOW_CATEGORIES = [
+    { key: "weapon",     label: "⚔️ Weapons"    },
+    { key: "armor",      label: "🛡️ Armor"      },
+    { key: "potion",     label: "🧪 Potions"    },
+    { key: "food",       label: "🍖 Food"       },
+    { key: "material",   label: "📦 Materials"  },
+    { key: "ingredient", label: "✦ Sacred Items" },
+  ];
+
+  picker.innerHTML = `
+    <div class="reward-picker-tabs" style="flex-wrap:wrap;gap:4px">
+      ${BESTOW_CATEGORIES.map(cat => `<button class="reward-picker-tab${cat.key === currentCat ? ' active' : ''}" data-cat="${cat.key}">${cat.label}</button>`).join("")}
+    </div>
+    <input type="text" id="bestow-item-search" class="field-input" placeholder="🔍 Search all items..." style="margin:8px 0;padding:6px 10px;font-size:0.82rem"/>
+    <div class="reward-picker-list"></div>
+    <div class="reward-picker-selected"></div>
+  `;
+
+  const listDiv     = picker.querySelector(".reward-picker-list");
+  const selectedDiv = picker.querySelector(".reward-picker-selected");
+  const searchInput = picker.querySelector("#bestow-item-search");
+
+  function getBadge(item) {
+    if (item.grade)  { const col = GRADE_COLORS[item.grade]  || "#aaa"; return `<span style="font-size:0.65rem;font-weight:700;padding:1px 5px;border-radius:3px;background:${col}22;color:${col};border:1px solid ${col}44;margin-left:4px">${item.grade}</span>`; }
+    if (item.rarity) { const col = RARITY_COLORS[item.rarity]|| "#aaa"; return `<span style="font-size:0.65rem;font-weight:700;padding:1px 5px;border-radius:3px;background:${col}22;color:${col};border:1px solid ${col}44;margin-left:4px">${item.rarity}</span>`; }
+    return "";
+  }
+
+  function syncHidden() {
+    document.getElementById("bestow-items").value = selected.map(i => `${i.name}, ${i.qty}`).join("\n");
+  }
+
+  function updateSelectedDisplay() {
+    if (!selected.length) {
+      selectedDiv.innerHTML = `<div style="color:var(--text-dim);font-size:0.82rem;padding:6px 0;font-style:italic">No items selected yet.</div>`;
+    } else {
+      selectedDiv.innerHTML = `
+        <div style="font-size:0.72rem;color:var(--text-dim);margin-bottom:6px;font-family:var(--ff-mono);letter-spacing:0.06em">SELECTED ITEMS</div>
+        ${selected.map((item, idx) => `
+          <div class="reward-selected-row">
+            <span class="reward-selected-num">${idx + 1}</span>
+            <span class="reward-selected-icon">${item.icon || "📦"}</span>
+            <span class="reward-selected-name">${item.name}${getBadge(item)}</span>
+            <input type="number" min="1" value="${item.qty}" data-name="${item.name}" class="reward-qty-input"/>
+            <button data-name="${item.name}" class="reward-remove-btn">✕</button>
+          </div>`).join("")}`;
+    }
+    syncHidden();
+    selectedDiv.querySelectorAll(".reward-qty-input").forEach(input => {
+      input.addEventListener("input", () => {
+        const val = Math.max(1, parseInt(input.value) || 1);
+        input.value = val;
+        const item = selected.find(i => i.name === input.dataset.name);
+        if (item) { item.qty = val; syncHidden(); }
+      });
+    });
+    selectedDiv.querySelectorAll(".reward-remove-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        selected = selected.filter(i => i.name !== btn.dataset.name);
+        updateSelectedDisplay();
+        showCategory(currentCat);
+      });
+    });
+  }
+
+  function showCategory(catKey) {
+    currentCat = catKey;
+    const q = searchQuery.toLowerCase();
+    let items = ITEMS.filter(i => i.type === catKey);
+    if (q) items = items.filter(i => i.name.toLowerCase().includes(q));
+    if (!items.length) { listDiv.innerHTML = `<div style="color:var(--text-dim);font-size:0.82rem;padding:8px;font-style:italic">No items found.</div>`; return; }
+    listDiv.innerHTML = items.map(item => {
+      const isSel = !!selected.find(s => s.name === item.name);
+      return `<button class="reward-item-btn${isSel ? ' selected' : ''}" data-name="${item.name}">
+        ${item.icon || "📦"} ${item.name}${getBadge(item)}
+        ${item.stats ? `<span class="reward-item-stat">${item.stats}</span>` : ""}
+        ${isSel ? `<span class="reward-item-check">✓</span>` : ""}
+      </button>`;
+    }).join("");
+    listDiv.querySelectorAll(".reward-item-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const name = btn.dataset.name;
+        if (selected.find(i => i.name === name)) return;
+        const item = ITEMS.find(i => i.name === name);
+        selected.push({ ...item, qty: 1 });
+        updateSelectedDisplay();
+        showCategory(currentCat);
+      });
+    });
+  }
+
+  searchInput.addEventListener("input", () => {
+    searchQuery = searchInput.value;
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      const filtItems = ITEMS.filter(i => i.name.toLowerCase().includes(q));
+      listDiv.innerHTML = filtItems.length
+        ? filtItems.map(item => {
+            const isSel = !!selected.find(s => s.name === item.name);
+            return `<button class="reward-item-btn${isSel ? ' selected' : ''}" data-name="${item.name}">
+              ${item.icon||"📦"} ${item.name}${getBadge(item)}
+              ${item.stats ? `<span class="reward-item-stat">${item.stats}</span>` : ""}
+              ${isSel ? `<span class="reward-item-check">✓</span>` : ""}
+            </button>`;
+          }).join("")
+        : `<div style="color:var(--text-dim);font-size:0.82rem;padding:8px;font-style:italic">No items found.</div>`;
+      listDiv.querySelectorAll(".reward-item-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const name = btn.dataset.name;
+          if (selected.find(i => i.name === name)) return;
+          const item = ITEMS.find(i => i.name === name);
+          selected.push({ ...item, qty: 1 });
+          updateSelectedDisplay();
+          searchInput.dispatchEvent(new Event("input"));
+        });
+      });
+    } else { showCategory(currentCat); }
+  });
+
+  picker.querySelectorAll(".reward-picker-tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      picker.querySelectorAll(".reward-picker-tab").forEach(t => t.classList.remove("active"));
+      tab.classList.add("active");
+      searchQuery = ""; searchInput.value = "";
+      showCategory(tab.dataset.cat);
+    });
+  });
+
+  showCategory(currentCat);
+  updateSelectedDisplay();
+}
+
+// Render picker when bestow modal opens
+const _origOpenDeityModal = window.openDeityModal;
 window.openDeityModal = function(id) {
-  origOpenDeityModal?.(id);
-  if (id === "quest-modal") setTimeout(renderQuestRewardPicker, 0);
+  _origOpenDeityModal?.(id);
+  if (id === "quest-modal")  setTimeout(renderQuestRewardPicker, 0);
+  if (id === "bestow-modal") setTimeout(renderBestowItemPicker,  0);
 };
 // Also render faction quest picker when factions panel becomes visible
 document.addEventListener("DOMContentLoaded", () => {
@@ -1119,6 +1277,8 @@ async function loadWorshippers() {
     set("worshipper-count",    _worshippers.length);
     set("ov-worshipper-count", _worshippers.length);
     renderWorshippers(_worshippers);
+    // Start listening for faith-level-up notifications (once per session)
+    startFaithNotifListener();
   } catch(err) { console.error("Worshipper load error:", err); }
 }
 
@@ -1255,9 +1415,9 @@ function loadActiveEvents() {
 //  PANEL SWITCH
 // ═══════════════════════════════════════════════════
 function onDeityPanelSwitch(name) {
-  if (name === "worshippers") loadWorshippers();
+  if (name === "worshippers") { loadWorshippers(); loadWorshipperActivityLog(); }
   if (name === "visions")     loadVisionHistory();
-  if (name === "factions")    loadFactionMissions();
+  if (name === "factions")    { loadFactionMissions(); loadFactionActivityLog(); }
   if (name === "quests")      loadDeityQuests();
   if (name === "npcs")        initDeityNpcPanel();
   if (name === "chat")        initDeityChat();
@@ -1265,8 +1425,220 @@ function onDeityPanelSwitch(name) {
 }
 
 // ═══════════════════════════════════════════════════
-//  SEND VISION
+//  WORSHIPPER ACTIVITY LOG
 // ═══════════════════════════════════════════════════
+async function loadWorshipperActivityLog() {
+  const container = document.getElementById("worshipper-activity-log");
+  if (!container) return;
+  if (!_worshippers.length) {
+    container.innerHTML = `<p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">No worshippers to show activity for.</p>`;
+    return;
+  }
+  container.innerHTML = `<p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">Loading activity...</p>`;
+  try {
+    const worshipperUids = _worshippers.map(w => w.uid);
+    // Firestore 'in' supports up to 30 values; chunk if needed
+    const chunkSize = 30;
+    let allLogs = [];
+    for (let i = 0; i < worshipperUids.length; i += chunkSize) {
+      const chunk = worshipperUids.slice(i, i + chunkSize);
+      const snap = await getDocs(
+        query(collection(db, "activityLog"), where("uid", "in", chunk), orderBy("timestamp", "desc"), limit(50))
+      );
+      snap.forEach(d => allLogs.push({ id: d.id, ...d.data() }));
+    }
+    // Sort combined results by timestamp desc
+    allLogs.sort((a, b) => (b.timestamp?.toMillis?.() || 0) - (a.timestamp?.toMillis?.() || 0));
+    allLogs = allLogs.slice(0, 60);
+    if (!allLogs.length) {
+      container.innerHTML = `<p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">No activity recorded yet.</p>`;
+      return;
+    }
+    container.innerHTML = allLogs.map(log => {
+      const w = _worshippers.find(x => x.uid === log.uid);
+      const name = w?.name || log.playerName || "Unknown";
+      const ts = log.timestamp?.toDate?.()?.toLocaleString() || "—";
+      return `<div class="activity-log-entry" style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--border)">
+        <span style="font-size:1.1rem;flex-shrink:0">${log.icon || "📋"}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:0.82rem;color:var(--text)">${log.html || log.message || "—"}</div>
+          <div style="font-size:0.72rem;color:var(--ash);margin-top:2px">
+            <span style="color:var(--gold-dim)">${name}</span> · ${ts}
+          </div>
+        </div>
+      </div>`;
+    }).join("");
+  } catch(e) {
+    console.error("[WorshipperActivityLog]", e);
+    container.innerHTML = `<p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">Failed to load activity: ${e.message}</p>`;
+  }
+}
+
+// ═══════════════════════════════════════════════════
+//  FACTION MEMBER ACTIVITY LOG
+// ═══════════════════════════════════════════════════
+async function loadFactionActivityLog() {
+  const container = document.getElementById("faction-activity-log");
+  if (!container) return;
+  // Determine this deity's faction from their claimed leader profile
+  const leaders = window._lastLoadedFactionLeaders || [];
+  const myLeader = leaders.find(l => l.deityUid === _uid);
+  if (!myLeader) {
+    container.innerHTML = `<p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">Claim a faction to view member activity.</p>`;
+    return;
+  }
+  const faction = myLeader.faction;
+  container.innerHTML = `<p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">Loading faction activity...</p>`;
+  try {
+    // Get all characters in this faction
+    const charSnap = await getDocs(query(collection(db, "characters"), where("faction", "==", faction)));
+    const factionUids = charSnap.docs.map(d => d.id);
+    if (!factionUids.length) {
+      container.innerHTML = `<p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">No members in ${faction} yet.</p>`;
+      return;
+    }
+    const chunkSize = 30;
+    let allLogs = [];
+    for (let i = 0; i < factionUids.length; i += chunkSize) {
+      const chunk = factionUids.slice(i, i + chunkSize);
+      const snap = await getDocs(
+        query(collection(db, "activityLog"), where("uid", "in", chunk), orderBy("timestamp", "desc"), limit(50))
+      );
+      snap.forEach(d => allLogs.push({ id: d.id, ...d.data() }));
+    }
+    allLogs.sort((a, b) => (b.timestamp?.toMillis?.() || 0) - (a.timestamp?.toMillis?.() || 0));
+    allLogs = allLogs.slice(0, 60);
+    const nameMap = {};
+    charSnap.docs.forEach(d => { nameMap[d.id] = d.data().name || "Unknown"; });
+    if (!allLogs.length) {
+      container.innerHTML = `<p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">No activity recorded for ${faction} yet.</p>`;
+      return;
+    }
+    container.innerHTML = `<div style="font-size:0.72rem;color:var(--text-dim);margin-bottom:8px;font-family:var(--font-mono);letter-spacing:0.06em">FACTION: ${faction}</div>` +
+    allLogs.map(log => {
+      const name = nameMap[log.uid] || log.playerName || "Unknown";
+      const ts = log.timestamp?.toDate?.()?.toLocaleString() || "—";
+      return `<div class="activity-log-entry" style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--border)">
+        <span style="font-size:1.1rem;flex-shrink:0">${log.icon || "📋"}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:0.82rem;color:var(--text)">${log.html || log.message || "—"}</div>
+          <div style="font-size:0.72rem;color:var(--ash);margin-top:2px">
+            <span style="color:var(--gold-dim)">${name}</span> · ${ts}
+          </div>
+        </div>
+      </div>`;
+    }).join("");
+  } catch(e) {
+    console.error("[FactionActivityLog]", e);
+    container.innerHTML = `<p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">Failed to load: ${e.message}</p>`;
+  }
+}
+
+// ═══════════════════════════════════════════════════
+//  FAITH INCREASE NOTIFICATIONS
+// ═══════════════════════════════════════════════════
+let _faithNotifUnsub = null;
+
+function _renderFaithNotifEntry(n, panel, prepend = true) {
+  const isMantleUp = n.subtype === 'mantle_ascension';
+  const ts    = n.createdAt?.toDate?.()?.toLocaleString() || 'just now';
+  const icon  = isMantleUp ? '🎉' : '✨';
+  const badge = isMantleUp
+    ? `<span style="background:rgba(201,168,76,0.15);color:var(--gold);font-family:var(--font-mono);font-size:0.6rem;padding:2px 7px;border-radius:8px;border:1px solid rgba(201,168,76,0.3);letter-spacing:0.06em">MANTLE ASCENSION</span>`
+    : `<span style="background:rgba(93,190,133,0.1);color:#5dbe85;font-family:var(--font-mono);font-size:0.6rem;padding:2px 7px;border-radius:8px;border:1px solid rgba(93,190,133,0.2);letter-spacing:0.06em">CHOIR ADVANCEMENT</span>`;
+  const detail = `${n.mantle} — Choir ${n.choir} &nbsp;·&nbsp; Faith <b>${n.faithLevel}</b>`;
+  const el = document.createElement('div');
+  el.style.cssText = 'display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--border)';
+  el.innerHTML = `
+    <span style="font-size:1.2rem;margin-top:2px">${icon}</span>
+    <div style="flex:1;min-width:0">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
+        <span style="font-size:0.85rem;font-weight:600;color:var(--text)">${n.playerName}</span>
+        ${badge}
+      </div>
+      <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:3px">${detail}</div>
+      <div style="font-size:0.68rem;color:var(--ash)">${ts}</div>
+    </div>`;
+  if (prepend) panel.prepend(el); else panel.appendChild(el);
+}
+
+function startFaithNotifListener() {
+  if (_faithNotifUnsub) return; // already running
+
+  // ── Step 1: Load full history (read + unread) ──
+  const _loadHistory = () => {
+    const panel = document.getElementById("deity-faith-notif-list");
+    if (!panel) { console.warn("[FaithNotif] Panel element not found"); return; }
+    if (!_uid)  { console.warn("[FaithNotif] _uid not set"); return; }
+
+    console.log("[FaithNotif] Loading history for uid:", _uid);
+    getDocs(query(
+      collection(db, "deityNotifications"),
+      where("deityUid", "==", _uid),
+      where("type",     "==", "faith_increase"),
+      orderBy("createdAt", "desc"),
+      limit(50)
+    )).then(snap => {
+      console.log("[FaithNotif] History docs found:", snap.size);
+      // Always wipe the placeholder, whether or not there are results
+      panel.innerHTML = snap.empty
+        ? `<p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">No faith level-ups yet.</p>`
+        : '';
+      if (!snap.empty) {
+        // Render oldest-first so newest ends up at the top via prepend
+        Array.from(snap.docs).reverse().forEach(d => _renderFaithNotifEntry(d.data(), panel, true));
+      }
+    }).catch(err => {
+      console.error("[FaithNotif] History load failed:", err);
+    });
+  };
+
+  // Run immediately; if DOM isn't ready yet, defer one tick
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _loadHistory);
+  } else {
+    _loadHistory();
+  }
+
+  // ── Step 2: Live listener for incoming unread notifications ──
+  _faithNotifUnsub = onSnapshot(
+    query(
+      collection(db, "deityNotifications"),
+      where("deityUid", "==", _uid),
+      where("type",     "==", "faith_increase"),
+      where("read",     "==", false),
+      orderBy("createdAt", "desc"),
+      limit(20)
+    ),
+    snap => {
+      snap.docChanges().forEach(change => {
+        if (change.type !== "added") return;
+        const n = change.doc.data();
+        const isMantleUp = n.subtype === 'mantle_ascension';
+
+        // Toast
+        const toastMsg = isMantleUp
+          ? `🎉 ${n.playerName} ascended to ${n.mantle}!`
+          : `✨ ${n.playerName} — ${n.mantle} Choir ${n.choir}`;
+        window.showToast(toastMsg, isMantleUp ? 'success' : 'info');
+
+        // Mark read so it won't re-toast on next session
+        updateDoc(doc(db, "deityNotifications", change.doc.id), { read: true }).catch(()=>{});
+
+        // Add to panel live
+        const panel = document.getElementById("deity-faith-notif-list");
+        if (panel) {
+          // Clear placeholder if still showing
+          const placeholder = panel.querySelector('p');
+          if (placeholder) placeholder.remove();
+          _renderFaithNotifEntry(n, panel, true);
+        }
+      });
+    },
+    err => console.error("[FaithNotif] Live listener error:", err)
+  );
+}
+window._startFaithNotifListener = startFaithNotifListener;
 function _getTargetUid(type) {
   const sel = document.getElementById(`${type}-target`);
   if (!sel) return "";
@@ -1356,6 +1728,9 @@ async function doBestow() {
     document.getElementById("bestow-modal").style.display = "none";
     document.getElementById("bestow-gold").value  = "0";
     document.getElementById("bestow-items").value = "";
+    // Reset the item picker
+    const _bPicker = document.getElementById("bestow-item-picker");
+    if (_bPicker) { _bPicker.innerHTML = ""; setTimeout(renderBestowItemPicker, 0); }
 
     const logEl = document.getElementById("bestow-log");
     if (logEl) {
@@ -1726,18 +2101,19 @@ async function doDropQuest(questType) {
   if (btn) { btn.disabled = true; btn.textContent = "Dropping Quest..."; }
   try {
     await addDoc(collection(db, "storyQuests"), {
-      type:        questType,
+      type:           questType,
       title,
-      description: desc,
+      description:    desc,
       objectives,
-      reward:      { gold, exp, items: rewardItems },
-      assignedTo:  targetUid,          // null = all players can see it
-      deityUid:    _uid,
+      reward:         { gold, exp, items: rewardItems },
+      assignedTo:     targetUid,          // null = all players can see it
+      deityUid:       _uid,
       deityName,
-      status:      "active",
-      completedBy: [],
-      expiresAt:   expiresAt || null,
-      createdAt:   serverTimestamp(),
+      status:         "active",
+      completionType: "open",             // deity.js quests are always open to all players
+      completedBy:    [],
+      expiresAt:      expiresAt || null,
+      createdAt:      serverTimestamp(),
     });
 
     // Clear form
@@ -1906,7 +2282,9 @@ window._loadDeityQuestSubmissions = async function() {
   renderDeityQuests();
 };
 
-// Approve a submission: update doc, grant reward, notify player
+// Approve a submission: update doc, notify player
+// Reward is granted client-side by the player's onSnapshot listener
+// (same pattern as faction quests — deity only sets status:'approved')
 window._approveSubmission = async function(subId, questId) {
   try {
     const quest = _deityQuests.find(q => q.id === questId);
@@ -1915,6 +2293,21 @@ window._approveSubmission = async function(subId, questId) {
     if (!sub) return;
 
     await updateDoc(doc(db, 'questSubmissions', subId), { status: 'approved' });
+
+    // For one_time quests: stamp completedBy so other players get locked out
+    if (quest.completionType === 'one_time') {
+      try {
+        await updateDoc(doc(db, 'storyQuests', questId), {
+          completedBy: arrayUnion({
+            uid: sub.uid,
+            playerName: sub.playerName || '?',
+            completedAt: new Date(),
+          }),
+        });
+      } catch(e) {
+        console.warn('Could not stamp completedBy on storyQuest:', e);
+      }
+    }
 
     // Notify the player
     await addDoc(collection(db, 'notifications'), {

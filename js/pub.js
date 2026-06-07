@@ -66,7 +66,7 @@ const PUB_LOCATIONS = {
     continent:   "Northern Continent",
     continentId: "frostveil",
     capitalDest: "Frostspire — Gladys Kingdom",
-    capitalCost: 100, capitalTime: 300,
+    capitalCost: 100, capitalTime: 60,
   },
   western: {
     location:    "Solmere",
@@ -75,7 +75,7 @@ const PUB_LOCATIONS = {
     continent:   "Western Continent",
     continentId: "verdantis",
     capitalDest: "Solmere — Elaria Kingdom",
-    capitalCost: 100, capitalTime: 300,
+    capitalCost: 100, capitalTime: 60,
   },
 };
 
@@ -174,6 +174,22 @@ window.renderPubPanel = function() {
   const panel = document.getElementById('panel-pub');
   if (!panel) return;
 
+  // ── Dead player restriction ───────────────────────────────────────────────
+  // Dead players cannot travel, enter the pub, or use location chat.
+  // They can only chat in General Chat and access the trade panel.
+  if (_charData?.isDead) {
+    panel.innerHTML = `
+      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 24px;gap:16px;text-align:center;">
+        <div style="font-size:3rem">💀</div>
+        <div style="color:var(--gold);font-family:var(--font-mono);font-size:1.1rem;letter-spacing:0.1em;text-transform:uppercase;">You Are Dead</div>
+        <div style="color:var(--text-dim);font-size:0.9rem;max-width:320px;line-height:1.6;">
+          The pub doors are barred to the deceased. You cannot travel, gamble, or speak in location chat until you are resurrected.<br><br>
+          You may still chat in <strong style="color:var(--gold)">General Chat</strong> and trade with other players.
+        </div>
+      </div>`;
+    return;
+  }
+
   if (!_isAtPub()) { _renderPubGate(panel); return; }
 
   const pub = _getCurrentPub();
@@ -182,27 +198,30 @@ window.renderPubPanel = function() {
 
 // ── Gate view ─────────────────────────────────────────────────
 function _renderPubGate(panel) {
+  // Dead players are shown the death overlay in renderPubPanel before reaching here,
+  // but guard again in case _renderPubGate is ever called directly.
+  if ((_charData || window._charData)?.isDead) {
+    renderPubPanel(); // re-route through the dead overlay
+    return;
+  }
   const cards = Object.values(PUB_LOCATIONS).map(p => {
     const atCapital   = _isAtCapitalOf(p);
     const inContinent = _isInContinentOf(p);
     let statusHtml, actionHtml;
     if (atCapital) {
       statusHtml = `<div class="pub-gate-status ready">✓ You are in ${p.location}</div>`;
-      actionHtml = `<button class="pub-gate-action-btn" onclick="window._pubTravelTo('${p.travelId}','${p.continent}')">ENTER PUB — 10 💰 · 1 min</button>`;
+      actionHtml = `<button class="pub-gate-action-btn" onclick="window._pubTravelTo('${p.travelId}','${p.continent}')">ENTER PUB — 10 💰 · 30s</button>`;
     } else if (inContinent) {
       statusHtml = `<div class="pub-gate-status near">📍 You are in the ${p.continent}</div>`;
       actionHtml = `
         <button class="pub-gate-action-btn" onclick="window.openTravelModal?.('${p.capitalDest}','${p.continent}',20,60)">
           TRAVEL TO ${p.location.toUpperCase()} — 20 💰 · 1 min
-        </button>
-        <button class="pub-gate-action-btn secondary" onclick="window._viewCapitalFromPub?.('${p.continentId}')" style="margin-top:6px;">
-          VIEW ${p.location.toUpperCase()} →
         </button>`;
     } else {
       statusHtml = `<div class="pub-gate-status far">🌍 ${p.continent}</div>`;
       actionHtml = `<div class="pub-gate-hint">Travel to the ${p.continent} first, then find ${p.location}.</div>
         <button class="pub-gate-action-btn secondary" onclick="window.openTravelModal?.('${p.capitalDest}','${p.continent}',${p.capitalCost},${p.capitalTime})">
-          TRAVEL THERE — ${p.capitalCost} 💰 · 5m
+          TRAVEL THERE — ${p.capitalCost} 💰 · 1 min
         </button>`;
     }
     return `
@@ -226,10 +245,14 @@ function _renderPubGate(panel) {
 }
 
 window._pubTravelTo = function(travelId, continent) {
+  if ((_charData || window._charData)?.isDead) {
+    window.showToast?.('☠️ Dead players cannot travel. Resurrect first.', 'error');
+    return;
+  }
   if (typeof window.openTravelModal === 'function') {
-    window.openTravelModal(travelId, continent, 10, 60);
+    window.openTravelModal(travelId, continent, 10, 30);
   } else if (typeof window._startTravel === 'function') {
-    window._startTravel({ dest: travelId, continent, cost: 10, seconds: 60 });
+    window._startTravel({ dest: travelId, continent, cost: 10, seconds: 30 });
     if (typeof window.switchPanel === 'function') window.switchPanel('map');
   } else {
     window.showToast?.('Open the World Map to travel.', '');
@@ -696,6 +719,10 @@ function _checkLiveGames() {
 }
 
 window._openPubGame = function(gameId) {
+  if ((_charData || window._charData)?.isDead) {
+    window.showToast?.('☠️ Dead players cannot gamble. Resurrect first.', 'error');
+    return;
+  }
   const game = PUB_GAMES.find(g => g.id === gameId);
   if (!game || !game.live) { window.showToast?.('Coming soon!', ''); return; }
 

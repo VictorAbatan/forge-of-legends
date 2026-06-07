@@ -1055,9 +1055,62 @@ exports.updateFaithLevel = onCall(CALL_OPTS, async (request) => {
 
   const { targetUid, amount } = request.data;
   const targetChar = await getCharacter(targetUid);
-  const newFaith   = Math.max(0, (targetChar.faithLevel||0) + (amount||1));
+  const oldFaith   = targetChar.faithLevel || 0;
+  const newFaith   = Math.max(0, oldFaith + (amount || 1));
 
   await db.collection("characters").doc(targetUid).update({ faithLevel: newFaith });
+
+  // Notify the deity if faith increased
+  if (newFaith > oldFaith) {
+    try {
+      // ── Derive mantle + choir from faith level (mirrors FAITH_MANTLES in dashboard.js) ──
+      const FAITH_MANTLES = [
+        { mantle: 0, label: "Faithless",   choirs: [5,    10,   15]   },
+        { mantle: 1, label: "Initiate",    choirs: [30,   35,   40]   },
+        { mantle: 2, label: "Devotee",     choirs: [80,   85,   90]   },
+        { mantle: 3, label: "Acolyte",     choirs: [180,  185,  190]  },
+        { mantle: 4, label: "Zealot",      choirs: [380,  385,  390]  },
+        { mantle: 5, label: "Chosen",      choirs: [780,  785,  790]  },
+        { mantle: 6, label: "High Priest", choirs: [1580, 1585, 1590] },
+      ];
+      const _getFaithTier = (faith) => {
+        let mantleIdx = 0;
+        for (let i = FAITH_MANTLES.length - 1; i >= 0; i--) {
+          if (faith >= FAITH_MANTLES[i].choirs[0]) { mantleIdx = i; break; }
+          if (i === 0 && faith >= 0) { mantleIdx = 0; break; }
+        }
+        if (faith < FAITH_MANTLES[0].choirs[0]) mantleIdx = 0;
+        const current = FAITH_MANTLES[mantleIdx];
+        let choir = 0;
+        for (let c = 2; c >= 0; c--) {
+          if (faith >= current.choirs[c]) { choir = c + 1; break; }
+        }
+        return { label: current.label, mantleIdx, choir };
+      };
+
+      const oldTier = _getFaithTier(oldFaith);
+      const newTier = _getFaithTier(newFaith);
+      const mantleAscended = newTier.mantleIdx > oldTier.mantleIdx;
+
+      await db.collection("deityNotifications").add({
+        deityUid:   uid,
+        type:       "faith_increase",
+        subtype:    mantleAscended ? "mantle_ascension" : "choir_advancement",
+        playerUid:  targetUid,
+        playerName: targetChar.name || "Unknown",
+        mantle:     newTier.label,
+        choir:      newTier.choir,
+        faithLevel: newFaith,
+        oldFaith,
+        newFaith,
+        read:       false,
+        createdAt:  require("firebase-admin/firestore").FieldValue.serverTimestamp(),
+      });
+    } catch(notifErr) {
+      console.warn("[updateFaithLevel] Notification write failed:", notifErr.message);
+    }
+  }
+
   return { success:true, newFaith, message:`Faith level updated to ${newFaith}.` };
 });
 

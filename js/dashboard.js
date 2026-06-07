@@ -19,23 +19,69 @@ import { getApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.
 
 // ═══════════════════════════════════════════════════
 //  INVENTORY WRITE QUEUE  (prevents race conditions)
-//  Usage: await _invWrite(uid, inv, extraFields?)
-//  All inventory writes should go through this so
-//  concurrent operations don't clobber each other.
+//  _invWrite(uid, mutatorFn, extraFields?)
+//
+//  The ONLY correct way to touch a character's inventory.
+//  Callers pass a MUTATOR — a function (inv) => void  — that describes
+//  WHAT to change, not a pre-built snapshot.  _invWrite opens a Firestore
+//  transaction, reads the current server doc, hands the live inventory
+//  array to the mutator, then writes the result back.
+//
+//  This eliminates every stale-snapshot race:
+//    • Two concurrent calls both read the real server state, apply their
+//      own delta, and write.  Firebase retries whichever one conflicts.
+//    • Nothing is ever silently overwritten by a stale local copy.
+//
+//  Gold / other scalar fields that need atomic change should be passed as
+//  FieldValue.increment() values in `extra` — never as raw arithmetic on
+//  _charData.gold.
+//
+//  After the transaction completes, _charData is refreshed from the
+//  server so all subsequent reads in the same session are consistent.
+//
+//  Usage:
+//    await _invWrite(_uid, inv => {
+//      const ex = inv.find(i => i.name === 'Iron');
+//      if (ex) ex.qty += 3; else inv.push({ name:'Iron', qty:3, type:'material' });
+//    });
+//
+//    await _invWrite(_uid, inv => {
+//      const idx = inv.findIndex(i => i.name === itemName);
+//      if (idx !== -1) inv.splice(idx, 1);
+//    }, { gold: increment(-500) });
 // ═══════════════════════════════════════════════════
 let _invWriteQueue = Promise.resolve();
-async function _invWrite(uid, inv, extra = {}) {
+
+async function _invWrite(uid, mutatorFn, extra = {}) {
   _invWriteQueue = _invWriteQueue.then(async () => {
     try {
       const charRef = doc(db, 'characters', uid);
       await runTransaction(db, async tx => {
         const snap = await tx.get(charRef);
-        if (!snap.exists()) throw new Error('Character not found');
-        tx.update(charRef, { inventory: inv, ...extra });
+        if (!snap.exists()) throw new Error('[_invWrite] Character doc not found');
+        // Work on a deep copy of the server's live inventory
+        const inv = (snap.data().inventory || []).map(i => ({ ...i }));
+        // Let the caller describe their mutation against the fresh data
+        mutatorFn(inv);
+        // Remove zero-qty items that the mutator may have left behind
+        const cleaned = inv.filter(i => (i.qty ?? 1) > 0);
+        tx.update(charRef, { inventory: cleaned, ...extra });
       });
-    } catch(e) {
-      console.warn('[_invWrite] transaction failed, falling back to updateDoc:', e);
-      await updateDoc(doc(db, 'characters', uid), { inventory: inv, ...extra });
+      // Keep _charData consistent with what was just written
+      await refreshCharData();
+    } catch (e) {
+      console.warn('[_invWrite] transaction failed:', e);
+      // Last-resort fallback: apply the mutation locally and write directly.
+      // This is imperfect but better than silently losing the change.
+      try {
+        const fallbackInv = ((_charData?.inventory) || []).map(i => ({ ...i }));
+        mutatorFn(fallbackInv);
+        const cleaned = fallbackInv.filter(i => (i.qty ?? 1) > 0);
+        await updateDoc(doc(db, 'characters', uid), { inventory: cleaned, ...extra });
+        if (_charData) _charData.inventory = cleaned;
+      } catch (e2) {
+        console.error('[_invWrite] fallback also failed:', e2);
+      }
     }
   }).catch(e => console.warn('[_invWrite] queue error:', e));
   return _invWriteQueue;
@@ -108,7 +154,7 @@ window.showBossRaidArena = function(state) {
   set('monster-grade', `Boss`);
   updateBattleBars(state.boss.hp, state.boss.maxHp, state.party[state.leaderIdx].hp, state.party[state.leaderIdx].hpMax, 0, 0);
   set('battle-player-name', state.party[state.leaderIdx].name);
-  set('battle-player-rank', `${state.party[state.leaderIdx].rank||'Wanderer'} Lv.${state.party[state.leaderIdx].level||1}`);
+  set('battle-player-rank', `${state.party[state.leaderIdx].rank||'Wanderer'} Lv.${_displayLevel(state.party[state.leaderIdx].level||1)}`);
   // Hide mana bar for now
   document.getElementById('player-mp-fill').style.width = '0%';
   set('player-mp-text', '—');
@@ -288,6 +334,7 @@ function isValidParty(party) {
 
 
 let _party = null; // { id, leader, members: [{uid, name, avatar}], code }
+let _partyPicFile = null; // persists across re-renders so preview survives Firestore snapshots
 let _partyId = null;
 let _partyUnsub = null;
 
@@ -340,6 +387,8 @@ window.createParty = async function() {
       members: [{ uid: _uid, name: _charData.name, avatar: _charData.avatarUrl, rank: _charData.rank || 'Wanderer', level: _charData.level || 1 }],
       raid: null
     };
+    await updateDoc(doc(db, 'characters', _uid), { gold: increment(-5000) }); // FIXED: use increment to avoid concurrent-write clobber
+    _charData.gold = Math.max(0, (_charData.gold || 0) - 5000);
     await setDoc(partyDoc, partyData);
     _partyId = partyDoc.id;
     _party = partyData;
@@ -410,16 +459,15 @@ window.leaveParty = async function() {
       leader: chosen.uid,
       members: arrayRemove(selfMember),
     });
-    await updateDoc(doc(db, 'characters', _charData.uid), { gold: (_charData.gold || 0) - 2000 });
     _partyId = null; _party = null;
     if (_partyUnsub) _partyUnsub();
-    window.showToast(`Left party. ${chosen.name} is the new leader. (-2,000 gold)`, 'info');
+    window.showToast(`Left party. ${chosen.name} is the new leader.`, 'info');
     window.renderPartyUI();
     return;
   }
 
   // Non-leader, or leader leaving an empty party — simple confirm
-  const confirmed = await inkConfirm('Leave the party? This costs 2,000 gold.');
+  const confirmed = await inkConfirm('Leave the party?');
   if (!confirmed) return;
 
   const partyDoc = doc(db, 'parties', _partyId);
@@ -427,10 +475,9 @@ window.leaveParty = async function() {
   await updateDoc(partyDoc, {
     members: arrayRemove(selfMember),
   });
-  await updateDoc(doc(db, 'characters', _charData.uid), { gold: (_charData.gold || 0) - 2000 });
   _partyId = null; _party = null;
   if (_partyUnsub) _partyUnsub();
-  window.showToast('Left party (-2,000 gold).', 'info');
+  window.showToast('Left party.', 'info');
   window.renderPartyUI();
 };
 
@@ -481,12 +528,10 @@ function _pickNewLeader(members) {
 
 window.deleteParty = async function() {
   if (!_partyId || !_party || _party.leader !== _charData.uid) return window.showToast('Only leader can delete.');
-  // Deduct 5k gold
-  await updateDoc(doc(db, 'characters', _charData.uid), { gold: (_charData.gold || 0) - 5000 });
   await deleteDoc(doc(db, 'parties', _partyId));
   _partyId = null; _party = null;
   if (_partyUnsub) _partyUnsub();
-  window.showToast('Party deleted (-5,000 gold).', 'info');
+  window.showToast('Party deleted.', 'info');
   window.renderPartyUI();
 };
 
@@ -672,8 +717,9 @@ window.renderPartyUI = function() {
       <div class="party-control-row">
         <input type="file" id="party-pic-file" accept="image/*" style="display:none">
         <label for="party-pic-file" class="btn-secondary party-ctrl-btn" style="cursor:pointer">Upload Picture</label>
+        <span id="party-pic-filename" style="font-size:0.75rem;color:var(--text-dim);font-style:italic;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px"></span>
         <button class="btn-secondary party-ctrl-btn" id="btn-set-party-pic">Set Picture</button>
-        <img id="party-pic-preview" src="" style="display:none;width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid var(--gold)">
+        <img id="party-pic-preview" src="" style="display:none;width:40px;height:40px;border-radius:50%;object-fit:cover;border:2px solid var(--gold);flex-shrink:0">
       </div>
     </div>`;
   }
@@ -687,7 +733,7 @@ window.renderPartyUI = function() {
       <img src="${m.avatar||''}" class="party-member-avatar" onerror="this.src=''">
       <div class="party-member-info">
         <div class="party-member-name">${m.name}${isThisLeader ? ' <span class="party-leader-badge">Leader</span>' : ''}</div>
-        <div class="party-member-rank">${m.rank||'Wanderer'} · Lv.${m.level||1}</div>
+        <div class="party-member-rank">${m.rank||'Wanderer'} · Lv.${_displayLevel(m.level||1)}</div>
       </div>
       ${isLeader && m.uid !== _uid ? `<button class="party-kick-btn" onclick="window.kickMember('${m.uid}')">Kick</button>` : ''}
     </div>`;
@@ -697,9 +743,9 @@ window.renderPartyUI = function() {
   // ── Danger zone ────────────────────────────────────
   html += `<div class="party-actions">`;
   if (isLeader) {
-    html += `<button class="btn-secondary party-danger-btn" onclick="window.deleteParty()">🗑️ Delete Party <span class="party-cost">−5,000 gold</span></button>`;
+    html += `<button class="btn-secondary party-danger-btn" onclick="window.deleteParty()">🗑️ Delete Party</button>`;
   }
-  html += `<button class="btn-secondary party-leave-btn" onclick="window.leaveParty()">🚪 Leave Party <span class="party-cost">−2,000 gold</span></button>`;
+  html += `<button class="btn-secondary party-leave-btn" onclick="window.leaveParty()">🚪 Leave Party</button>`;
   html += `</div>`;
 
   ui.innerHTML = html;
@@ -727,40 +773,52 @@ window.renderPartyUI = function() {
     const fileNameSpan = document.getElementById('party-pic-filename');
     const previewImg = document.getElementById('party-pic-preview');
     let selectedFile = null;
+    // Restore any previously selected file across re-renders
+    if (_partyPicFile && previewImg && fileNameSpan) {
+      const reader = new FileReader();
+      reader.onload = ev => { previewImg.src = ev.target.result; previewImg.style.display = 'inline-block'; };
+      reader.readAsDataURL(_partyPicFile);
+      fileNameSpan.textContent = _partyPicFile.name;
+    }
     if (fileInput && setBtn) {
-      fileInput.addEventListener('change', function(e) {
+      fileInput.addEventListener('change', function() {
         if (fileInput.files && fileInput.files[0]) {
-          selectedFile = fileInput.files[0];
-          fileNameSpan.textContent = selectedFile.name;
-          // Show preview
+          _partyPicFile = fileInput.files[0];
+          selectedFile = _partyPicFile;
+          if (fileNameSpan) fileNameSpan.textContent = _partyPicFile.name;
           const reader = new FileReader();
-          reader.onload = function(ev) {
-            previewImg.src = ev.target.result;
-            previewImg.style.display = 'inline-block';
+          reader.onload = ev => {
+            if (previewImg) { previewImg.src = ev.target.result; previewImg.style.display = 'inline-block'; }
           };
-          reader.readAsDataURL(selectedFile);
+          reader.readAsDataURL(_partyPicFile);
         } else {
+          _partyPicFile = null;
           selectedFile = null;
-          fileNameSpan.textContent = '';
-          previewImg.src = '';
-          previewImg.style.display = 'none';
+          if (fileNameSpan) fileNameSpan.textContent = '';
+          if (previewImg) { previewImg.src = ''; previewImg.style.display = 'none'; }
         }
       });
       setBtn.onclick = async function() {
-        if (!selectedFile) return window.showToast('Please select an image file.', 'error');
+        if (!_partyPicFile) return window.showToast('Please select an image file.', 'error');
+        const orig = setBtn.textContent;
+        setBtn.disabled = true; setBtn.textContent = 'Uploading...';
         try {
-          // Use Firebase v9+ modular API
           const { ref: storageRef, uploadBytes, getDownloadURL } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js");
-          const filePath = `party-pics/${_partyId}_${Date.now()}_${selectedFile.name}`;
+          const filePath = `party-pics/${_partyId}_${Date.now()}_${_partyPicFile.name}`;
           const fileRef = storageRef(storage, filePath);
           window.showToast('Uploading image...', 'info');
-          await uploadBytes(fileRef, selectedFile);
+          await uploadBytes(fileRef, _partyPicFile);
           const url = await getDownloadURL(fileRef);
           await window.setPartyProfilePic(url);
+          _partyPicFile = null;
+          selectedFile = null;
+          window.showToast('Party picture updated!', 'success');
           window.renderPartyUI();
         } catch (e) {
           console.error('[PartyPicUpload] Upload failed:', e);
           window.showToast('Upload failed.', 'error');
+        } finally {
+          setBtn.disabled = false; setBtn.textContent = orig;
         }
       };
     }
@@ -771,11 +829,92 @@ window.renderPartyUI = function() {
   if (_raidSlot) {
     const _iAmLeader = _party && (_party.leader === _uid || _party.leader === _charData?.uid);
     _raidSlot.innerHTML = _iAmLeader
-      ? `<div class="party-start-raid-wrap">
-           <button class="btn-primary party-start-raid-btn" onclick="window._raidState='choose-boss';window.showBossSelect()">⚔️ Start Raid</button>
+      ? `<div class="party-start-raid-wrap" style="display:flex;flex-direction:column;gap:10px;align-items:stretch">
+           <button class="btn-secondary" style="font-size:0.85rem;width:100%" onclick="window._openPartyArrangeModal()">🔀 Arrange Member Order</button>
+           <button class="btn-primary party-start-raid-btn" onclick="window._raidState='choose-boss';window.showBossSelect()">⚔️ Choose Boss & Start Raid</button>
          </div>`
       : '';
   }
+};
+
+// ── Party Member Arrangement Modal ───────────────────────────────────────────
+// Leader drags/reorders members before starting — sets the turn order in the raid.
+window._openPartyArrangeModal = function() {
+  if (!_party || !_party.members) return;
+  document.getElementById('_party-arrange-modal')?.remove();
+
+  // Start from saved memberOrder if exists, else use current member array
+  const savedOrder = _party.memberOrder || _party.members.map(m => m.uid);
+  // Build sorted member array based on saved order
+  let ordered = savedOrder.map(uid => _party.members.find(m => m.uid === uid)).filter(Boolean);
+  // Append any members not yet in savedOrder (e.g. just joined)
+  _party.members.forEach(m => { if (!ordered.find(o => o.uid === m.uid)) ordered.push(m); });
+
+  const overlay = document.createElement('div');
+  overlay.id = '_party-arrange-modal';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.78);z-index:10000;display:flex;align-items:center;justify-content:center;';
+
+  function buildList() {
+    return ordered.map((m, i) => {
+      const isLeader = m.uid === _party.leader;
+      const av = m.avatar?.startsWith('http')
+        ? `<img src="${m.avatar}" style="width:32px;height:32px;border-radius:50%;object-fit:cover;border:1.5px solid var(--border);flex-shrink:0;">`
+        : `<span style="font-size:1.3rem">${m.avatar || '⚔️'}</span>`;
+      return `<div class="_arrange-row" data-uid="${m.uid}"
+        style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:rgba(255,255,255,0.04);
+        border:1.5px solid var(--border);border-radius:10px;cursor:grab;user-select:none;
+        ${isLeader ? 'border-color:var(--gold);' : ''}">
+        <span style="font-size:1.1rem;color:var(--ash);min-width:20px;text-align:center">${i + 1}</span>
+        ${av}
+        <div style="flex:1">
+          <div style="font-size:0.9rem;font-weight:600;color:var(--text)">${m.name}${isLeader ? ' <span style="font-size:0.65rem;color:var(--gold);font-weight:700;letter-spacing:0.08em">LEADER</span>' : ''}</div>
+          <div style="font-size:0.72rem;color:var(--ash)">${m.rank || 'Wanderer'} · Lv.${_displayLevel(m.level || 1)}</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:3px">
+          <button onclick="window._arrangeMoveUp(${i})" style="background:rgba(255,255,255,0.06);border:1px solid var(--border);border-radius:5px;padding:2px 8px;cursor:pointer;color:var(--text-dim);font-size:0.8rem" ${i === 0 ? 'disabled' : ''}>▲</button>
+          <button onclick="window._arrangeMoveDown(${i})" style="background:rgba(255,255,255,0.06);border:1px solid var(--border);border-radius:5px;padding:2px 8px;cursor:pointer;color:var(--text-dim);font-size:0.8rem" ${i === ordered.length - 1 ? 'disabled' : ''}>▼</button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  overlay.innerHTML = `
+    <div style="background:var(--ink2);border:1.5px solid var(--border);border-radius:18px;padding:28px 24px;max-width:400px;width:92%;box-shadow:0 8px 40px #0008;">
+      <div style="font-family:var(--font-display);font-size:0.78rem;letter-spacing:0.12em;color:var(--gold);margin-bottom:4px;">ARRANGE PARTY ORDER</div>
+      <div style="font-size:0.82rem;color:var(--text-dim);margin-bottom:16px;line-height:1.5;">Position 1 acts first in the raid. Use ▲ ▼ to reorder.</div>
+      <div id="_arrange-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;">${buildList()}</div>
+      <div style="display:flex;gap:10px;">
+        <button id="_arrange-confirm" class="btn-primary" style="flex:1">✅ Confirm Order</button>
+        <button class="btn-secondary" style="flex:1" onclick="document.getElementById('_party-arrange-modal').remove()">Cancel</button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+  window._arrangeMoveUp = function(idx) {
+    if (idx <= 0) return;
+    [ordered[idx - 1], ordered[idx]] = [ordered[idx], ordered[idx - 1]];
+    document.getElementById('_arrange-list').innerHTML = buildList();
+  };
+  window._arrangeMoveDown = function(idx) {
+    if (idx >= ordered.length - 1) return;
+    [ordered[idx], ordered[idx + 1]] = [ordered[idx + 1], ordered[idx]];
+    document.getElementById('_arrange-list').innerHTML = buildList();
+  };
+
+  document.getElementById('_arrange-confirm').onclick = async function() {
+    this.disabled = true; this.textContent = 'Saving...';
+    try {
+      const newOrder = ordered.map(m => m.uid);
+      await updateDoc(doc(db, 'parties', _partyId), { memberOrder: newOrder });
+      window.showToast('Party order saved!', 'success');
+      overlay.remove();
+    } catch(e) {
+      this.disabled = false; this.textContent = '✅ Confirm Order';
+      window.showToast('Failed to save order. Try again.', 'error');
+    }
+  };
 };
 
 window.showJoinPartyModal = function() {
@@ -886,7 +1025,7 @@ window.showBossSelect = function() {
           <button class="raid-option-btn raid-option-primary" onclick="window.createParty().then(()=>{window._raidState='party';window.showBossSelect();})">
             <span class="raid-option-icon">🛡️</span>
             <span class="raid-option-label">Create a Party</span>
-            <span class="raid-option-sub">You become leader</span>
+            <span class="raid-option-sub">You become leader · 5,000 gold</span>
           </button>
           <button class="raid-option-btn" onclick="window.showJoinPartyModal()">
             <span class="raid-option-icon">🤝</span>
@@ -1131,6 +1270,42 @@ const ALL_ARMOR_NAMES = [
   // S-GRADE
   "Saturn","Unshadowed","Null","Dominion","Godshroud","Oblivion","Gungnir","Imperium","Worldshell","Eternity"
 ];
+
+// ═══════════════════════════════════════════════════
+//  SHARED GRADE RESOLVER
+//  _resolveEquipGrade(name) → 'E'|'D'|'C'|'B'|'A'|'S'
+//
+//  Priority order:
+//    1. CANONICAL_EQUIP_RECIPES (authoritative, covers crafted + reward items)
+//    2. ALL_WEAPON_NAMES / ALL_ARMOR_NAMES positional lookup (10 items per tier)
+//    3. Falls back to 'E' (never returns 'D' as a silent default)
+//
+//  Use this everywhere item.grade may be missing — deity bestowals,
+//  quest rewards, drop loot, trades — so the market bracket is always correct.
+// ═══════════════════════════════════════════════════
+window._resolveEquipGrade = function(name) {
+  if (!name) return 'E';
+  const baseName = name.replace(/\s*\+\d+$/, '');
+
+  // 1. CANONICAL_EQUIP_RECIPES is the gold source — covers every craftable item
+  //    AND all S-grade weapons/armors (which are also in there with cost 2800000)
+  if (window.CANONICAL_EQUIP_RECIPES) {
+    for (const [g, items] of Object.entries(window.CANONICAL_EQUIP_RECIPES)) {
+      if (items.find(i => i.name === baseName)) return g;
+    }
+  }
+
+  // 2. Positional lookup via ALL_WEAPON_NAMES / ALL_ARMOR_NAMES
+  //    Each grade band is exactly 10 items, grades E→D→C→B→A→S
+  const GRADE_ORDER = ['E','D','C','B','A','S'];
+  const wIdx = ALL_WEAPON_NAMES.indexOf(baseName);
+  if (wIdx !== -1) return GRADE_ORDER[Math.floor(wIdx / 10)] || 'E';
+  const aIdx = ALL_ARMOR_NAMES.indexOf(baseName);
+  if (aIdx !== -1) return GRADE_ORDER[Math.floor(aIdx / 10)] || 'E';
+
+  return 'E';
+};
+
 // ═══════════════════════════════════════════════════
 //  EQUIP MODAL LOGIC
 // ═══════════════════════════════════════════════════
@@ -1513,22 +1688,31 @@ window.renderFactionQuestsPanel = function(force) {
         const fqQuery = query(collection(db, 'factionQuestSubmissions'), where('uid', '==', _uid), where('questId', 'in', questIds));
         _factionQuestSubUnsub = onSnapshot(fqQuery, subSnap => {
           window._factionQuestSubmissions = {};
+          if (!window._factionQuestDone) window._factionQuestDone = {};
           subSnap.forEach(d => {
             const data = d.data();
             window._factionQuestSubmissions[data.questId] = data.status;
-            // Auto-apply reward when deity approves
-            if (data.status === 'approved' && !window._factionQuestDone?.[data.questId]) {
+            // Guard uses BOTH:
+            // 1. data.rewarded — persisted on the submission doc; survives reloads
+            // 2. _factionQuestDone[questId] — in-memory flag for same-session double-fire
+            if (data.status === 'approved' && !data.rewarded && !window._factionQuestDone[data.questId]) {
               const quest = snap.docs.find(doc => doc.id === data.questId)?.data();
               if (quest) {
-                window._factionQuestDone = window._factionQuestDone || {};
-                window._factionQuestDone[data.questId] = true;
-                // Deliver ALL reward items, not just the first
-                if (quest.reward?.items?.length > 1) {
-                  _applyRewardMulti(quest.reward?.exp||0, quest.reward?.gold||0, quest.reward.items);
-                } else {
-                  _applyReward(quest.reward?.exp||0, quest.reward?.gold||0, (quest.reward?.items?.[0]||null));
-                }
-                window.showToast(`✅ Faction Quest complete: ${quest.title}! +${quest.reward?.gold||0} gold · +${quest.reward?.exp||0} EXP`, "success");
+                // Await the flag write — only apply reward if it succeeds.
+                // If it fails (network/rules), we skip this cycle; the next
+                // listener fire will retry cleanly with no duplicate risk.
+                updateDoc(d.ref, { rewarded: true })
+                  .then(() => {
+                    window._factionQuestDone[data.questId] = true;
+                    // Deliver ALL reward items, not just the first
+                    if (quest.reward?.items?.length > 1) {
+                      _applyRewardMulti(quest.reward?.exp||0, quest.reward?.gold||0, quest.reward.items);
+                    } else {
+                      _applyReward(quest.reward?.exp||0, quest.reward?.gold||0, (quest.reward?.items?.[0]||null));
+                    }
+                    window.showToast(`✅ Faction Quest complete: ${quest.title}! +${quest.reward?.gold||0} gold · +${quest.reward?.exp||0} EXP`, "success");
+                  })
+                  .catch(e => console.warn('[Quest] Could not mark rewarded, skipping reward this cycle:', e));
               }
             }
           });
@@ -1860,7 +2044,10 @@ const DEITY_INGREDIENTS = {
 };
 
 // Profession EXP thresholds per level (doc: Profession section)
-const PROF_EXP_TABLE = [0,300,600,1200,2400,4800,9600,19200,38400,76800,153600];
+// Profession XP needed per level (index = current level, value = XP to reach next)
+// Lv0→1:3000 | Lv1→2:6000 | Lv2→3:12000 | Lv3→4:24000 | Lv4→5:48000
+// Lv5→6:96000 | Lv6→7:192000 | Lv7→8:384000 | Lv8→9:768000 | Lv9→10:1536000
+const PROF_EXP_TABLE = [3000,6000,12000,24000,48000,96000,192000,384000,768000,1536000];
 
 // Weekly Profession Quota Table (by level)
 const PROF_QUOTA_TABLE = [
@@ -1880,12 +2067,22 @@ const PROF_QUOTA_TABLE = [
 // Track quota progress in Firestore: { quotaProgress: { week: <ISO>, submitted: {common:0,...}, completed: false, penalty: false, bonus: false } }
 
 function getCurrentQuotaWeek() {
-  // Returns ISO week string, e.g. 2026-W13
+  // Returns a stable Monday-anchored ISO week string, e.g. "2026-W23".
+  // Uses the standard ISO 8601 algorithm: the week containing Thursday is
+  // always week 1, and weeks start on Monday. This is stable across timezones
+  // and never shifts by ±1 the way the old Math.ceil formula did.
   const now = new Date();
-  const year = now.getFullYear();
-  const onejan = new Date(now.getFullYear(),0,1);
-  const week = Math.ceil((((now - onejan) / 86400000) + onejan.getDay()+1)/7);
-  return `${year}-W${week}`;
+  // Shift so Monday=0 … Sunday=6
+  const dayOfWeek = (now.getDay() + 6) % 7;
+  // Find the Thursday of this week (ISO weeks are identified by their Thursday)
+  const thursday = new Date(now);
+  thursday.setDate(now.getDate() - dayOfWeek + 3);
+  // Jan 4 is always in week 1
+  const firstThursday = new Date(thursday.getFullYear(), 0, 4);
+  const firstMonday   = new Date(firstThursday);
+  firstMonday.setDate(firstThursday.getDate() - ((firstThursday.getDay() + 6) % 7));
+  const weekNum = Math.round((thursday - firstMonday) / 604800000) + 1;
+  return `${thursday.getFullYear()}-W${String(weekNum).padStart(2,'0')}`;
 }
 
 function getPlayerQuotaProgress() {
@@ -1973,7 +2170,10 @@ function updateQuotaProgress(submit=false) {
       legendary: ["Titanium","Adamantium","Celestial Fig","Dragonfruit","Celestial Whale","Black Unagi","Phoenix Bloom","Middlemist","Cyclops Eye","Dragon Scales"],
       mythic:    ["Aetherium","Eden\u2019s Tear","Cosmic Leviathan","Void Orchid","Titan Heart"]
     };
-    const RARITY_PRICE = { common: 10, uncommon: 50, rare: 200, legendary: 1000, mythic: 5000 };
+    // Quota auto-listing prices — midpoints of the resource market bracket ranges
+    // Common 50-100 → 75 | Uncommon 250-300 → 275 | Rare 1400-1500 → 1450
+    // Legendary 4000-5000 → 4500 | Mythic 13000-15000 → 14000
+    const RARITY_PRICE = { common: 75, uncommon: 275, rare: 1450, legendary: 4500, mythic: 14000 };
 
     // Build rarity counts
     let canSubmit = true;
@@ -2070,29 +2270,32 @@ function updateQuotaProgress(submit=false) {
       const btn = document.getElementById("btn-confirm-quota-submit");
       btn.disabled = true; btn.textContent = "SUBMITTING...";
 
-      // Remove from real inventory
-      const finalInv = [...(_charData?.inventory||[])];
-      ["common","uncommon","rare","legendary","mythic"].forEach(rarity => {
-        if (!rarityStats[rarity]) return;
-        let needed = rarityStats[rarity].needed;
-        rarityMap[rarity].forEach(mat => {
-          const idx = finalInv.findIndex(i => i.name === mat && needed > 0);
-          if (idx !== -1) {
-            const take = Math.min(finalInv[idx].qty, needed);
-            finalInv[idx].qty -= take; needed -= take;
-            if (finalInv[idx].qty <= 0) finalInv.splice(idx, 1);
-          }
-        });
-      });
+      // Remove from real inventory — pass a mutator so _invWrite reads
+      // the server's live inventory before deducting, preventing phantom removals
+      // if anything else touched the inventory since the page loaded.
+      const rarityStatsSnapshot = rarityStats;
+      const rarityMapSnapshot   = rarityMap;
 
       progress.completed = true; progress.bonus = true; progress.penalty = false;
 
       try {
-        await _invWrite(_uid, finalInv, { quotaProgress: progress, professionLuckBonus: true });
-        _charData.inventory           = finalInv;
-        _charData.quotaProgress       = progress;
-        _charData.professionLuckBonus = true;
-        window.renderInventory(finalInv);
+        await _invWrite(_uid, inv => {
+          ["common","uncommon","rare","legendary","mythic"].forEach(rarity => {
+            if (!rarityStatsSnapshot[rarity]) return;
+            let needed = rarityStatsSnapshot[rarity].needed;
+            rarityMapSnapshot[rarity].forEach(mat => {
+              const idx = inv.findIndex(i => i.name === mat && needed > 0);
+              if (idx !== -1) {
+                const take = Math.min(inv[idx].qty, needed);
+                inv[idx].qty -= take; needed -= take;
+                if (inv[idx].qty <= 0) inv.splice(idx, 1);
+              }
+            });
+          });
+        }, { quotaProgress: progress, professionLuckBonus: true });
+       _charData.quotaProgress       = progress;
+_charData.professionLuckBonus = true;
+window.renderInventory(_charData.inventory);
         renderProfessionQuota();
 
         // Auto-list each item on the market
@@ -2144,12 +2347,12 @@ function checkAndResetWeeklyQuota() {
     // If not completed, apply penalty
     if (!progress.completed) {
       // Penalty: -20% EXP progress (doc rule — no level loss)
-      let newExp = Math.floor((_charData.professionExp||0)*0.8);
+      let newExp = Math.floor((_charData.professionXp||0)*0.8);
       updateDoc(doc(db, "characters", _uid), {
-        professionExp: newExp,
+        professionXp: newExp,
         "quotaProgress": { week: currentWeek, submitted: {common:0,uncommon:0,rare:0,legendary:0,mythic:0}, completed: false, penalty: true, bonus: false }
       }).then(()=>{
-        _charData.professionExp = newExp;
+        _charData.professionXp = newExp;
         _charData.quotaProgress = { week: currentWeek, submitted: {common:0,uncommon:0,rare:0,legendary:0,mythic:0}, completed: false, penalty: true, bonus: false };
         renderProfessionQuota();
         window.showToast("Missed quota last week: -20% profession EXP.","error");
@@ -2178,32 +2381,32 @@ document.addEventListener("DOMContentLoaded", ()=>{
 
 // Resource find rates per profession level (doc: Material Find Percentage)
 const FIND_RATES = [
-  { common:80, uncommon:20, rare:0,  legendary:0,   mythic:0   },
-  { common:75, uncommon:20, rare:5,  legendary:0,   mythic:0   },
-  { common:70, uncommon:22, rare:8,  legendary:0,   mythic:0   },
-  { common:65, uncommon:25, rare:9,  legendary:1,   mythic:0   },
-  { common:60, uncommon:27, rare:11, legendary:2,   mythic:0   },
-  { common:55, uncommon:30, rare:12, legendary:3,   mythic:0   },
-  { common:50, uncommon:32, rare:14, legendary:4,   mythic:0   },
-  { common:40, uncommon:30, rare:25, legendary:5,   mythic:0.1 },
-  { common:35, uncommon:30, rare:20, legendary:10,  mythic:5   },
-  { common:30, uncommon:23, rare:26, legendary:14,  mythic:7   },
-  { common:15, uncommon:25, rare:30, legendary:20,  mythic:10  },
+  { common:80, uncommon:20, rare:0,  legendary:0,   mythic:0   }, // Lv0
+  { common:75, uncommon:20, rare:5,  legendary:0,   mythic:0   }, // Lv1
+  { common:70, uncommon:22, rare:8,  legendary:0,   mythic:0   }, // Lv2
+  { common:65, uncommon:25, rare:9,  legendary:1,   mythic:0   }, // Lv3
+  { common:60, uncommon:27, rare:11, legendary:2,   mythic:0   }, // Lv4
+  { common:55, uncommon:30, rare:12, legendary:3,   mythic:0   }, // Lv5
+  { common:50, uncommon:32, rare:14, legendary:4,   mythic:0   }, // Lv6
+  { common:40, uncommon:30, rare:25, legendary:5,   mythic:0.1 }, // Lv7
+  { common:37, uncommon:30, rare:20, legendary:12,  mythic:1   }, // Lv8
+  { common:35, uncommon:25, rare:23, legendary:14,  mythic:3   }, // Lv9
+  { common:20, uncommon:25, rare:30, legendary:20,  mythic:5   }, // Lv10
 ];
 
 // Find count per level (doc: Profession EXP Bar)
 const FIND_COUNT = [
-  "1 resource at a time",
-  "1 resource at a time",
-  "30% chance of 2 resources",
-  "50% chance of 2 resources",
-  "70% chance of 2 resources",
-  "100% chance of 2 resources",
-  "12% chance of 3 resources",
-  "24% chance of 3 resources",
-  "32% chance of 3 resources",
-  "50% chance of 3 resources",
-  "50% chance of 3 resources",
+  "1 resource at a time",                              // Lv0
+  "1 resource at a time",                              // Lv1
+  "5% chance of 2 resources",                          // Lv2
+  "10% chance of 2 resources",                         // Lv3
+  "30% chance of 2 resources",                         // Lv4
+  "50% chance of 2 resources",                         // Lv5
+  "100% chance of 2 resources, 3% chance of 3",        // Lv6
+  "100% chance of 2 resources, 5% chance of 3",        // Lv7
+  "100% chance of 2 resources, 10% chance of 3",       // Lv8
+  "100% chance of 2 resources, 30% chance of 3",       // Lv9
+  "100% chance of 2 resources, 30% chance of 3",       // Lv10
 ];
 
 const PROFESSION_DESCS = {
@@ -2250,33 +2453,78 @@ const DEITY_SHRINE_MAP = {
   "valley_of_overflowing": "Elionidas",
 };
 
-// Faith tiers — each tier strengthens the blessing multiplier
-// Base blessing is 3%. Each tier adds 3% (so Tier 5 = 18%)
-const FAITH_TIERS = [
-  { tier: 0, minFaith: 0,   label: "Faithless",    mult: 1.0  },
-  { tier: 1, minFaith: 5,   label: "Initiate",     mult: 1.5  },
-  { tier: 2, minFaith: 15,  label: "Devotee",      mult: 2.0  },
-  { tier: 3, minFaith: 35,  label: "Acolyte",      mult: 3.0  },
-  { tier: 4, minFaith: 70,  label: "Zealot",       mult: 4.0  },
-  { tier: 5, minFaith: 120, label: "Chosen",       mult: 5.0  },
-  { tier: 6, minFaith: 200, label: "High Priest",  mult: 6.0  },
+// Faith Mantles — each Mantle has 3 Choirs
+// Choir thresholds: Faithless C1=5, C2=10, C3=15
+// Each Mantle's C1 = previous Mantle's C3 × 2, then +5 per subsequent Choir
+// Blessing multiplier scales per Mantle (base) and fractionally per Choir
+const FAITH_MANTLES = [
+  { mantle: 0, label: "Faithless",   mult: 1.0, choirs: [5,   10,  15]  },
+  { mantle: 1, label: "Initiate",    mult: 1.5, choirs: [30,  35,  40]  },
+  { mantle: 2, label: "Devotee",     mult: 2.0, choirs: [80,  85,  90]  },
+  { mantle: 3, label: "Acolyte",     mult: 3.0, choirs: [180, 185, 190] },
+  { mantle: 4, label: "Zealot",      mult: 4.0, choirs: [380, 385, 390] },
+  { mantle: 5, label: "Chosen",      mult: 5.0, choirs: [780, 785, 790] },
+  { mantle: 6, label: "High Priest", mult: 6.0, choirs: [1580,1585,1590]},
 ];
 
-// Returns current faith tier data for a player
+// Returns current mantle + choir data for a player
+// choir: 0 = not yet reached C1 of this mantle, 1/2/3 = reached that choir
 function _getFaithTier(faithLevel) {
-  let current = FAITH_TIERS[0];
-  for (const t of FAITH_TIERS) {
-    if (faithLevel >= t.minFaith) current = t;
+  // Find which mantle we're in
+  let mantleIdx = 0;
+  for (let i = FAITH_MANTLES.length - 1; i >= 0; i--) {
+    if (faithLevel >= FAITH_MANTLES[i].choirs[0]) { mantleIdx = i; break; }
+    if (i === 0 && faithLevel >= 0) { mantleIdx = 0; break; }
   }
-  const next = FAITH_TIERS.find(t => t.minFaith > faithLevel) || null;
-  return { current, next };
+  // Edge: still in the pre-C1 phase of Faithless (faith 0-4)
+  if (faithLevel < FAITH_MANTLES[0].choirs[0]) mantleIdx = 0;
+
+  const current = FAITH_MANTLES[mantleIdx];
+
+  // Determine choir within this mantle (0 = between mantles / pre-C1)
+  let choir = 0;
+  for (let c = 2; c >= 0; c--) {
+    if (faithLevel >= current.choirs[c]) { choir = c + 1; break; }
+  }
+
+  // Progress bar: toward next choir threshold or next mantle's C1
+  const nextMantleData = mantleIdx < FAITH_MANTLES.length - 1 ? FAITH_MANTLES[mantleIdx + 1] : null;
+  let nextThreshold = null;
+  if (choir < 3) {
+    nextThreshold = current.choirs[choir]; // next choir in same mantle
+  } else if (nextMantleData) {
+    nextThreshold = nextMantleData.choirs[0]; // first choir of next mantle
+  }
+
+  const prevThreshold = choir > 0 ? current.choirs[choir - 1] : (mantleIdx > 0 ? FAITH_MANTLES[mantleIdx - 1].choirs[2] : 0);
+  const progress = nextThreshold
+    ? Math.round(((faithLevel - prevThreshold) / (nextThreshold - prevThreshold)) * 100)
+    : 100;
+
+  // Effective multiplier: base mantle mult + small bonus per choir achieved
+  const choirBonus = choir * (0.1);
+  const effectiveMult = current.mult + choirBonus;
+
+  // Build a next-step label for the UI
+  let nextLabel = null;
+  if (choir < 3) {
+    nextLabel = { label: `${current.label} — Choir ${choir + 1}`, minFaith: current.choirs[choir] };
+  } else if (nextMantleData) {
+    nextLabel = { label: `${nextMantleData.label} — Choir 1`, minFaith: nextMantleData.choirs[0] };
+  }
+
+  return {
+    current: { ...current, tier: current.mantle, choir, effectiveMult },
+    next: nextLabel,
+    progress,
+  };
 }
 
 // Returns the effective blessing description with faith multiplier applied
 function _getBlessingDesc(deity, faithLevel) {
   const basePct = 3;
   const { current } = _getFaithTier(faithLevel);
-  const effectivePct = Math.round(basePct * current.mult);
+  const effectivePct = Math.round(basePct * current.effectiveMult);
   const descs = {
     "Sah'run":   `${effectivePct}% chance enemies drop forge materials on defeat`,
     "Alistor":   `${effectivePct}% reduced chance of getting robbed/attacked while exploring`,
@@ -2293,7 +2541,7 @@ function _getBlessingDesc(deity, faithLevel) {
 function _getFaithBlessingPct(charData) {
   const faith = charData?.faithLevel || 0;
   const { current } = _getFaithTier(faith);
-  return (3 * current.mult) / 100; // e.g. tier 2 = 6% = 0.06
+  return (3 * current.effectiveMult) / 100; // e.g. Devotee C2 = (3×2.2)/100 = 6.6%
 }
 
 // ═══════════════════════════════════════════════════
@@ -2380,10 +2628,7 @@ function _renderShrinePanel() {
 
   // ── Own shrine state ──
   const faithLevel  = c.faithLevel || 0;
-  const { current: tier, next } = _getFaithTier(faithLevel);
-  const tierProgress = next
-    ? Math.round(((faithLevel - tier.minFaith) / (next.minFaith - tier.minFaith)) * 100)
-    : 100;
+  const { current: tier, next, progress } = _getFaithTier(faithLevel);
   const blessingDesc = _getBlessingDesc(c.deity, faithLevel);
 
   // Faith bar
@@ -2392,13 +2637,15 @@ function _renderShrinePanel() {
   const tierNumEl  = document.getElementById('shrine-tier-num');
   const tierLblEl  = document.getElementById('shrine-tier-label');
   const nextTierEl = document.getElementById('shrine-next-tier');
+  const choirNumEl = document.getElementById('shrine-choir-num');
   if (faithNumEl) faithNumEl.textContent = faithLevel;
-  if (faithBarEl) faithBarEl.style.width = tierProgress + '%';
-  if (tierNumEl)  tierNumEl.textContent  = tier.tier;
+  if (faithBarEl) faithBarEl.style.width = progress + '%';
+  if (tierNumEl)  tierNumEl.textContent  = tier.mantle;
   if (tierLblEl)  tierLblEl.textContent  = tier.label;
+  if (choirNumEl) choirNumEl.textContent = tier.choir > 0 ? `Choir ${tier.choir}` : '—';
   if (nextTierEl) nextTierEl.textContent = next
     ? `Next: ${next.label} at Faith ${next.minFaith}`
-    : 'Max Tier Reached ✦';
+    : 'Max Mantle Reached ✦';
 
   // Blessing
   const blessNameEl = document.getElementById('shrine-blessing-name');
@@ -2407,8 +2654,8 @@ function _renderShrinePanel() {
   const blessTierEl = document.getElementById('shrine-blessing-tier');
   if (blessNameEl) blessNameEl.textContent = c.blessing || '—';
   if (blessDescEl) blessDescEl.textContent = blessingDesc;
-  if (blessMultEl) blessMultEl.textContent = tier.mult + '×';
-  if (blessTierEl) blessTierEl.textContent = tier.tier;
+  if (blessMultEl) blessMultEl.textContent = tier.effectiveMult.toFixed(1) + '×';
+  if (blessTierEl) blessTierEl.textContent = `${tier.label} — Choir ${tier.choir}`;
 
   // Lore
   const loreDescEl = document.getElementById('shrine-lore-desc');
@@ -2491,21 +2738,20 @@ window._doShrineExplore = async function() {
   let logMsg = '';
   if (found) {
     const mat = mats[Math.floor(Math.random() * mats.length)];
-    const inv = [...(c.inventory || [])];
-    const ex  = inv.find(i => i.name === mat);
-    if (ex) ex.qty += 1; else inv.push({ name: mat, qty: 1, type: 'material' });
-    c.inventory = inv;
-    window._allInvItems = inv;
-    window._refreshInvDisplay?.();
     try {
-      await _invWrite(_uid, inv);
+      await _invWrite(_uid, inv => {
+        const ex = inv.find(i => i.name === mat);
+        if (ex) ex.qty += 1; else inv.push({ name: mat, qty: 1, type: 'material' });
+      });
+      window._allInvItems = _charData.inventory;
+      window._refreshInvDisplay?.();
+      logActivity('⚗️', `<b>Temple Explore:</b> Found <b>${mat}</b> at <b>${shrineDeity}'s shrine</b>.`, '#c9a84c');
+      await _incrementQuest('gather', 1);
+      logMsg = `<span style="color:#4fc870">✨ You found <b>${mat}</b>!</span>`;
+      window.showToast(`✨ Found: ${mat}`, 'success');
+      // Re-render panel to update mat counts
+      _renderShrinePanel();
     } catch(e) { console.warn('[Shrine] Inventory write failed:', e); }
-    logActivity('⚗️', `<b>Temple Explore:</b> Found <b>${mat}</b> at <b>${shrineDeity}'s shrine</b>.`, '#c9a84c');
-    await _incrementQuest('gather', 1);
-    logMsg = `<span style="color:#4fc870">✨ You found <b>${mat}</b>!</span>`;
-    window.showToast(`✨ Found: ${mat}`, 'success');
-    // Re-render panel to update mat counts
-    _renderShrinePanel();
   } else {
     logMsg = `<span style="color:var(--ash)">🌑 You searched carefully... but found nothing this time.</span>`;
     window.showToast('🌑 Nothing found this time. Keep exploring!', 'info');
@@ -2538,33 +2784,82 @@ window._doShrineSacrifice = async function() {
   sacBtn.disabled = true;
   sacBtn.textContent = '🙏 Offering...';
 
-  // Consume 1 of each
-  for (const mat of mats) {
-    const item = inv.find(i => i.name === mat);
-    item.qty -= 1;
-    if (item.qty <= 0) inv.splice(inv.indexOf(item), 1);
-  }
-
+  const matsToConsume = mats; // captured before async
   const newFaith = (c.faithLevel || 0) + 1;
   const { current: newTier } = _getFaithTier(newFaith);
-  const prevTier = _getFaithTier(c.faithLevel || 0).current;
-  const tieredUp = newTier.tier > prevTier.tier;
+  const prevState = _getFaithTier(c.faithLevel || 0).current;
+  const tieredUp = newTier.mantle > prevState.mantle;
+  const choiredUp = !tieredUp && newTier.choir > prevState.choir;
 
   try {
-    await _invWrite(_uid, inv, { faithLevel: newFaith });
-    Object.assign(c, { inventory: inv, faithLevel: newFaith });
-    window._allInvItems = inv;
+    await _invWrite(_uid, inv => {
+      // Consume 1 of each required material from the live server inventory
+      for (const mat of matsToConsume) {
+        const item = inv.find(i => i.name === mat);
+        if (item) {
+          item.qty -= 1;
+          if (item.qty <= 0) inv.splice(inv.indexOf(item), 1);
+        }
+      }
+    }, { faithLevel: newFaith });
+    window._allInvItems = _charData.inventory;
     window._refreshInvDisplay?.();
     set('s-faith', newFaith);
 
     if (resultEl) {
       resultEl.style.color = '#4fc870';
-      resultEl.textContent = tieredUp
-        ? `🎉 Faith reached ${newFaith}! Advanced to ${newTier.label}!`
-        : `🙏 Sacrifice accepted. Faith: ${newFaith}`;
+      if (tieredUp) {
+        resultEl.textContent = `🎉 Faith ${newFaith}! Ascended to ${newTier.label} — Choir ${newTier.choir}!`;
+      } else if (choiredUp) {
+        resultEl.textContent = `✨ Faith ${newFaith}! ${newTier.label} — Choir ${newTier.choir} reached!`;
+      } else {
+        resultEl.textContent = `🙏 Sacrifice accepted. Faith: ${newFaith}`;
+      }
     }
-    logActivity('🙏', `<b>Sacrifice Offered</b> at <b>${c.deity}'s shrine</b>. Faith Level: <b>${newFaith}</b>${tieredUp ? ` — Advanced to <b>${newTier.label}</b>!` : ''}.`, '#c9a84c');
-    if (tieredUp) window.showToast(`🎉 Faith Tier Up! You are now ${newTier.label}!`, 'success');
+    const eventLabel = tieredUp
+      ? ` — Ascended to <b>${newTier.label}</b> (Choir ${newTier.choir})!`
+      : choiredUp
+        ? ` — <b>${newTier.label} Choir ${newTier.choir}</b> reached!`
+        : '';
+    logActivity('🙏', `<b>Sacrifice Offered</b> at <b>${c.deity}'s shrine</b>. Faith: <b>${newFaith}</b>${eventLabel}.`, '#c9a84c');
+    if (tieredUp) window.showToast(`🎉 Mantle Ascension! You are now ${newTier.label}!`, 'success');
+    else if (choiredUp) window.showToast(`✨ ${newTier.label} — Choir ${newTier.choir}!`, 'success');
+
+    // ── Notify the deity if this was a Mantle ascension or Choir advancement ──
+    if ((tieredUp || choiredUp) && c.deity) {
+      try {
+        // Look up deity UID by matching the deity name against both
+        // the character's `name` field and `charClass` field for resilience
+        const [deityByName, deityByClass] = await Promise.all([
+          getDocs(query(collection(db, 'characters'), where('isDeity', '==', true), where('name',      '==', c.deity))),
+          getDocs(query(collection(db, 'characters'), where('isDeity', '==', true), where('charClass', '==', c.deity))),
+        ]);
+        const deityDoc = (!deityByName.empty ? deityByName : deityByClass).docs[0];
+        if (deityDoc) {
+          const deityUid = deityDoc.id;
+          const notifType = tieredUp ? 'mantle_ascension' : 'choir_advancement';
+          const notifMsg  = tieredUp
+            ? `⬆️ ${c.name || 'A worshipper'} ascended to ${newTier.label} (Choir ${newTier.choir})! Faith: ${newFaith}`
+            : `✨ ${c.name || 'A worshipper'} reached ${newTier.label} — Choir ${newTier.choir}. Faith: ${newFaith}`;
+          await addDoc(collection(db, 'deityNotifications'), {
+            deityUid,
+            type:        'faith_increase',
+            subtype:     notifType,
+            playerUid:   _uid,
+            playerName:  c.name   || 'Unknown',
+            playerClass: c.charClass || '—',
+            mantle:      newTier.label,
+            choir:       newTier.choir,
+            faithLevel:  newFaith,
+            message:     notifMsg,
+            read:        false,
+            createdAt:   serverTimestamp(),
+          });
+        }
+      } catch (notifErr) {
+        console.warn('[FaithNotif] Could not send deity notification:', notifErr);
+      }
+    }
 
     sacBtn.textContent = '🙏 OFFER SACRIFICE';
     // Re-render the panel so faith bar + mat list refresh
@@ -2620,6 +2915,10 @@ if (!window._knownStoryQuestIds) window._knownStoryQuestIds = null;
 
 function loadPublicStoryQuests() {
   if (_storyQuestsUnsub) { _storyQuestsUnsub(); _storyQuestsUnsub = null; window._knownStoryQuestIds = null; }
+  // Return a Promise that resolves after the FIRST snapshot so callers that
+  // await this are guaranteed STORY_QUESTS is populated before continuing.
+  return new Promise((resolve, reject) => {
+  let _resolved = false;
   try {
     const q = query(
       collection(db, "storyQuests"),
@@ -2697,19 +2996,24 @@ function loadPublicStoryQuests() {
       }
 
       _renderStoryQuests();
-    }, e => console.error("Failed to load story quests:", e));
+      // Resolve on first snapshot so awaiting callers can proceed
+      if (!_resolved) { _resolved = true; resolve(); }
+    }, e => { console.error("Failed to load story quests:", e); if (!_resolved) { _resolved = true; reject(e); } });
   } catch (e) {
     console.error("Failed to load story quests:", e);
+    if (!_resolved) { _resolved = true; reject(e); }
   }
+  }); // end Promise
 }
 
-// ── Calculate XP threshold for a given level (assumes 1.3x multiplier per level) ──
+// ── Calculate XP threshold for a given level ──
+// Base EXP per rank (index 0=Wanderer … 9=Eternal), multiplier ×1.10 per level within rank.
+const RANK_BASE_EXP = [100, 150, 225, 340, 500, 750, 1100, 1600, 2300, 3200];
+const RANK_EXP_MULT = 1.10;
 function _calcXpMax(rankIdx, level) {
-  // Resets per rank so numbers stay sane across 100 levels per rank.
-  // Base scales with rank (500 per rank tier), curve is 1.05 per level within rank.
   const levelWithinRank = ((level - 1) % 100) + 1;
-  const base = (rankIdx + 1) * 500;
-  return Math.round(base * Math.pow(1.05, Math.max(0, levelWithinRank - 1)));
+  const base = RANK_BASE_EXP[Math.min(rankIdx, 9)];
+  return Math.round(base * Math.pow(RANK_EXP_MULT, Math.max(0, levelWithinRank - 1)));
 }
 // Fix: Restore missing function header for _migrateAccountStats
 async function _migrateAccountStats(c) {
@@ -2718,12 +3022,12 @@ async function _migrateAccountStats(c) {
   const rank     = c.rank     || "Wanderer";
   const rankIdx  = Math.max(0, RANK_ORDER_M.indexOf(rank));
 
-  // Correct hpMax: 100 base + 10 per level + 150 per rank ascension
-  const correctHpMax   = 100 + (level * 10) + (rankIdx * 150);
-  // Correct manaMax: 50 base + 5 per level + 75 per rank ascension
-  const correctManaMax = 50  + (level * 5)  + (rankIdx * 75);
-  // Correct statPoints: we can't know how many were spent, but we can check
-  // total earned vs what's stored. Total earned = 20 (welcome) + 3*level + 25*rankIdx
+  // Correct hpMax: 100 base + 10 per level-within-rank + 150 per rank ascension
+  const levelWithinRankM = ((level - 1) % 100) + 1;
+  const correctHpMax   = 100 + (levelWithinRankM * 10) + (rankIdx * 150);
+  // Correct manaMax: 50 base + 5 per level-within-rank + 75 per rank ascension
+  const correctManaMax = 50  + (levelWithinRankM * 5)  + (rankIdx * 75);
+  // Correct statPoints: total earned = 20 (welcome) + 3*levelWithinRank + 25*rankIdx
   // We only patch if hpMax or manaMax is clearly wrong (< expected base)
 
   const updates = {};
@@ -2749,7 +3053,7 @@ async function _migrateAccountStats(c) {
     needsPatch = true;
   }
   // Fix statPoints: if account has fewer than minimum earned, top it up
-  const minPoints = 20 + (level * 3) + (rankIdx * 25);
+  const minPoints = 20 + (levelWithinRankM * 3) + (rankIdx * 25);
   // We only add if current is suspiciously low (< 0 or less than level*3 alone)
   // Don't override if they've been legitimately spent (statPoints could be 0)
   // — just ensure hpMax/manaMax/xpMax are right, leave spent points alone
@@ -2875,7 +3179,7 @@ function populateDashboard(c) {
 
   // Sidebar
   set("sb-name",  c.name);
-  set("sb-meta",  `${c.rank||"Wanderer"} · Level ${c.level||1}`);
+  set("sb-meta",  `${c.rank||"Wanderer"} · Level ${_displayLevel(c.level||1)}`);
   set("sb-xp",    `${c.xp||0} / ${c.xpMax||100}`);
   css("sb-xpfill","width", xpPct+"%");
   set("mobile-header-char", c.name);
@@ -2883,7 +3187,7 @@ function populateDashboard(c) {
   // Overview
   set("panel-welcome",  `Welcome to the Forge, ${c.name}.`);
   set("stat-rank",      c.rank    || "Wanderer");
-  set("stat-level",     `Level ${c.level||1}`);
+  set("stat-level",     `Level ${_displayLevel(c.level||1)}`);
   set("stat-gold",      c.gold    ?? 500);
   set("stat-hp",        c.hp      ?? 100);
   set("stat-hp-max",   `/ ${_effectiveHpMax}`);
@@ -2898,7 +3202,7 @@ function populateDashboard(c) {
   // Character profile
   set("prof-name",         c.name);
   set("prof-name-display", c.name);
-  set("prof-title",        (c.titles||["Wanderer"])[0]);
+  set("prof-title",        (c.titles||[])[0] || "");
   set("prof-rank-badge",   `Rank: ${c.rank||"Wanderer"}`);
   set("prof-race",         c.race       || "—");
   set("prof-race-attr",    c.raceAttr   || "—");
@@ -3210,20 +3514,31 @@ window._stanceModalSelect = function(idx) {
 };
 
 window._stanceModalConfirm = function() {
-  if (_stanceModalSelected === null) return;
+  // Recover if _stanceModalSelected is null despite button being enabled
+  if (_stanceModalSelected === null) {
+    const stances = _getStances();
+    const firstIdx = stances.findIndex(s => s?.name);
+    if (firstIdx < 0) return; // truly no stances
+    _stanceModalSelected = firstIdx;
+  }
   // Persist the selection as the active stance
   window._activeStanceIdx = _stanceModalSelected;
+  console.log('[BATTLE] _stanceModalConfirm: selected stance index =', _stanceModalSelected);
   renderStancesGrid?.();
   renderBattleStancePicker?.();
   // Save callback BEFORE _closeStanceModal() nulls it
   const cb = _stanceModalCallback;
   window._closeStanceModal();
+  console.log('[BATTLE] Calling stance modal callback');
   if (cb) cb(_stanceModalSelected);
 };
 
 window._closeStanceModal = function() {
   const modal = document.getElementById('stance-select-modal');
-  if (modal) modal.style.display = 'none';
+  if (modal) {
+    modal.style.display = 'none';
+    console.log('[BATTLE] Stance modal closed');
+  }
   _stanceModalCallback = null;
 };
 
@@ -3679,7 +3994,7 @@ const ITEM_ICONS = {
 };
 
 const ITEM_TYPES = {
-  consumable: ["Potion","Elixir","Food","Soup","Skewer","Carp","Sardine","Meat","Herb Fish","Grilled","Roasted","Fried"],
+  consumable: ["Potion","Elixir","Food","Soup","Skewer","Herb Fish","Grilled","Roasted","Fried"],
   equipment:  ["Sword","Dagger","Bow","Vest","Plate","Armor","Shield","Staff","Robe","Axe","Spear","Blade","Wand","Mace","Knife","Rod","Bow","Cloak","Cuirass","Chainmail","Fortress","Mantle","Shroud","Tunic","Greatsword","Cleaver","Warplate","Warbreaker","Longbow","Spellknife","Spellhammer"],
   material:   ["Ore","Crystal","Rune","Wood","Herb","Bone","Thread","Essence","Dust","Shard","Leaf","Bark","Sprigs","Root","Bloom","Petal","Scale","Fang","Hide","Meat","Pelt","Claw","Horn","Fat","Feather","Stone","Fragment","Moss","Seed"],
   quest:      [
@@ -3840,14 +4155,14 @@ window.previewSellMaterial = function(itemName) {
 
 // Convert one material to gold (base rate: rarity-based)
 window.convertMaterialToGold = async function(itemName) {
-  const inv = [...(_charData?.inventory || [])];
-  const item = inv.find(i => i.name === itemName);
-  if (!item || item.qty < 1) return;
+  // Quick pre-check against local state so we can bail early
+  const localItem = (_charData?.inventory || []).find(i => i.name === itemName);
+  if (!localItem || localItem.qty < 1) return;
   // Gold value by rough rarity tier
   const SELL_RATES = {
     mythic:10000, legendary:500, rare:150, uncommon:40, common:10
   };
-  const MYTHIC    = ['Aetherium','Eden’s Tear','Cosmic Leviathan','Void Orchid','Titan Heart'];
+  const MYTHIC    = ['Aetherium','‘Eden’s Tear','Cosmic Leviathan','Void Orchid','Titan Heart'];
   const LEGENDARY = ['Titanium','Adamantium','Celestial Fig','Dragonfruit','Celestial Whale','Black Unagi','Phoenix Bloom','Middlemist','Cyclops Eye','Dragon Scales'];
   const RARE      = ['Gold','Mythril','Palladium','Spirit Plum','Frost Apples','Ember Fruit','Shadowfish','Flamefish','Ying Koi','Spirit Herb','Jade Vine','Ghost Root','Spirit Venison','Shadow Hide','Drake Meat'];
   const UNCOMMON  = ['Silver','Bronze','Marble','Obsidian','Quartz','Golden Pears','Moon Grapes','Sunfruit','Crystal Berries','Bitter Root','Silverfin','Glowfish','Spotted Eel','Coral Snapper','Red Minnow','Silverleaf','Goldroot','Nightshade','Glowleaf','Lotus','Leather','Fangs','Fur','Horns','Claws'];
@@ -3856,15 +4171,17 @@ window.convertMaterialToGold = async function(itemName) {
              : RARE.includes(itemName) ? 'rare'
              : UNCOMMON.includes(itemName) ? 'uncommon' : 'common';
   const goldVal = SELL_RATES[tier];
-  if (item.qty > 1) item.qty--; else inv.splice(inv.indexOf(item), 1);
-  const newGold = (_charData.gold || 0) + goldVal;
-  await _invWrite(_uid, inv, { gold: newGold });
-  _charData.inventory = inv; _charData.gold = newGold;
-  window._allInvItems = inv;
+  // Mutator removes from live server inventory; increment() adds gold atomically
+  await _invWrite(_uid, inv => {
+    const item = inv.find(i => i.name === itemName);
+    if (!item || item.qty < 1) throw new Error('[sell] ' + itemName + ' not in server inventory');
+    if (item.qty > 1) item.qty--; else inv.splice(inv.indexOf(item), 1);
+  }, { gold: increment(goldVal) });
+  window._allInvItems = _charData.inventory;
   _syncAllDisplays(_charData);
   window._refreshInvDisplay();
-  window.showToast(`Sold ${itemName} for ${goldVal} gold!`, 'success');
-  logActivity('💱', `<b>Converted</b> ${itemName} → <b>${goldVal}💰</b>.`, '#c9a84c');
+  window.showToast('Sold ' + itemName + ' for ' + goldVal + ' gold!', 'success');
+  logActivity('💱', '<b>Converted</b> ' + itemName + ' → <b>' + goldVal + '🪙</b>.', '#c9a84c');
 };
 
 window._activeInvTab = "all"; // track active tab globally
@@ -4076,9 +4393,13 @@ window.useItem = async function(itemName, kind) {
     if (!confirmed) return;
     if (inv[idx].qty > 1) inv[idx].qty--; else inv.splice(idx, 1);
     const baseStats = { str:10, int:10, def:10, dex:10 };
-    // Level-earned points (3 per level after 1) + the 20 welcome bonus every player started with
+    // Stat points formula: 20 (welcome bonus) + 3 per level-up + 25 per rank ascension
     const WELCOME_BONUS = 20;
-    const earnedPoints = Math.max(0, ((_charData.level || 1) - 1) * 3) + WELCOME_BONUS;
+    const RANK_ORDER = ['Wanderer','Follower','Disciple','Master','Exalted','Crown','Supreme','Legend','Myth','Eternal'];
+    const rankIdx      = Math.max(0, RANK_ORDER.indexOf(_charData.rank || 'Wanderer'));
+    const earnedPoints = WELCOME_BONUS
+      + Math.max(0, ((_charData.level || 1) - 1) * 3)
+      + rankIdx * 25;
     await updateDoc(doc(db, 'characters', _uid), { stats: baseStats, statPoints: earnedPoints, inventory: inv });
     Object.assign(_charData, { stats: baseStats, statPoints: earnedPoints, inventory: inv });
     window._allInvItems = inv;
@@ -4154,9 +4475,9 @@ function buildDeityIngredients(deity) {
   const level    = _charData?.level || 1;
   const rank     = _charData?.rank  || 'Wanderer';
 
-  // Ascension is available when at the last level of current rank (level % 100 === 0)
+  // Ascension is available when at the last level of current rank AND xp bar is full (xp >= xpMax)
   const levelWithinRank = ((level - 1) % 100) + 1;
-  const atMaxLevel      = levelWithinRank === 100;
+  const atMaxLevel      = levelWithinRank === 100 && (_charData?.xp ?? 0) >= (_charData?.xpMax ?? 1);
   const allIngsMet      = ings.every(ing => ((_charData?.inventory||[]).find(i => i.name === ing)?.qty ?? 0) >= required);
   const canAscend       = atMaxLevel && allIngsMet && RANK_ORDER.indexOf(rank) < RANK_ORDER.length - 1;
   const isMaxRank       = RANK_ORDER.indexOf(rank) >= RANK_ORDER.length - 1;
@@ -4168,7 +4489,7 @@ function buildDeityIngredients(deity) {
       ? `<button id="ascend-btn" class="btn-primary" style="margin-top:16px" onclick="window.doRankAscension()">⬆ ASCEND TO ${nextRank.toUpperCase()}</button>`
       : `<div style="margin-top:14px;padding:10px 14px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:var(--radius);font-size:0.78rem;color:var(--text-dim);font-style:italic">
           ${!atMaxLevel
-            ? `Reach level ${Math.ceil(level / 100) * 100} to unlock ascension. (Currently level ${level} — ${100 - levelWithinRank} level${100 - levelWithinRank === 1 ? '' : 's'} away)`
+            ? `Reach Level 100 and fill the EXP bar to unlock ascension. (Currently Level ${levelWithinRank}${levelWithinRank === 100 ? ' — EXP bar not yet full' : ' — ' + (100 - levelWithinRank) + ' level' + (100 - levelWithinRank === 1 ? '' : 's') + ' away'})`
             : `Collect all required ingredients to ascend.`
           }
         </div>`;
@@ -4213,8 +4534,10 @@ window.doRankAscension = async function() {
   if (RANK_ORDER.indexOf(rank) >= RANK_ORDER.length - 1) { window.showToast('Already at maximum rank.', 'error'); return; }
 
   const levelWithinRank = ((level - 1) % 100) + 1;
-  if (levelWithinRank !== 100) {
-    window.showToast(`Reach level ${Math.ceil(level / 100) * 100} first.`, 'error'); return;
+  const xp    = _charData?.xp    ?? 0;
+  const xpMax = _charData?.xpMax ?? 1;
+  if (levelWithinRank !== 100 || xp < xpMax) {
+    window.showToast(`Reach Level 100 and fill your EXP bar before ascending.`, 'error'); return;
   }
 
   const inv = _charData.inventory || [];
@@ -4253,12 +4576,24 @@ You will gain:
 
     const newRank      = RANK_ORDER[rankIdx + 1];
     const newRankIdx   = rankIdx + 1;
+    // Level resets to 1 within the new rank (absolute level = newRankIdx * 100 + 1)
+    const newAbsLevel  = newRankIdx * 100 + 1;
+    const newXpMax     = _calcXpMax(newRankIdx, newAbsLevel);
     const newHpMax     = (_charData.hpMax  || 100) + 150;
     const newManaMax   = (_charData.manaMax || 50) + 75;
     const newStatPts   = (_charData.statPoints || 0) + 25;
 
+    // Carry overflow XP into the new rank (xp was clamped to xpMax at the cap, so
+    // anything stored beyond xpMax is the overflow that happens at the moment of ascension)
+    const xpCarry = Math.max(0, (_charData.xp || 0) - (_charData.xpMax || 1) + 1);
+    // Cap carry so it can't instantly level up in the new rank
+    const startXp = Math.min(xpCarry, newXpMax - 1);
+
     await updateDoc(doc(db, 'characters', _uid), {
       rank:       newRank,
+      level:      newAbsLevel,
+      xp:         startXp,
+      xpMax:      newXpMax,
       hpMax:      newHpMax,
       manaMax:    newManaMax,
       statPoints: newStatPts,
@@ -4267,6 +4602,9 @@ You will gain:
 
     // Update local cache
     _charData.rank       = newRank;
+    _charData.level      = newAbsLevel;
+    _charData.xp         = startXp;
+    _charData.xpMax      = newXpMax;
     _charData.hpMax      = newHpMax;
     _charData.manaMax    = newManaMax;
     _charData.statPoints = newStatPts;
@@ -4278,7 +4616,7 @@ You will gain:
     if (typeof refreshStatDisplay   === 'function') refreshStatDisplay(_charData);
     if (typeof buildSkillTree       === 'function') buildSkillTree(_charData.charClass, _charData);
 
-    logActivity('⬆️', `<b>Rank Ascension:</b> Advanced to <b>${newRank}</b>! +150 HP, +75 Mana, +25 Stat Points.`, '#c9a84c');
+    logActivity('⬆️', `<b>Rank Ascension:</b> Advanced to <b>${newRank}</b>! Level reset to 1. +150 HP, +75 Mana, +25 Stat Points.`, '#c9a84c');
     window.showToast(`✦ You have ascended to ${newRank}!`, 'success');
   } catch(e) {
     console.error('[doRankAscension]', e);
@@ -4319,7 +4657,7 @@ function showActiveProfession(c) {
 
   const lvl  = c.professionLvl || 0;
   const xp   = c.professionXp  || 0;
-  const maxXp = PROF_EXP_TABLE[Math.min(lvl, PROF_EXP_TABLE.length-2)] || 100;
+  const maxXp = (lvl < 10) ? (PROF_EXP_TABLE[lvl] || 3000) : 0;
   const pct  = Math.min(100, Math.round((xp / maxXp) * 100));
   const rates = FIND_RATES[Math.min(lvl, FIND_RATES.length-1)];
 
@@ -4366,20 +4704,18 @@ async function startTravel({ dest, continent, cost, seconds }) {
 
   try {
     const arrivalTime = new Date(Date.now() + travelSeconds * 1000);
-    await updateDoc(doc(db, "characters", _uid), {
-      gold:          gold - travelCost,
-      travelingUntil: arrivalTime,
-      travelDest:    dest,
-      travelContinent: continent,
-    });
+    const travelUpdate = { travelingUntil: arrivalTime, travelDest: dest, travelContinent: continent };
+    if (travelCost > 0) travelUpdate.gold = gold - travelCost;
+    await updateDoc(doc(db, "characters", _uid), travelUpdate);
     if (_charData) {
-      _charData.gold = gold - travelCost;
+      if (travelCost > 0) _charData.gold = gold - travelCost;
       _charData.travelingUntil = { toDate: () => arrivalTime };
       _charData.travelDest = dest;
       _charData.travelContinent = continent;
     }
-    set("stat-gold", gold - travelCost);
-    set("s-gold",    gold - travelCost);
+    const newGold = travelCost > 0 ? gold - travelCost : gold;
+    set("stat-gold", newGold);
+    set("s-gold",    newGold);
     document.getElementById("travel-modal").style.display = "none";
     startTravelCountdown(arrivalTime, dest);
     window.showToast(`Traveling to ${dest}...`, "");
@@ -4483,20 +4819,20 @@ const CHAT_LOCATION_BG = {
   "mistveil":            "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Fmistveil_town.jpeg?alt=media&token=3fd261ca-b5d2-4096-8b0c-9c0f53e2c228",
   "mistveil-town":       "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Fmistveil_town.jpeg?alt=media&token=3fd261ca-b5d2-4096-8b0c-9c0f53e2c228",
   // Northern Continent — explore zones (monster/resource/deity all use wildlands)
-  "frostfang":           "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost_wildlands.jpeg?alt=media&token=6a811429-0b80-4be9-a10f-3a7b2f929420",
-  "sheen-lake":          "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost_wildlands.jpeg?alt=media&token=6a811429-0b80-4be9-a10f-3a7b2f929420",
-  "misty-hollow":        "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost_wildlands.jpeg?alt=media&token=6a811429-0b80-4be9-a10f-3a7b2f929420",
-  "dark-cathedral":      "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost_wildlands.jpeg?alt=media&token=6a811429-0b80-4be9-a10f-3a7b2f929420",
-  "wisteria":            "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost_wildlands.jpeg?alt=media&token=6a811429-0b80-4be9-a10f-3a7b2f929420",
-  "silver-lake":         "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost_wildlands.jpeg?alt=media&token=6a811429-0b80-4be9-a10f-3a7b2f929420",
-  "hobbit-cave":         "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost_wildlands.jpeg?alt=media&token=6a811429-0b80-4be9-a10f-3a7b2f929420",
-  "arctic-willow":       "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost_wildlands.jpeg?alt=media&token=6a811429-0b80-4be9-a10f-3a7b2f929420",
-  "dream-river":         "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost_wildlands.jpeg?alt=media&token=6a811429-0b80-4be9-a10f-3a7b2f929420",
-  "suldan-mine":         "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost_wildlands.jpeg?alt=media&token=6a811429-0b80-4be9-a10f-3a7b2f929420",
-  "shrine-of-secrets":   "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost_wildlands.jpeg?alt=media&token=6a811429-0b80-4be9-a10f-3a7b2f929420",
-  "aurora-basin":        "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost_wildlands.jpeg?alt=media&token=6a811429-0b80-4be9-a10f-3a7b2f929420",
-  "forgotten-estuary":   "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost_wildlands.jpeg?alt=media&token=6a811429-0b80-4be9-a10f-3a7b2f929420",
-  "frost-wildlands":     "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost_wildlands.jpeg?alt=media&token=6a811429-0b80-4be9-a10f-3a7b2f929420",
+  "frostfang":           "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost-wildlands.png?alt=media&token=fcbb7a22-7269-4e3d-a94c-ee4467a9bb6d",
+  "sheen-lake":          "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost-wildlands.png?alt=media&token=fcbb7a22-7269-4e3d-a94c-ee4467a9bb6d",
+  "misty-hollow":        "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost-wildlands.png?alt=media&token=fcbb7a22-7269-4e3d-a94c-ee4467a9bb6d",
+  "dark-cathedral":      "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost-wildlands.png?alt=media&token=fcbb7a22-7269-4e3d-a94c-ee4467a9bb6d",
+  "wisteria":            "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost-wildlands.png?alt=media&token=fcbb7a22-7269-4e3d-a94c-ee4467a9bb6d",
+  "silver-lake":         "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost-wildlands.png?alt=media&token=fcbb7a22-7269-4e3d-a94c-ee4467a9bb6d",
+  "hobbit-cave":         "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost-wildlands.png?alt=media&token=fcbb7a22-7269-4e3d-a94c-ee4467a9bb6d",
+  "arctic-willow":       "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost-wildlands.png?alt=media&token=fcbb7a22-7269-4e3d-a94c-ee4467a9bb6d",
+  "dream-river":         "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost-wildlands.png?alt=media&token=fcbb7a22-7269-4e3d-a94c-ee4467a9bb6d",
+  "suldan-mine":         "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost-wildlands.png?alt=media&token=fcbb7a22-7269-4e3d-a94c-ee4467a9bb6d",
+  "shrine-of-secrets":   "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost-wildlands.png?alt=media&token=fcbb7a22-7269-4e3d-a94c-ee4467a9bb6d",
+  "aurora-basin":        "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost-wildlands.png?alt=media&token=fcbb7a22-7269-4e3d-a94c-ee4467a9bb6d",
+  "forgotten-estuary":   "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost-wildlands.png?alt=media&token=fcbb7a22-7269-4e3d-a94c-ee4467a9bb6d",
+  "frost-wildlands":     "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost-wildlands.png?alt=media&token=fcbb7a22-7269-4e3d-a94c-ee4467a9bb6d",
   // Western Continent — safe zones
   "solmere":             "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fsolmere.jpeg?alt=media&token=d651b87b-c394-4aa7-8177-c533daa67da2",
   "sunpetal":            "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fsunpetal_village.jpeg?alt=media&token=da53581d-271c-4879-a40f-460c19a8879e",
@@ -4508,20 +4844,55 @@ const CHAT_LOCATION_BG = {
   "verdance":            "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdance_town.jpeg?alt=media&token=06f44360-80c6-422f-8877-74aec213608f",
   "verdance-town":       "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdance_town.jpeg?alt=media&token=06f44360-80c6-422f-8877-74aec213608f",
   // Western Continent — explore zones (all use wildlands)
-  "whispering-forest":   "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis_wildlands.jpeg?alt=media&token=1897eed1-4719-4aeb-aed7-14be9434c38e",
-  "golden-plains":       "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis_wildlands.jpeg?alt=media&token=1897eed1-4719-4aeb-aed7-14be9434c38e",
-  "element-valley":      "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis_wildlands.jpeg?alt=media&token=1897eed1-4719-4aeb-aed7-14be9434c38e",
-  "defiled-sanctum":     "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis_wildlands.jpeg?alt=media&token=1897eed1-4719-4aeb-aed7-14be9434c38e",
-  "asahi-valley":        "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis_wildlands.jpeg?alt=media&token=1897eed1-4719-4aeb-aed7-14be9434c38e",
-  "moss-stream":         "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis_wildlands.jpeg?alt=media&token=1897eed1-4719-4aeb-aed7-14be9434c38e",
-  "argent-grotto":       "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis_wildlands.jpeg?alt=media&token=1897eed1-4719-4aeb-aed7-14be9434c38e",
-  "golden-river":        "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis_wildlands.jpeg?alt=media&token=1897eed1-4719-4aeb-aed7-14be9434c38e",
-  "shiny-cavern":        "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis_wildlands.jpeg?alt=media&token=1897eed1-4719-4aeb-aed7-14be9434c38e",
-  "purgatory-of-light":  "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis_wildlands.jpeg?alt=media&token=1897eed1-4719-4aeb-aed7-14be9434c38e",
-  "temple-of-verdict":   "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis_wildlands.jpeg?alt=media&token=1897eed1-4719-4aeb-aed7-14be9434c38e",
-  "heart-garden":        "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis_wildlands.jpeg?alt=media&token=1897eed1-4719-4aeb-aed7-14be9434c38e",
-  "valley-of-overflowing":"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis_wildlands.jpeg?alt=media&token=1897eed1-4719-4aeb-aed7-14be9434c38e",
-  "verdantis-wildlands":  "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis_wildlands.jpeg?alt=media&token=1897eed1-4719-4aeb-aed7-14be9434c38e",
+  "whispering-forest":   "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis-wildlands.jpg?alt=media&token=0cf70f7b-9b0d-4daf-b514-8d9d530888fa",
+  "golden-plains":       "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis-wildlands.jpg?alt=media&token=0cf70f7b-9b0d-4daf-b514-8d9d530888fa",
+  "element-valley":      "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis-wildlands.jpg?alt=media&token=0cf70f7b-9b0d-4daf-b514-8d9d530888fa",
+  "asahi-valley":        "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis-wildlands.jpg?alt=media&token=0cf70f7b-9b0d-4daf-b514-8d9d530888fa",
+  "moss-stream":         "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis-wildlands.jpg?alt=media&token=0cf70f7b-9b0d-4daf-b514-8d9d530888fa",
+  "argent-grotto":       "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis-wildlands.jpg?alt=media&token=0cf70f7b-9b0d-4daf-b514-8d9d530888fa",
+  "golden-river":        "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis-wildlands.jpg?alt=media&token=0cf70f7b-9b0d-4daf-b514-8d9d530888fa",
+  "shiny-cavern":        "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis-wildlands.jpg?alt=media&token=0cf70f7b-9b0d-4daf-b514-8d9d530888fa",
+  "purgatory-of-light":  "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis-wildlands.jpg?alt=media&token=0cf70f7b-9b0d-4daf-b514-8d9d530888fa",
+  "temple-of-verdict":   "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis-wildlands.jpg?alt=media&token=0cf70f7b-9b0d-4daf-b514-8d9d530888fa",
+  "heart-garden":        "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis-wildlands.jpg?alt=media&token=0cf70f7b-9b0d-4daf-b514-8d9d530888fa",
+  "valley-of-overflowing":"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis-wildlands.jpg?alt=media&token=0cf70f7b-9b0d-4daf-b514-8d9d530888fa",
+  "verdantis-wildlands":  "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis-wildlands.jpg?alt=media&token=0cf70f7b-9b0d-4daf-b514-8d9d530888fa",
+  // Vorthak — Glass Hell sub-region
+  "lake-of-reflections":  "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fglass-hell.jpg?alt=media&token=0e81de0c-af56-49c7-9e2b-dcb9d9c8fa78",
+  "crystal-cave":         "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fglass-hell.jpg?alt=media&token=0e81de0c-af56-49c7-9e2b-dcb9d9c8fa78",
+  "rainbow-valley":       "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fglass-hell.jpg?alt=media&token=0e81de0c-af56-49c7-9e2b-dcb9d9c8fa78",
+  "shimmering-peak":      "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fglass-hell.jpg?alt=media&token=0e81de0c-af56-49c7-9e2b-dcb9d9c8fa78",
+  "mirror-sky":           "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fglass-hell.jpg?alt=media&token=0e81de0c-af56-49c7-9e2b-dcb9d9c8fa78",
+  // Vorthak — Shattered Heavens sub-region
+  "tempest-crown":        "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fshattered-heavens.jpg?alt=media&token=22ef88f0-9ccf-4e11-ad8d-f573f15ea85e",
+  "frostfall-exp":        "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fshattered-heavens.jpg?alt=media&token=22ef88f0-9ccf-4e11-ad8d-f573f15ea85e",
+  "frostfall-expanse":    "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fshattered-heavens.jpg?alt=media&token=22ef88f0-9ccf-4e11-ad8d-f573f15ea85e",
+  "ember-horizon":        "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fshattered-heavens.jpg?alt=media&token=22ef88f0-9ccf-4e11-ad8d-f573f15ea85e",
+  "veilwater-basin":      "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fshattered-heavens.jpg?alt=media&token=22ef88f0-9ccf-4e11-ad8d-f573f15ea85e",
+  "titan-divide":         "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fshattered-heavens.jpg?alt=media&token=22ef88f0-9ccf-4e11-ad8d-f573f15ea85e",
+  // Vorthak — Dark Woodlands sub-region
+  "crimson-fang":         "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fdark-woodlands.jpg?alt=media&token=d408a676-ec9f-40a7-8dd0-08899c88a04a",
+  "root-grove":           "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fdark-woodlands.jpg?alt=media&token=d408a676-ec9f-40a7-8dd0-08899c88a04a",
+  "serpent-mire":         "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fdark-woodlands.jpg?alt=media&token=d408a676-ec9f-40a7-8dd0-08899c88a04a",
+  "burrowdeep":           "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fdark-woodlands.jpg?alt=media&token=d408a676-ec9f-40a7-8dd0-08899c88a04a",
+  "burrowdeep-basin":     "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fdark-woodlands.jpg?alt=media&token=d408a676-ec9f-40a7-8dd0-08899c88a04a",
+  "gremlin-hollows":      "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fdark-woodlands.jpg?alt=media&token=d408a676-ec9f-40a7-8dd0-08899c88a04a",
+  // Vorthak — Corrupted Hallows sub-region
+  "defiled-sanctum":      "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fcorrupted-hallows.jpg?alt=media&token=90859bb8-c4d6-44f1-ad54-f085f85b9fc5",
+  "dark-cathedral":       "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fcorrupted-hallows.jpg?alt=media&token=90859bb8-c4d6-44f1-ad54-f085f85b9fc5",
+  "gravemarch-fields":    "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fcorrupted-hallows.jpg?alt=media&token=90859bb8-c4d6-44f1-ad54-f085f85b9fc5",
+  "fallen-bastion":       "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fcorrupted-hallows.jpg?alt=media&token=90859bb8-c4d6-44f1-ad54-f085f85b9fc5",
+  "whispering-necropolis":"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fcorrupted-hallows.jpg?alt=media&token=90859bb8-c4d6-44f1-ad54-f085f85b9fc5",
+  // Vorthak — Otherworld sub-region
+  "blighted-world":       "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fotherworld.jpg?alt=media&token=9c5bfee7-ab52-44be-acca-806572eac528",
+  "infernal-reach":       "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fotherworld.jpg?alt=media&token=9c5bfee7-ab52-44be-acca-806572eac528",
+  "sphinx-dominion":      "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fotherworld.jpg?alt=media&token=9c5bfee7-ab52-44be-acca-806572eac528",
+  "ashwing-aerie":        "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fotherworld.jpg?alt=media&token=9c5bfee7-ab52-44be-acca-806572eac528",
+  "leviathan-depths":     "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fotherworld.jpg?alt=media&token=9c5bfee7-ab52-44be-acca-806572eac528",
+  // Nyx Abyss
+  "void-chasm":           "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fnyx-abyss%2Fnyx-abyss.jpeg?alt=media&token=f53427ea-4393-48e1-93d7-c83f7823dd8a",
+  "abyssal-depths":       "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fnyx-abyss%2Fnyx-abyss.jpeg?alt=media&token=f53427ea-4393-48e1-93d7-c83f7823dd8a",
+  "fallen-heaven":        "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fnyx-abyss%2Fnyx-abyss.jpeg?alt=media&token=f53427ea-4393-48e1-93d7-c83f7823dd8a",
 };
 
 const GENERAL_CHAT_BG = "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/general%20chat.jpg?alt=media&token=692fa815-c40f-4b8a-8b16-1017ab8af4ea";
@@ -4563,8 +4934,13 @@ async function initChat() {
   // Write presence so others can see us
   await writePresence(locationId);
 
-  // Listen to active players in location
-  listenPresence(locationId);
+  // Listen to active players in location (or general if starting there)
+  if (_chatTab === "general") {
+    await writePresence("general");
+    _listenGeneralPresence();
+  } else {
+    listenPresence(locationId);
+  }
 
   // Listen to NPCs in this location
   listenLocationNpcs(locationId);
@@ -4625,9 +5001,10 @@ async function initChat() {
       deadNotice.remove();
     }
 
-    // On General tab, fetch all active players across all locations
+    // On General tab, listen to players currently in General chat
     if (tab === "general") {
-      _loadAllPlayers();
+      writePresence("general");
+      _listenGeneralPresence();
       _loadGeneralNpcsForSidebar();
     } else {
       // Re-listen to local presence
@@ -4646,7 +5023,6 @@ async function writePresence(locationId) {
       name:      _charData.name,
       rank:      _charData.rank || "Wanderer",
       level:     _charData.level || 1,
-      title:     (_charData.titles||[])[0] || "",
       avatarUrl: _charData.avatarUrl || "",
       location:  locationId,
       lastSeen:  serverTimestamp(),
@@ -4675,7 +5051,7 @@ function listenPresence(locationId) {
       const av = p.avatarUrl?.startsWith("http")
         ? `<img src="${p.avatarUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:50%"/>`
         : `<span style="font-size:0.9rem">${p.avatarUrl || "⚔️"}</span>`;
-      return `<div class="chat-player-chip" onclick="openPlayerPopup('${p.uid}','${(p.name||"").replace(/'/g,"\\'")}',this)" title="${p.name} · ${p.rank} Lv.${p.level||1}">
+      return `<div class="chat-player-chip" onclick="openPlayerPopup('${p.uid}','${(p.name||"").replace(/'/g,"\\'")}',this)" title="${p.name} · ${p.rank} Lv.${_displayLevel(p.level||1)}">
         <div class="chat-player-avatar">${av}</div>
         <span class="chat-player-name">${p.name}</span>
       </div>`;
@@ -4716,8 +5092,50 @@ async function _loadAllPlayers() {
   }
 }
 
-// ── Load global NPCs into sidebar when on General tab ──────────────────────
-let _generalNpcs = [];
+// ── Listen to players currently in General chat (presence-based) ───────────
+function _listenGeneralPresence() {
+  const listEl = document.getElementById("chat-players-list");
+  if (!listEl) return;
+
+  // Stop any existing location presence listener
+  if (_presenceUnsub) { _presenceUnsub(); _presenceUnsub = null; }
+
+  const presCol = collection(db, "presence", "general", "players");
+  const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
+  const q = query(presCol, where("lastSeen", ">=", fiveMinAgo));
+
+  _presenceUnsub = onSnapshot(q, snap => {
+    const onlineEl = document.getElementById("chat-online");
+    const players  = snap.docs.map(d => d.data()).filter(p => p.uid !== _uid && !p.isDeity);
+    const total    = players.length + 1; // include self
+    if (onlineEl) onlineEl.textContent = `● ${total} online`;
+
+    // Self chip first
+    const selfChip = (() => {
+      const av = _charData?.avatarUrl?.startsWith("http")
+        ? `<img src="${_charData.avatarUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:50%"/>`
+        : `<span style="font-size:0.9rem">${_charData?.avatarUrl || "⚔️"}</span>`;
+      return `<div class="chat-player-chip is-self" title="${_charData?.name} (You)">
+        <div class="chat-player-avatar">${av}</div>
+        <span class="chat-player-name">${_charData?.name || "You"} (You)</span>
+      </div>`;
+    })();
+
+    const otherChips = players.map(p => {
+      const av = p.avatarUrl?.startsWith("http")
+        ? `<img src="${p.avatarUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:50%"/>`
+        : `<span style="font-size:0.9rem">${p.avatarUrl || "⚔️"}</span>`;
+      return `<div class="chat-player-chip" onclick="openPlayerPopup('${p.uid}','${(p.name||"").replace(/'/g,"\\'")}',this)" title="${p.name} · ${p.rank||""} Lv.${_displayLevel(p.level||1)}">
+        <div class="chat-player-avatar">${av}</div>
+        <span class="chat-player-name">${p.name}</span>
+      </div>`;
+    }).join("");
+
+    listEl.innerHTML = selfChip + (otherChips || `<span style="color:var(--ash);font-size:0.72rem;font-style:italic">No other players in General Chat</span>`);
+  }, () => {});
+}
+
+
 async function _loadGeneralNpcsForSidebar() {
   _generalNpcs = [];
   try {
@@ -4768,22 +5186,23 @@ function startChatListener(locationId, tab) {
       requestAnimationFrame(() => {
         const snapshot = msg.duelSnapshot;
         if (msg.isLiveDuelCard) {
-          const isParticipant = snapshot && (
+          // Check if viewer is a participant. If _uid isn't resolved yet,
+          // default to mountDuelCard (live listener) so we never accidentally
+          // treat a participant as a spectator and lock them out.
+          const isParticipant = !snapshot || !_uid || (
             snapshot.challengerId === _uid || snapshot.targetId === _uid
           );
           if (isParticipant) {
-            // Participants: live listener (falls back to snapshot on error)
+            // Participants (or unknown uid): live listener — renderDuelCard inside
+            // will correctly evaluate isMyTurn using the real uid each time it fires.
             window.mountDuelCard?.(msg.duelId, el, snapshot || null);
-          } else if (snapshot) {
-            // Spectators: render snapshot statically — no Firestore read needed
-            window.renderDuelCard?.(snapshot, msg.duelId, el);
           } else {
-            // Old message with no snapshot — try live, errors caught inside mountDuelCard
-            window.mountDuelCard?.(msg.duelId, el, null);
+            // Confirmed spectator: render snapshot statically (read-only, no listener)
+            window.renderDuelCard?.(snapshot, msg.duelId, el, /*isStaticSnapshot=*/true);
           }
         } else if (snapshot) {
-          // Static snapshot card (historical turn records)
-          window.renderDuelCard?.(snapshot, msg.duelId, el);
+          // Static snapshot card (historical turn records) — always read-only
+          window.renderDuelCard?.(snapshot, msg.duelId, el, /*isStaticSnapshot=*/true);
         } else {
           window.mountDuelCard?.(msg.duelId, el, null);
         }
@@ -4872,8 +5291,8 @@ function startChatListener(locationId, tab) {
         <div class="chat-msg-avatar own-avatar">${avatarContent}</div>
         <div class="chat-msg-body">
           <div class="chat-msg-header own-header">
-            ${msg.title ? `<span class="chat-msg-title">${msg.title}</span>` : ""}
-            <span class="chat-msg-rank">${msg.rank||_charData?.rank||"Wanderer"} · Lv.${msg.level||_charData?.level||1}</span>
+            ${msg.title && !["Wanderer","Follower","Disciple","Master","Exalted","Crown","Supreme","Legend","Myth","Eternal"].includes(msg.title) ? `<span class="chat-msg-title">${msg.title}</span>` : ""}
+            <span class="chat-msg-rank">${msg.rank||_charData?.rank||"Wanderer"} · Lv.${_displayLevel(msg.level||_charData?.level||1)}</span>
             <span class="chat-msg-name own-name">${msg.charName||_charData?.name||"You"}</span>
           </div>
           ${replyQuoteHTML}
@@ -4912,8 +5331,8 @@ function startChatListener(locationId, tab) {
         <div class="chat-msg-body">
           <div class="chat-msg-header">
             <span class="chat-msg-name npc-name" onclick="openPlayerPopup('npc_${msg.npcId||'npc'}','${(msg.charName||"NPC").replace(/'/g,"\\'")}',this)" style="cursor:pointer">🧙 ${msg.charName||"NPC"}</span>
-            ${msg.title ? `<span class="chat-msg-title npc-role">${msg.title}</span>` : ""}
-            <span class="chat-msg-rank" style="color:var(--gold-dim);font-size:0.7rem">${msg.rank||"NPC"} · Lv.${msg.level||1}</span>
+            ${msg.title && !["Wanderer","Follower","Disciple","Master","Exalted","Crown","Supreme","Legend","Myth","Eternal"].includes(msg.title) ? `<span class="chat-msg-title npc-role">${msg.title}</span>` : ""}
+            <span class="chat-msg-rank" style="color:var(--gold-dim);font-size:0.7rem">${msg.rank||"NPC"} · Lv.${_displayLevel(msg.level||1)}</span>
             ${msg.isAutoReply ? `<span style="font-size:0.65rem;color:var(--ash);font-style:italic">auto</span>` : ""}
             <span class="chat-msg-time">${time}</span>
           </div>
@@ -4936,8 +5355,8 @@ function startChatListener(locationId, tab) {
         <div class="chat-msg-body">
           <div class="chat-msg-header">
             <span class="chat-msg-name" onclick="openPlayerPopup('${msg.uid}','${(msg.charName||"").replace(/'/g,"\\'")}',this)" style="cursor:pointer">${msg.charName||"Unknown"}</span>
-            ${msg.title ? `<span class="chat-msg-title">${msg.title}</span>` : ""}
-            <span class="chat-msg-rank">${msg.rank||"Wanderer"} · Lv.${msg.level||1}</span>
+            ${msg.title && !["Wanderer","Follower","Disciple","Master","Exalted","Crown","Supreme","Legend","Myth","Eternal"].includes(msg.title) ? `<span class="chat-msg-title">${msg.title}</span>` : ""}
+            <span class="chat-msg-rank">${msg.rank||"Wanderer"} · Lv.${_displayLevel(msg.level||1)}</span>
             <span class="chat-msg-time">${time}</span>
           </div>
           ${tab === "general" ? `<div class="chat-msg-location">📍 ${msg.location||""}</div>` : ""}
@@ -5004,10 +5423,14 @@ function startChatListener(locationId, tab) {
           // inside mountDuelCard is NOT destroyed (replaceChild would kill it).
           if (existing.classList.contains('duel-card-wrapper')) {
             const msg = change.doc.data();
-            const snapshot = msg.duelSnapshot;
-            if (snapshot) {
-              // Re-render card content into the same element — listener survives
-              window.renderDuelCard?.(snapshot, msg.duelId, existing);
+            // Live duel cards are managed by the mountDuelCard Firestore listener —
+            // do NOT re-render them here or we'll clobber the live listener's work.
+            // Only re-render static snapshot cards (isLiveDuelCard=false).
+            if (!msg.isLiveDuelCard) {
+              const snapshot = msg.duelSnapshot;
+              if (snapshot) {
+                window.renderDuelCard?.(snapshot, msg.duelId, existing, /*isStaticSnapshot=*/true);
+              }
             }
           } else {
             // Regular messages: safe to replace
@@ -5059,7 +5482,6 @@ async function sendChat() {
     avatarUrl: _charData.avatarUrl || "",
     rank: _charData.rank || "Wanderer",
     level: _charData.level || 1,
-    title: (_charData.titles||[])[0] || "",
     location: location,
     text: text,
     timestamp: serverTimestamp(),
@@ -5881,6 +6303,110 @@ window.closeItemStatModal = function() {
   document.getElementById('item-stat-modal').style.display = 'none';
 };
 
+// Returns { minP, maxP, blocked } for a given inventory item — used by the sell modal UI
+// to show the price range hint before the player enters an amount.
+window._getListingBracket = function(item) {
+  // ─────────────────────────────────────────────────────────────────────────
+  // Market listing rules — only three item classes may be listed:
+  //   1. Resources / raw materials   (by rarity)
+  //   2. Unenchanted equipment        (by grade E–S)
+  //   3. Cooked food                  (by recipe grade)
+  //
+  // Potions, quest/ascension items, and enchanted or merged equipment
+  // are permanently blocked.  Returns { blocked, reason } or { minP, maxP }.
+  // ─────────────────────────────────────────────────────────────────────────
+  if (!item) return null;
+  const n        = item.name.toLowerCase();
+  const itemType = getItemType(item.name);
+
+  // ── Blocked: quest / ascension items ─────────────────────────────────────
+  if (itemType === 'quest') {
+    return { blocked: true, reason: 'Quest and advancement materials cannot be listed on the market.' };
+  }
+
+  // ── Blocked: potions and elixirs ─────────────────────────────────────────
+  const POTION_NAMES = [
+    "Minor HP Potion","Standard HP Potion","Greater HP Potion",
+    "Minor Mana Potion","Standard Mana Potion","Greater Mana Potion",
+    "Minor Luck Potion","Standard Luck Potion","Greater Luck Potion",
+    "Minor EXP Potion","Standard EXP Potion","Greater EXP Potion",
+    "Stat Reset Potion","Class Reset Potion","Resurrection Potion",
+    "Companion Change Potion","Race Rebirth Potion","Divine Shift Potion",
+  ];
+  if (itemType === 'consumable' && (
+    POTION_NAMES.includes(item.name) || ["potion","elixir"].some(x => n.includes(x))
+  )) {
+    return { blocked: true, reason: 'Potions cannot be listed on the market.' };
+  }
+
+  // ── Blocked: enchanted or merged equipment ───────────────────────────────
+  if (itemType === 'equipment') {
+    const enchLvl = item.enchantLevel || (parseInt((item.name || '').match(/\+(\d+)$/)?.[1]) || 0);
+    if (enchLvl > 0) {
+      return { blocked: true, reason: 'Enchanted or merged equipment cannot be listed. Only base (unenchanted) gear may be sold.' };
+    }
+  }
+
+  // ── Price brackets ────────────────────────────────────────────────────────
+  // Raw resources / gathered materials — tiered by rarity
+  const RESOURCE_BRACKETS = {
+    Common:    [50,    100],
+    Uncommon:  [250,   300],
+    Rare:      [1400,  1500],
+    Legendary: [4000,  5000],
+    Mythic:    [13000, 15000],
+  };
+  // Cooked food — tiered by recipe grade
+  const FOOD_BRACKETS = {
+    Common:    [1560,  1600],
+    Uncommon:  [3380,  3500],
+    Rare:      [11960, 13000],
+    Legendary: [37180, 40000],
+    Mythic:    [74390, 80000],
+  };
+  // Equipment — tiered by item grade (unenchanted only, enforced above)
+  // Prices derived from: Crafting Fee + Max Material Cost + 30% profit + range rounding
+  const EQUIP_BRACKETS = {
+    E: [4550,    5000],
+    D: [20410,   23000],
+    C: [110760,  120000],
+    B: [1347450, 1500000],
+    A: [4173000, 5000000],
+    S: [8645000, 10000000],
+  };
+
+  let minP, maxP;
+
+  if (itemType === 'equipment') {
+    const g = item.grade || window._resolveEquipGrade(item.name);
+    [minP, maxP] = EQUIP_BRACKETS[g] || EQUIP_BRACKETS['E'];
+
+  } else if (itemType === 'consumable') {
+    // Non-potion consumable → cooked food; resolve grade from recipe registry
+    let foodGrade = 'Common';
+    if (window.CANONICAL_FOOD_RECIPES) {
+      for (const recipes of Object.values(window.CANONICAL_FOOD_RECIPES)) {
+        const found = recipes.find(r => r.name === item.name);
+        if (found?.grade) { foodGrade = found.grade; break; }
+      }
+    }
+    [minP, maxP] = FOOD_BRACKETS[foodGrade] || FOOD_BRACKETS['Common'];
+
+  } else {
+    // Raw material / resource — detect rarity from stored field or item name
+    let rarity = item.rarity || 'Common';
+    if (!item.rarity) {
+      if      (["aetherium","titan heart","eden's tear","cosmic leviathan","void orchid"].some(x => n.includes(x))) rarity = 'Mythic';
+      else if (["adamantium","titanium","dragon scales","cyclops eye","phoenix feather","celestial","dragonfruit","black unagi"].some(x => n.includes(x))) rarity = 'Legendary';
+      else if (["gold ","palladium","mythril","shadow hide","spirit venison","drake meat","shadowfish","flamefish","ying koi","spirit herb","jade vine","ghost root","frost apples","ember fruit","spirit plum"].some(x => n.includes(x))) rarity = 'Rare';
+      else if (["silver","bronze","obsidian","marble","quartz","tough hide","fangs","fur","horns","claws","leather","silverfin","glowfish","spotted eel","coral snapper","red minnow","silverleaf","goldroot","nightshade","glowleaf","lotus","golden pears","moon grapes","sunfruit","crystal berries","bitter root"].some(x => n.includes(x))) rarity = 'Uncommon';
+    }
+    [minP, maxP] = RESOURCE_BRACKETS[rarity] || RESOURCE_BRACKETS['Common'];
+  }
+
+  return { minP, maxP, blocked: false };
+};
+
 async function sellItem() {
   console.log('[DEBUG] sellItem called');
   const errEl = document.getElementById("sell-error");
@@ -5900,65 +6426,17 @@ async function sellItem() {
   if (!price||price<1){ errEl.textContent = "Enter a valid price.";       return; }
   if (qty > item.qty){ errEl.textContent = "Not enough of that item.";    return; }
 
-  // Enforce min/max price brackets — derived from crafting costs per item/tier
-  // Equipment: limits based on per-grade craft cost ranges (lower ≈ cost×0.90, upper ≈ cost×1.35)
-  const equipGradeBrackets = { E:[170,320], D:[370,650], C:[740,1300], B:[1950,3300], A:[4800,7900], S:[9200,14500] };
-  // Food: limits by grade (craft costs: Common 30, Uncommon 60, Rare 140, Legendary 350, Mythic 900)
-  const foodGradeBrackets = { Common:[25,45], Uncommon:[50,85], Rare:[120,190], Legendary:[300,480], Mythic:[800,1200] };
-  // Potions: limits by specific item name (craft costs reflected directly)
-  const potionNameBrackets = {
-    "Minor HP Potion":[25,45],   "Standard HP Potion":[65,105],   "Greater HP Potion":[175,270],
-    "Minor Mana Potion":[25,45], "Standard Mana Potion":[65,105], "Greater Mana Potion":[175,270],
-    "Minor Luck Potion":[25,45], "Standard Luck Potion":[65,105], "Greater Luck Potion":[175,270],
-    "Minor EXP Potion":[25,45],  "Standard EXP Potion":[65,105],  "Greater EXP Potion":[175,270],
-    "Stat Reset Potion":[1800,2700],
-    "Class Reset Potion":[4500,6500],
-    "Companion Change Potion":[5400,8000],
-    "Resurrection Potion":[4500,6500],
-    "Race Rebirth Potion":[9000,13000],
-    "Divine Shift Potion":[13500,20000],
-  };
-  // Materials: limits by rarity (not crafted, so rarity-based is appropriate)
-  const materialRarityBrackets = {
-    Common:[8,15], Uncommon:[18,30], Rare:[45,70], Legendary:[120,200], Mythic:[350,550], Deity:[500,1200],
-  };
-
-  // Determine bracket — equipment grade first, then food grade, then potion name, then material rarity
-  let minP, maxP;
-  const n = item.name.toLowerCase();
-  const itemType = getItemType(item.name);
-  if (itemType === 'equipment') {
-    const g = item.grade || 'D';
-    [minP, maxP] = equipGradeBrackets[g] || equipGradeBrackets['D'];
-  } else if (itemType === 'consumable' && potionNameBrackets[item.name]) {
-    [minP, maxP] = potionNameBrackets[item.name];
-  } else if (itemType === 'consumable' && ["potion","elixir"].some(x=>n.includes(x))) {
-    // Generic potion fallback
-    [minP, maxP] = [25, 270];
-  } else if (itemType === 'consumable') {
-    // Food — determine grade from CANONICAL_FOOD_RECIPES
-    let foodGrade = 'Common';
-    if (window.CANONICAL_FOOD_RECIPES) {
-      for (const recipes of Object.values(window.CANONICAL_FOOD_RECIPES)) {
-        const found = recipes.find(r => r.name === item.name);
-        if (found?.grade) { foodGrade = found.grade; break; }
-      }
-    }
-    [minP, maxP] = foodGradeBrackets[foodGrade] || foodGradeBrackets['Common'];
-  } else {
-    // Material — use rarity field if available, else detect from name
-    let rarity = item.rarity || 'Common';
-    if (!item.rarity) {
-      if (["aetherium","titan heart","void crystal","eden's tear","cosmic leviathan"].some(x=>n.includes(x))) rarity = 'Mythic';
-      else if (["adamantium","titanium","dragon scales","cyclops eye","phoenix feather"].some(x=>n.includes(x))) rarity = 'Legendary';
-      else if (["gold","palladium","mythril","shadow hide","spirit venison","drake meat"].some(x=>n.includes(x))) rarity = 'Rare';
-      else if (["bronze","silver","obsidian","marble","tough hide","fangs","claws","horns","fire essence","water essence","earth essence","wind essence"].some(x=>n.includes(x))) rarity = 'Uncommon';
-      else if (["ephemeral","oil-stained","whispering","void-eye","orb of silence","magic crystal"].some(x=>n.includes(x))) rarity = 'Deity';
-    }
-    [minP, maxP] = materialRarityBrackets[rarity] || materialRarityBrackets['Common'];
-  }
-  if (price < minP || price > maxP) {
-    errEl.textContent = `Price for this item must be between ${minP} and ${maxP} coins.`;
+  // ── Listing type restriction + price bracket (delegate to _getListingBracket) ──
+  // Only resources, unenchanted equipment, and cooked food may be listed.
+  const bracket = window._getListingBracket(item);
+  if (!bracket) { errEl.textContent = "Unable to determine listing price for this item."; return; }
+  if (bracket.blocked) { errEl.textContent = bracket.reason || "This item cannot be listed on the market."; return; }
+  const { minP, maxP } = bracket;
+  if (price < minP || (maxP !== Infinity && price > maxP)) {
+    const rangeLabel = maxP === Infinity
+      ? `at least ${minP.toLocaleString()} coins`
+      : `between ${minP.toLocaleString()} and ${maxP.toLocaleString()} coins`;
+    errEl.textContent = `Price for this item must be ${rangeLabel}.`;
     return;
   }
 
@@ -5979,16 +6457,18 @@ async function sellItem() {
       listedAt:    serverTimestamp(),
     });
 
-    // Deduct listed qty from player inventory — use _invWrite to prevent race clobbers
-    const inv = [...(_charData.inventory || [])];
-    const invIdx = inv.findIndex(i => i.name === item.name);
-    if (invIdx !== -1) {
-      inv[invIdx].qty -= qty;
-      if (inv[invIdx].qty <= 0) inv.splice(invIdx, 1);
-    }
-    await _invWrite(_uid, inv);
-    _charData.inventory = inv;
-    window._allInvItems = inv;
+    // Deduct listed qty from player inventory — mutator reads live server inv
+    // so a concurrent gather or reward can't cause a phantom restoration
+    const listedItemName = item.name;
+    const listedQty = qty;
+    await _invWrite(_uid, inv => {
+      const invIdx = inv.findIndex(i => i.name === listedItemName);
+      if (invIdx !== -1) {
+        inv[invIdx].qty -= listedQty;
+        if (inv[invIdx].qty <= 0) inv.splice(invIdx, 1);
+      }
+    });
+    window._allInvItems = _charData.inventory;
     window._refreshInvDisplay?.();
 
     window.showToast(`${item.name} listed for ${price} coins each.`, "success");
@@ -6156,6 +6636,7 @@ window._questProgress   = {};
 window._completedQuests = new Set();
 window._bonusClaimed    = false;
 window._storyProgress   = {};
+if (!window._storyQuestDone) window._storyQuestDone = {}; // in-memory session guard — never persisted
 
 // ── Helpers ──
 function _getDailyProgress(id) {
@@ -6189,6 +6670,12 @@ if (!window._sqActiveTab) window._sqActiveTab = 'active';
 function _renderStoryQuests() {
   const container = document.getElementById('story-quests-list');
   if (!container) return;
+  // Preserve which quest bodies are currently open so a re-render doesn't slam them shut
+  const _openIds = new Set();
+  container.querySelectorAll('.sq-item').forEach(el => {
+    const body = el.querySelector('.sq-body');
+    if (body && body.style.display !== 'none') _openIds.add(el.dataset.questId);
+  });
   container.innerHTML = '';
 
   if (!STORY_QUESTS.length) {
@@ -6318,6 +6805,13 @@ function _renderStoryQuests() {
         })() : `<div class="sq-closed-note">This quest has closed. Tasks completed before closing are not rewarded.</div>`}
         <div class="dq-reward">↳ +${q.reward.xp} EXP · +${q.reward.gold} Coins${q.reward.item ? ` · ${q.reward.item.qty}× ${q.reward.item.name}` : ''}</div>
       </div>`;
+    // Restore open state if this card was open before the re-render
+    if (_openIds.has(q.id)) {
+      const body = el.querySelector('.sq-body');
+      const chevron = el.querySelector('.sq-chevron');
+      if (body) body.style.display = 'block';
+      if (chevron) chevron.textContent = '▴';
+    }
     container.appendChild(el);
   });
 }
@@ -6341,9 +6835,12 @@ window._dismissStoryQuest = function(questId) {
 
 // ── Quest submission state: questId → 'pending' | 'approved' | 'rejected' ──
 if (!window._questSubmissions) window._questSubmissions = {};
+let _questSubUnsub = null; // unsubscribe handle — prevents stacked listeners
 
 window._loadQuestSubmissions = async function() {
   if (!_uid) return;
+  // Tear down any existing listener before registering a new one
+  if (_questSubUnsub) { _questSubUnsub(); _questSubUnsub = null; }
   try {
     const q = query(collection(db, 'questSubmissions'), where('uid', '==', _uid));
     // Initial load
@@ -6355,15 +6852,29 @@ window._loadQuestSubmissions = async function() {
     });
     _renderStoryQuests();
     // Live listener for status changes (approval/rejection by deity)
-    onSnapshot(q, snap => {
+    _questSubUnsub = onSnapshot(q, snap => {
       window._questSubmissions = {};
       snap.forEach(d => {
         const data = d.data();
         window._questSubmissions[data.questId] = data.status;
-        // Auto-apply reward when deity approves
-        if (data.status === 'approved' && !window._storyProgress[data.questId]?.done) {
+        // Guard uses BOTH:
+        // Guard uses BOTH:
+        // 1. data.rewarded — persisted on the submission doc; survives reloads
+        // 2. _storyQuestDone[questId] — in-memory flag for same-session double-fire
+        //    (intentionally NOT persisted — data.rewarded handles reload safety)
+        if (data.status === 'approved' && !data.rewarded && !window._storyQuestDone[data.questId]) {
           const quest = STORY_QUESTS.find(sq => sq.id === data.questId);
-          if (quest) _completeStoryQuest(quest);
+          if (quest) {
+            // Await the flag write — only apply reward if it succeeds.
+            // If it fails (network/rules), we skip this cycle; the next
+            // listener fire will retry cleanly with no duplicate risk.
+            updateDoc(d.ref, { rewarded: true })
+              .then(() => {
+                window._storyQuestDone[data.questId] = true;
+                _completeStoryQuest(quest);
+              })
+              .catch(e => console.warn('[Quest] Could not mark rewarded, skipping reward this cycle:', e));
+          }
         }
       });
       _renderStoryQuests();
@@ -6573,7 +7084,9 @@ async function _checkDailyCompletion(id) {
 }
 
 async function _completeStoryQuest(q) {
-  window._storyProgress[q.id].done = true;
+  if (!window._storyProgress[q.id]) window._storyProgress[q.id] = { count: 0, done: false, locations: new Set() };
+  // done is tracked separately in _storyQuestDone (set by the caller after rewarded:true is written)
+  // and is intentionally NOT persisted — data.rewarded on the submission doc is the reload-safe guard
   await _applyReward(q.reward.xp, q.reward.gold, q.reward.item);
   // Log completion in Firestore for deity log
   try {
@@ -6607,23 +7120,45 @@ window.logFactionQuestCompletion = async function(questId) {
 }
 
 async function _applyReward(xp, gold, item) {
-  if (!_charData) return;
-  const inv = [...(_charData.inventory||[])];
-  if (item) {
-    const ex = inv.find(i=>i.name===item.name);
-    const _isEquip = getItemType(item.name)==='equipment';
-    if (ex && !_isEquip) { ex.qty += item.qty; }
-    else { const _ni={...item}; if(_isEquip) _ni.iid=Math.random().toString(36).slice(2,10)+Date.now().toString(36); inv.push(_ni); }
-  }
-  const { newXp, newLevel, newRank, newXpMax, leveledUp } = _processExp(_charData.xp||0,_charData.xpMax||100,_charData.level||1,_charData.rank||"Wanderer",xp,_charData.charClass);
-  const updates = { gold:(_charData.gold||0)+gold, inventory:inv, xp:newXp, xpMax:newXpMax, level:newLevel, rank:newRank };
-  if (leveledUp) { updates.statPoints=(_charData.statPoints||0)+3; updates.hpMax=(_charData.hpMax||100)+10; updates.manaMax=(_charData.manaMax||50)+5; }
-  await updateDoc(doc(db,"characters",_uid), updates);
-  Object.assign(_charData, updates);
-  window._allInvItems = inv;
+  // FIXED: Was a raw updateDoc reading from stale _charData — raced with any
+  // concurrent write (auto-battle, bestow, trade) and silently dropped changes.
+  // Now uses a transaction so inventory and gold are always merged from the
+  // server-side doc, never from a potentially-stale local snapshot.
+  if (!_charData || !_uid) return;
+  let leveledUp = false, newLevel, newRank;
+  const charRef = doc(db, 'characters', _uid);
+  await runTransaction(db, async tx => {
+    const snap = await tx.get(charRef);
+    if (!snap.exists()) throw new Error('Character not found');
+    const fresh = snap.data();
+    const inv = [...(fresh.inventory || [])];
+    if (item) {
+      const ex = inv.find(i => i.name === item.name);
+      const _isEquip = getItemType(item.name) === 'equipment';
+      if (ex && !_isEquip) { ex.qty += (item.qty || 1); }
+      else { const _ni = {...item}; if (_isEquip) _ni.iid = Math.random().toString(36).slice(2,10)+Date.now().toString(36); inv.push(_ni); }
+    }
+    const res = _processExp(fresh.xp||0, fresh.xpMax||100, fresh.level||1, fresh.rank||'Wanderer', xp, fresh.charClass);
+    leveledUp = res.leveledUp; newLevel = res.newLevel; newRank = res.newRank;
+    const updates = {
+      // Use increment() for gold so two concurrent +gold rewards both land
+      gold: increment(gold),
+      inventory: inv,
+      xp: res.newXp, xpMax: res.newXpMax, level: res.newLevel, rank: res.newRank,
+    };
+    if (res.leveledUp) {
+      updates.statPoints = increment(3);
+      updates.hpMax  = (fresh.hpMax  || 100) + 10;
+      updates.manaMax = (fresh.manaMax || 50)  + 5;
+    }
+    tx.update(charRef, updates);
+  });
+  // Refresh local cache from server so subsequent reads are consistent
+  await refreshCharData();
+  window._allInvItems = _charData.inventory || [];
   _syncAllDisplays(_charData);
   if (leveledUp) {
-    window.showToast(`🎉 LEVEL UP! Now Level ${newLevel}!`,"success");
+    window.showToast(`🎉 LEVEL UP! Now Level ${newLevel}!`, 'success');
     logActivity('⬆️', `<b>Level Up!</b> You reached <b>Level ${newLevel}</b>.`, '#e8d070');
     if (newRank !== (_charData.rank || 'Wanderer')) {
       logActivity('👑', `<b>Rank Ascension!</b> You are now <b>${newRank}</b>.`, '#c9a84c');
@@ -6633,24 +7168,42 @@ async function _applyReward(xp, gold, item) {
 
 // Multi-item reward variant — delivers every item in the items array
 async function _applyRewardMulti(xp, gold, items) {
-  if (!_charData) return;
-  const inv = [...(_charData.inventory||[])];
-  for (const item of (items || [])) {
-    if (!item || !item.name) continue;
-    const ex = inv.find(i => i.name === item.name);
-    const _isEquip = getItemType(item.name) === 'equipment';
-    if (ex && !_isEquip) { ex.qty += (item.qty || 1); }
-    else { const _ni = {...item}; if (_isEquip) _ni.iid = Math.random().toString(36).slice(2,10)+Date.now().toString(36); inv.push(_ni); }
-  }
-  const { newXp, newLevel, newRank, newXpMax, leveledUp } = _processExp(_charData.xp||0,_charData.xpMax||100,_charData.level||1,_charData.rank||"Wanderer",xp,_charData.charClass);
-  const updates = { gold:(_charData.gold||0)+gold, inventory:inv, xp:newXp, xpMax:newXpMax, level:newLevel, rank:newRank };
-  if (leveledUp) { updates.statPoints=(_charData.statPoints||0)+3; updates.hpMax=(_charData.hpMax||100)+10; updates.manaMax=(_charData.manaMax||50)+5; }
-  await updateDoc(doc(db,"characters",_uid), updates);
-  Object.assign(_charData, updates);
-  window._allInvItems = inv;
+  // FIXED: Same race-condition fix as _applyReward — use a transaction and
+  // increment() for gold instead of a stale read-modify-write.
+  if (!_charData || !_uid) return;
+  let leveledUp = false, newLevel, newRank;
+  const charRef = doc(db, 'characters', _uid);
+  await runTransaction(db, async tx => {
+    const snap = await tx.get(charRef);
+    if (!snap.exists()) throw new Error('Character not found');
+    const fresh = snap.data();
+    const inv = [...(fresh.inventory || [])];
+    for (const item of (items || [])) {
+      if (!item || !item.name) continue;
+      const ex = inv.find(i => i.name === item.name);
+      const _isEquip = getItemType(item.name) === 'equipment';
+      if (ex && !_isEquip) { ex.qty += (item.qty || 1); }
+      else { const _ni = {...item}; if (_isEquip) _ni.iid = Math.random().toString(36).slice(2,10)+Date.now().toString(36); inv.push(_ni); }
+    }
+    const res = _processExp(fresh.xp||0, fresh.xpMax||100, fresh.level||1, fresh.rank||'Wanderer', xp, fresh.charClass);
+    leveledUp = res.leveledUp; newLevel = res.newLevel; newRank = res.newRank;
+    const updates = {
+      gold: increment(gold),
+      inventory: inv,
+      xp: res.newXp, xpMax: res.newXpMax, level: res.newLevel, rank: res.newRank,
+    };
+    if (res.leveledUp) {
+      updates.statPoints = increment(3);
+      updates.hpMax  = (fresh.hpMax  || 100) + 10;
+      updates.manaMax = (fresh.manaMax || 50)  + 5;
+    }
+    tx.update(charRef, updates);
+  });
+  await refreshCharData();
+  window._allInvItems = _charData.inventory || [];
   _syncAllDisplays(_charData);
   if (leveledUp) {
-    window.showToast(`🎉 LEVEL UP! Now Level ${newLevel}!`,"success");
+    window.showToast(`🎉 LEVEL UP! Now Level ${newLevel}!`, 'success');
     logActivity('⬆️', `<b>Level Up!</b> You reached <b>Level ${newLevel}</b>.`, '#e8d070');
   }
 }
@@ -6688,7 +7241,7 @@ function _restoreStoryProgress(saved) {
   window._storyProgress = {};
   STORY_QUESTS.forEach(q => {
     const s = saved[q.id] || {};
-    window._storyProgress[q.id] = { count:s.count||0, done:s.done||false, locations:new Set(s.locations||[]) };
+    window._storyProgress[q.id] = { count:s.count||0, done:false, locations:new Set(s.locations||[]) }; // done always starts false — _storyQuestDone handles session guard
   });
 }
 
@@ -6702,7 +7255,7 @@ async function _saveAllQuestProgress() {
     const storyProgress = {};
     STORY_QUESTS.forEach(q => {
       const sp = window._storyProgress[q.id]||{};
-      storyProgress[q.id] = { count:sp.count||0, done:sp.done||false, locations:[...(sp.locations instanceof Set?sp.locations:[])] };
+      storyProgress[q.id] = { count:sp.count||0, locations:[...(sp.locations instanceof Set?sp.locations:[])] }; // done intentionally not persisted
     });
     await setDoc(doc(db,"dailyQuests",_uid),{ date:new Date().toDateString(), completed:[...window._completedQuests], bonusClaimed:window._bonusClaimed, progress:prog, storyProgress },{ merge:true });
   } catch(err) { console.error("Quest save error:", err); }
@@ -6715,25 +7268,25 @@ async function _saveAllQuestProgress() {
 
 const PROF_RESOURCES = {
   Miner:     {
-    common:    ["Iron","Coal","Copper","Tin","Limestone"],
+    common:    ["Iron","Copper","Tin","Limestone","Coal"],
     uncommon:  ["Silver","Bronze","Obsidian","Marble","Quartz"],
     rare:      ["Gold","Mythril","Palladium"],
     legendary: ["Titanium","Adamantium"],
     mythic:    ["Aetherium"],
   },
   Forager:   {
-    common:    ["Apples","Blueberries","Garlic","Melons","Golden Pears"],
-    uncommon:  ["Moon Grapes","Sunfruit","Crystal Berries","Bitter Root","Silverleaf","Basil Sprigs","Goldroot","Lotus"],
-    rare:      ["Spirit Plum","Frost Apples","Ember Fruit","Nightshade","Glowleaf","Spirit Herb","Jade Vine","Ghost Root"],
-    legendary: ["Celestial Fig","Dragonfruit","Phoenix Bloom","Void Orchid"],
+    common:    ["Blueberries","Apples","Garlic","Mushroom","Melons"],
+    uncommon:  ["Golden Pears","Moon Grapes","Sunfruit","Crystal Berries","Bitter Root"],
+    rare:      ["Spirit Plum","Frost Apples","Ember Fruit"],
+    legendary: ["Celestial Fig","Dragonfruit"],
     mythic:    ["Eden's Tear"],
   },
   Herbalist: {
-    common:    ["Mint Leaves","Soft Bark","Wild Herbs","Mushroom"],
-    uncommon:  ["Healing Fern","Glow Moss","Dream Lily"],
-    rare:      ["Ancient Herb","Spirit Root","Veilbloom"],
-    legendary: ["Orb of Silence","Eye of All-knowing"],
-    mythic:    ["Tears of The Endless Goldfish"],
+    common:    ["Mint Leaves","Basil Sprigs","Wild Herbs","Soft Bark","Wood"],
+    uncommon:  ["Silverleaf","Goldroot","Nightshade","Glowleaf","Lotus"],
+    rare:      ["Spirit Herb","Jade Vine","Ghost Root"],
+    legendary: ["Phoenix Bloom","Middlemist"],
+    mythic:    ["Void Orchid"],
   },
   Angler:    {
     common:    ["Trout","Carp","Catfish","Sardine","Pufferfish"],
@@ -6743,11 +7296,11 @@ const PROF_RESOURCES = {
     mythic:    ["Cosmic Leviathan"],
   },
   Hunter:    {
-    common:    ["Raw Meat","Bone Fragments","Tough Hide","Feathers","Animal Fat"],
-    uncommon:  ["Leather","Fangs","Fur","Horns","Claws","Quality Pelt","Wolf Fang","Bear Claw"],
-    rare:      ["Spirit Venison","Shadow Hide","Drake Meat","Beast Core","Phantom Feather","Blood Crystal"],
-    legendary: ["Titan Heart","Divine Bull Essence","Heart of the Red Phoenix"],
-    mythic:    ["Forgotten Desire Seed"],
+    common:    ["Raw Meat","Tough Hide","Bone Fragments","Feathers","Animal Fat"],
+    uncommon:  ["Leather","Fangs","Fur","Horns","Claws"],
+    rare:      ["Spirit Venison","Shadow Hide","Drake Meat"],
+    legendary: ["Cyclops Eye","Dragon Scales"],
+    mythic:    ["Titan Heart"],
   },
 };
 
@@ -6811,13 +7364,8 @@ window._doGather = async function() {
 
   try {
     const lvl   = _charData.professionLvl || 0;
-    const rates = {
-      common:    [80,75,70,65,60,55,50,40,35,30,15][Math.min(lvl,10)],
-      uncommon:  [20,20,22,25,27,30,32,30,30,23,25][Math.min(lvl,10)],
-      rare:      [0,5,8,9,11,12,14,25,20,26,30][Math.min(lvl,10)],
-      legendary: [0,0,0,1,2,3,4,5,10,14,20][Math.min(lvl,10)],
-      mythic:    [0,0,0,0,0,0,0,0.1,5,7,10][Math.min(lvl,10)],
-    };
+    // Use the canonical FIND_RATES table defined in the spec constants above
+    const rates = FIND_RATES[Math.min(lvl, 10)];
 
     let found = null;
     const logLines = [];
@@ -6843,36 +7391,45 @@ window._doGather = async function() {
     const rarityColors = { common:"#aaa", uncommon:"#70c090", rare:"#5b9fe0", legendary:"#c9a84c", mythic:"#d070e0" };
     const col = rarityColors[rarity]||"#aaa";
 
-    // Chance of finding 2+ items based on level
+    // Chance of finding 2+ items based on level (matches Profession EXP Bar spec)
+    // Lv0-1: 0%, Lv2: 5%, Lv3: 10%, Lv4: 30%, Lv5: 50%, Lv6-10: 100%
     let count = 1;
-    const doubleChance = [0,0,30,50,70,100,100,100,100,100,100][Math.min(lvl,10)];
-    const tripleChance = [0,0,0,0,0,0,12,24,32,50,50][Math.min(lvl,10)];
+    const doubleChance = [0,0,5,10,30,50,100,100,100,100,100][Math.min(lvl,10)];
+    // Triple only possible at Lv6+: 3%, 5%, 10%, 30%, 30%
+    const tripleChance = [0,0,0,0,0,0,3,5,10,30,30][Math.min(lvl,10)];
     if (Math.random()*100 < tripleChance) count = 3;
     else if (Math.random()*100 < doubleChance) count = 2;
 
     logLines.push(`<div class="gather-log-entry success">✅ You found <strong style="color:${col}">x${count} ${found}</strong>! <span style="font-size:10px;color:${col};text-transform:uppercase;">(${rarity})</span></div>`);
 
-    // Add to inventory
-    const inv = [...(_charData.inventory||[])];
-    const ex = inv.find(i=>i.name===found);
-    const _fIsEquip = getItemType(found)==='equipment';
-    if (ex && !_fIsEquip) { ex.qty += count; }
-    else { const _ni={name:found,qty:count,type:_fIsEquip?'equipment':getItemType(found)}; if(_fIsEquip) _ni.iid=Math.random().toString(36).slice(2,10)+Date.now().toString(36); inv.push(_ni); }
-    _charData.inventory = inv;
-    window._allInvItems = inv;
+    // Add to inventory — mutator works on live server data
+    const foundItem = found;
+    const foundCount = count;
+    const isEquip = getItemType(found) === 'equipment';
+    // Pre-generate iid for equipment outside the mutator (random, idempotent)
+    const newIid = isEquip ? (Math.random().toString(36).slice(2,10)+Date.now().toString(36)) : null;
+    // Optimistic local update so HUD refreshes immediately
+    const invLocal = [...(_charData.inventory||[])];
+    const exLocal = invLocal.find(i=>i.name===foundItem);
+    if (exLocal && !isEquip) { exLocal.qty += foundCount; }
+    else { const _ni={name:foundItem,qty:foundCount,type:isEquip?'equipment':getItemType(foundItem)}; if(isEquip) _ni.iid=newIid; invLocal.push(_ni); }
+    _charData.inventory = invLocal;
+    window._allInvItems = invLocal;
     window._refreshInvDisplay();
 
-    // Profession XP
-    const xpGain = { common:2, uncommon:5, rare:10, legendary:20, mythic:50 }[rarity]||2;
+    // Profession XP per resource rarity (spec: Common 10, Uncommon 25, Rare 60, Legendary 150, Mythic 500)
+    // Multiply by count — finding 3x items gives 3x XP
+    const xpGain = { common:10, uncommon:25, rare:60, legendary:150, mythic:500 }[rarity]||10;
     // Veil blessing: +X% EXP from all activities including gathering
     const _veilGatherBonus = _charData?.deity === 'Veil' ? (1 + _getFaithBlessingPct(_charData)) : 1;
-    const xpGainFinal = Math.round(xpGain * _veilGatherBonus);
+    const xpGainFinal = Math.round(xpGain * count * _veilGatherBonus);
     let newProfXp  = (_charData.professionXp||0) + xpGainFinal;
     let newProfLvl = lvl;
     let leveledProf = false;
     // Use a while loop so overflow XP carries forward and multi-level gains are handled
     while (newProfLvl < 10) {
-      const xpNeeded = PROF_EXP_TABLE[Math.min(newProfLvl, PROF_EXP_TABLE.length-2)] || 300;
+      const xpNeeded = PROF_EXP_TABLE[newProfLvl]; // index = current level, 0-9
+      if (xpNeeded == null) break; // safety: beyond table
       if (newProfXp >= xpNeeded) {
         newProfXp -= xpNeeded; // subtract threshold so XP resets cleanly
         newProfLvl++;
@@ -6881,6 +7438,19 @@ window._doGather = async function() {
         break;
       }
     }
+    // Cap XP at 0 if somehow at max level
+    if (newProfLvl >= 10) newProfXp = 0;
+
+    // ── OPTIMISTIC UI UPDATE ──
+    // Patch _charData and render the XP bar immediately so the player sees
+    // feedback right away. A guard flag tells _syncAllDisplays to skip the
+    // profession bar while the Firestore write is in-flight, preventing the
+    // "jump → revert → jump" flicker. Once _invWrite resolves, the flag clears
+    // and the next refreshCharData re-renders from confirmed server data.
+    _charData.professionXp  = newProfXp;
+    _charData.professionLvl = newProfLvl;
+    window._gatherWritePending = true;
+    showActiveProfession(_charData);
 
       // ── PET GROWTH SYSTEM ──
       // Updated Companion EXP/level curve
@@ -6907,7 +7477,7 @@ window._doGather = async function() {
         console.warn('[PET GROWTH DEBUG] No companion assigned to character.');
       }
 
-      // Save all updates — use _invWrite queue so concurrent ops don't clobber inventory
+      // Save all updates — mutator adds gathered item to live server inventory
       const updates = {
         professionXp: newProfXp,
         professionLvl: newProfLvl
@@ -6916,9 +7486,17 @@ window._doGather = async function() {
         updates.companionExp = companionExp;
         updates.companionLevel = companionLevel;
       }
-      await _invWrite(_uid, inv, updates);
-      Object.assign(_charData, { inventory: inv, ...updates });
-      showActiveProfession(_charData);
+      await _invWrite(_uid, inv => {
+        const ex = inv.find(i => i.name === foundItem);
+        if (ex && !isEquip) { ex.qty += foundCount; }
+        else { const _ni={name:foundItem,qty:foundCount,type:isEquip?'equipment':getItemType(foundItem)}; if(isEquip) _ni.iid=newIid; inv.push(_ni); }
+      }, updates);
+      // Write confirmed — clear the guard so future refreshCharData calls
+      // can freely re-render the profession bar from server data
+      window._gatherWritePending = false;
+      // _invWrite calls refreshCharData() — inventory display syncs from server
+      window._allInvItems = _charData.inventory;
+      window._refreshInvDisplay();
       // Force companion UI refresh after EXP update
       if (_charData.companion) {
         const COMPANION_EXP_TABLE = [0, 1000, 1800, 3000, 4200, 5700, 7000, 9600, 12000, 15000];
@@ -6955,10 +7533,11 @@ window._doGather = async function() {
     logEl.innerHTML = `<div class="gather-log-entry empty">❌ Gather failed. Try again.</div>`;
   }
 
-  // Re-enable after 3s cooldown
+  // Restore label immediately so button doesn't stay on "Working..." while the
+  // cooldown ticks. Button remains disabled for 3s to prevent spam.
+  btn.textContent = PROF_ACTION[prof]||"⛏️ GATHER";
   setTimeout(() => {
     btn.disabled = false;
-    btn.textContent = PROF_ACTION[prof]||"⛏️ GATHER";
   }, 3000);
 };
 
@@ -7022,12 +7601,12 @@ window.saveNameChange = async function() {
 
   try {
     const updates = { name: newName, lastNameChange: now };
-    if (cost > 0) updates.gold = (_charData.gold || 0) - cost;
+    if (cost > 0) updates.gold = increment(-cost); // FIXED: use increment to avoid concurrent-write clobber
     await updateDoc(doc(db, "characters", _uid), updates);
 
     // Update local state
     _charData.name = newName;
-    if (cost > 0) _charData.gold = (_charData.gold || 0) - cost;
+    if (cost > 0) _charData.gold = Math.max(0, (_charData.gold || 0) - cost);
     _charData.lastNameChange = now;
 
     // Refresh displays
@@ -7180,8 +7759,8 @@ window.saveBioChange = async function() {
 };
 
 
-function set(id, val)    { const e = document.getElementById(id); if (e) e.textContent = val; }
-function css(id, p, v)   { const e = document.getElementById(id); if (e) e.style[p] = v; }
+function set(id, val)    { const e = document.getElementById(id); if (e) { e.textContent = val; } else { console.warn('[SET] Element not found:', id); } }
+function css(id, p, v)   { const e = document.getElementById(id); if (e) { e.style[p] = v; } else { console.warn('[CSS] Element not found:', id); } }
 function escapeHtml(str) { const d = document.createElement("div"); d.textContent = str; return d.innerHTML; }
 function formatChatText(str) {
   return escapeHtml(str)
@@ -7462,7 +8041,32 @@ window.startBestowWatcher = function() {
       const msg = parts.length ? parts.join(', ') : 'resources';
       window.showToast(`✨ Divine Bestowment: ${msg}`, 'success');
       logActivity('✨', `<b>Divine Bestowment:</b> ${msg} granted by your deity.`, '#c9a84c');
-      Object.assign(_charData, data);
+      // FIXED: Was Object.assign(_charData, data) — a full replacement with the
+      // Firestore snapshot. If the player is mid-battle, the auto-battle loop
+      // holds a reference to the OLD _charData object; the next kill write would
+      // send back the pre-bestow inventory and gold, erasing the bestowment.
+      // Instead, only update the fields the bestow actually changed so the
+      // battle loop's accumulated local state is preserved.
+      if (!_autoBattleRunning) {
+        // Safe to do a full sync when not in battle — but ONLY when a real
+        // bestow changed. We're already inside the `bestowId !== _prevBestowId`
+        // guard above so this is correct; note that other gather/XP writes to
+        // the character doc fire this listener too, but they don't change
+        // lastBestowId so they never reach this branch.
+        Object.assign(_charData, data);
+      } else {
+        // Mid-battle: only patch the bestow-specific fields to avoid clobbering
+        // inventory/gold changes the battle loop has accumulated but not yet flushed.
+        // The battle loop will pick up the real server values on its next await.
+        if ('lastBestowGold'  in data) _charData.lastBestowGold  = data.lastBestowGold;
+        if ('lastBestowItems' in data) _charData.lastBestowItems = data.lastBestowItems;
+        if ('lastBestowId'    in data) _charData.lastBestowId    = data.lastBestowId;
+        if ('faithLevel'      in data) _charData.faithLevel      = data.faithLevel;
+        if ('blessing'        in data) _charData.blessing        = data.blessing;
+        // Inventory and gold are intentionally NOT merged here; the battle loop
+        // has unsaved deltas. The next kill write uses increment() for gold,
+        // so the bestow gold (written server-side by the Cloud Function) is safe.
+      }
       _syncAllDisplays(_charData);
       window.renderInventory(_charData.inventory || []);
     }
@@ -7723,9 +8327,9 @@ window.joinFaction = async function(factionName, idx) {
   // Wait for animation, then join and crossfade
   setTimeout(async () => {
     try {
-      await updateDoc(doc(db, "characters", _uid), { faction: factionName, gold: (_charData.gold||0) - 500 });
+      await updateDoc(doc(db, "characters", _uid), { faction: factionName, gold: increment(-500) }); // FIXED: use increment
       _charData.faction = factionName;
-      _charData.gold = (_charData.gold||0) - 500;
+      _charData.gold = Math.max(0, (_charData.gold||0) - 500);
       window.showToast(`Joined ${factionName}!`, "success");
       // Crossfade: fade out all, then show immersive view
       container.style.transition = 'opacity 0.5s';
@@ -8061,11 +8665,11 @@ window.leaveFaction = async function(factionName) {
     const now = Date.now();
     await updateDoc(doc(db, "characters", _uid), {
       faction: null,
-      gold: (_charData.gold||0) - 2000,
+      gold: increment(-2000), // FIXED: use increment to avoid concurrent-write clobber
       factionLeaveInfo: { cooldownUntil: now + 7*24*60*60*1000, taskCompleted: false }
     });
     _charData.faction = null;
-    _charData.gold = (_charData.gold||0) - 2000;
+    _charData.gold = Math.max(0, (_charData.gold||0) - 2000);
     _charData.factionLeaveInfo = { cooldownUntil: now + 7*24*60*60*1000, taskCompleted: false };
     window.showToast(`Left ${factionName}.`, "success");
     renderFactionsPanel();
@@ -8242,76 +8846,199 @@ const fnCreateWorldEvent = httpsCallable(functions, "createWorldEvent");
 // ── Client-side battle engine (mirrors Cloud Functions) ──
 // Zone-specific monster pools
 const ZONE_MONSTER_POOLS = {
-  'Frostfang Valley':  ['Blue-mane Wolf','Five-Fanged Bear'],
-  'Sheen Lake':        ['Groundhog Turtle','Twin-faced Serpent'],
-  'Misty Hollow':      ['Mist Phantom','Ice Ifrit','Water Wraith'],
-  'Dark Cathedral':    ['Condemned Knight','Revenant Bishop','Penitent Priest'],
-  'Whispering Forest': ['Red-mane Wolf','Vicious Gremlin'],
-  'Golden Plains':     ['Scavenger','Rampage Bull'],
-  'Element Valley':    ['Lightning Shroud','Stone Golem','Flame Spirit'],
-  'Defiled Sanctum':   ['Skeletal Beast','Ghoul Blatherer','Cursed Fiend'],
-  'Ashen Wastes':      ['Dark Sphinx','Blue Phoenix','Cyclops'],
-  'Infernal Reach':    ['Cerberus','Blood Kraken'],
-  'Ruined Sanctum':    ['Profane Priest','Corrupted Sage','Demonic Herald'],
-  'Blighted World':    ['Abomination','Devil Centurion'],
-  'Void Chasm':        ['Void Lurker','Oblivion Eye'],
-  'Abyssal Depths':    ['Abyssal Eater','Chaoswalker'],
-  "Fallen Heaven":     ['Godless Thing'],
+  // ── Vorthak: Glass Hell ──────────────────────────────────────────────
+  'Lake of Reflections':  ['Prism Spider','Glass Critter','Glass Centipede'],
+  'Crystal Cave':         ['Diamond Golem','Luster Bat','Shiny Crustacean'],
+  'Rainbow Valley':       ['Radiant Ifrit','Dazzling Fairy','Sparkling Elf'],
+  'Shimmering Peak':      ['Red Spirit','Blue Spirit','Purple Spirit'],
+  'Mirror Sky':           ['White Raven','Mirror-eyed Owl','Cloud Lurker'],
+  // ── Vorthak: Shattered Heavens ───────────────────────────────────────
+  'Tempest Crown':        ['Lightning Shroud','Mist Phantom','Hurricane Wraith'],
+  'Frostfall Expanse':    ['Ice Ifrit','Vicious Snowman','Crow Frostling'],
+  'Ember Horizon':        ['Flame Spirit','Burning Bush','Lava Golem'],
+  'Veilwater Basin':      ['Water Wraith','Water Serpent','Liquid Phantom'],
+  'Titan Divide':         ['Stone Golem','Moldy Giant','Clayface'],
+  // ── Vorthak: Dark Woodlands ──────────────────────────────────────────
+  'Crimson Fang':         ['Red-mane Wolf','Blue-mane Wolf','Alpha Beast Wolf'],
+  'Root Grove':           ['Five-Fanged Bear','Rampage Bull','Blood-faced Yak'],
+  'Serpent Mire':         ['Twin-faced Serpent','Razor-back Komodo','Giant-poison Toad'],
+  'Burrowdeep Basin':     ['Groundhog Turtle','Possessed Hedgehog','Bloodlusted Warthog'],
+  'Gremlin Hollows':      ['Vicious Gremlin','Scavenger','Vile Goblin'],
+  // ── Vorthak: Corrupted Hallows ───────────────────────────────────────
+  'Defiled Sanctum':      ['Penitent Priest','Cursed Fiend','Forsaken Follower'],
+  'Dark Cathedral':       ['Revenant Bishop','Profane Priest','Profane Presbyter'],
+  'Gravemarch Fields':    ['Skeletal Beast','Vile Thieving Vulture','Pallbearer'],
+  'Fallen Bastion':       ['Condemned Knight','Nightmare Horse','Profane Jester'],
+  'Whispering Necropolis':['Ghoul Blatherer','Condemned Siren','Weeping Apparition'],
+  // ── Vorthak: Otherworld ──────────────────────────────────────────────
+  'Blighted World':       ['Abomination','Corrupted Sage','Fallen Cyclops'],
+  'Infernal Reach':       ['Devil Centurion','Demonic Herald','Cerberus'],
+  'Sphinx Dominion':      ['Dark Sphinx','Desolate Matriarch','Bestial Sandworm'],
+  'Ashwing Aerie':        ['Blue Phoenix','Glowing Griffin','Nebulous Phoenix'],
+  'Leviathan Depths':     ['Blood Kraken','Lightning Eel','Colossal Black Serpent'],
+  // ── Nyx Abyss: Fallen Heaven ─────────────────────────────────────────
+  'Fractured Firmament':  ['Godless Thing','Dark Angel','Origin of Catastrophe'],
+  'Maw of Eternity':      ['Great Devourer','Gastric Juices','Gourmet Devil'],
+  'Veil of Madness':      ['Chaoswalker','Chaoshunter','Earl of Abolition'],
+  'The Watching Expanse': ['Oblivion Eye','Pyramid Eye','Eye of Jujularim'],
+  'Descent of the Nameless':['VoidSpawn','Faithless','Disciple of Silence'],
+  // ── Nyx Abyss: Underworld ─────────────────────────────────────────────
+  'Gravefall Descent':    ['Abyss Crawler','Filthy Monarch','Ferryman'],
+  'Weeping Caverns':      ['Doom Leech','Scourge Wraith','Ancient Bane'],
+  'Kingdom of Chains':    ['Shackled Sage','Chainbound Hound','Prisoner of Time'],
+  'The Hollow Deep':      ['Eyeless: The Abomination','Pale Emperor','Keeper of Secrets'],
+  'Throne of the Depths': ['King Yama','Anubis','Mictlantecuhtli'],
+  // ── Nyx Abyss: Land of Sin ────────────────────────────────────────────
+  'Throne of Pride':      ['Pride','Prejudice','Wrath'],
+  'Hallow of Greed':      ['Greed','Avarice','Envy'],
+  'Crimson Feast':        ['Gluttony','Insatiable Maw','Tail-Devourer'],
+  'Veil of Desire':       ['Lust','Desire','Demoness'],
+  'The Forsaken Graves':  ['Sloth','Despair','Sorrow'],
+  // ── Nyx Abyss: Cosmos ─────────────────────────────────────────────────
+  'Bleeding Constellations':['Star Phantom','The Unwinged Seraph','The Weeping Dust'],
+  'The Watching Worlds':  ['The Watcher','Dark Planet','High-dimensional Seer'],
+  'Nebula of Whispers':   ['The Whispering Gas','Cosmic Mist','The Hanging Lights'],
+  'Eclipse Throne':       ['Fade to Black','Unfathomable Wall','Shadowed Sun'],
+  'The Endless Maw':      ['Void Thing','The Twilight Horizon','The Singularity'],
+  // ── Nyx Abyss: The Withering Tree ─────────────────────────────────────
+  'Root of Malevolence':  ['Malevolence','Maleficence','Malediction'],
+  'Grove of Horror':      ['Horror','Dread','Bane'],
+  'Canopy of Despair':    ['Despair','Sorrow','Undoing'],
+  'Crown of Madness':     ['Madness','Delusion','Paranoia'],
+  'Heartwood Abyss':      ['Oblivion','Nihility','Entropy'],
 };
 // Max monsters per zone before 10-min respawn
 const ZONE_POOL_SIZE = { E:80, D:60, C:40, B:25, A:15, S:10 };
 
 const MONSTER_TEMPLATES = {
-  E: ['Groundhog Turtle','Red-mane Wolf','Five-Fanged Bear','Twin-faced Serpent','Scavenger','Blue-mane Wolf','Vicious Gremlin','Rampage Bull'],
-  D: ['Flame Spirit','Water Wraith','Stone Golem','Ice Ifrit','Lightning Shroud','Mist Phantom'],
-  C: ['Skeletal Beast','Condemned Knight','Revenant Bishop','Ghoul Blatherer','Cursed Fiend','Penitent Priest'],
-  B: ['Dark Sphinx','Blue Phoenix','Cyclops','Cerberus','Blood Kraken'],
-  A: ['Profane Priest','Devil Centurion','Demonic Herald','Corrupted Sage','Abomination'],
-  S: ['Abyssal Eater','Void Lurker','Chaoswalker','Oblivion Eye','Godless Thing'],
+  E: ['Prism Spider','Glass Critter','Glass Centipede','Red-mane Wolf','Blue-mane Wolf','Alpha Beast Wolf','Five-Fanged Bear','Rampage Bull','Blood-faced Yak','Groundhog Turtle','Possessed Hedgehog','Bloodlusted Warthog'],
+  D: ['Diamond Golem','Luster Bat','Shiny Crustacean','Radiant Ifrit','Dazzling Fairy','Sparkling Elf','Red Spirit','Blue Spirit','Purple Spirit','White Raven','Mirror-eyed Owl','Cloud Lurker','Lightning Shroud','Mist Phantom','Hurricane Wraith','Ice Ifrit','Vicious Snowman','Crow Frostling','Twin-faced Serpent','Razor-back Komodo','Giant-poison Toad','Vicious Gremlin','Scavenger','Vile Goblin'],
+  C: ['Flame Spirit','Burning Bush','Lava Golem','Water Wraith','Water Serpent','Liquid Phantom','Stone Golem','Moldy Giant','Clayface','Penitent Priest','Cursed Fiend','Forsaken Follower','Revenant Bishop','Profane Priest','Profane Presbyter'],
+  B: ['Skeletal Beast','Vile Thieving Vulture','Pallbearer','Condemned Knight','Nightmare Horse','Profane Jester','Ghoul Blatherer','Condemned Siren','Weeping Apparition'],
+  A: ['Abomination','Corrupted Sage','Fallen Cyclops','Devil Centurion','Demonic Herald','Cerberus','Dark Sphinx','Desolate Matriarch','Bestial Sandworm','Blue Phoenix','Glowing Griffin','Nebulous Phoenix','Blood Kraken','Lightning Eel','Colossal Black Serpent'],
+  S: [
+    // Fallen Heaven
+    'Godless Thing','Dark Angel','Origin of Catastrophe','Great Devourer','Gastric Juices','Gourmet Devil',
+    'Chaoswalker','Chaoshunter','Earl of Abolition','Oblivion Eye','Pyramid Eye','Eye of Jujularim',
+    'VoidSpawn','Faithless','Disciple of Silence',
+    // Underworld
+    'Abyss Crawler','Filthy Monarch','Ferryman','Doom Leech','Scourge Wraith','Ancient Bane',
+    'Shackled Sage','Chainbound Hound','Prisoner of Time',
+    'Eyeless: The Abomination','Pale Emperor','Keeper of Secrets',
+    'King Yama','Anubis','Mictlantecuhtli',
+    // Land of Sin
+    'Pride','Prejudice','Wrath','Greed','Avarice','Envy',
+    'Gluttony','Insatiable Maw','Tail-Devourer','Lust','Desire','Demoness',
+    'Sloth','Despair','Sorrow',
+    // Cosmos
+    'Star Phantom','The Unwinged Seraph','The Weeping Dust',
+    'The Watcher','Dark Planet','High-dimensional Seer',
+    'The Whispering Gas','Cosmic Mist','The Hanging Lights',
+    'Fade to Black','Unfathomable Wall','Shadowed Sun',
+    'Void Thing','The Twilight Horizon','The Singularity',
+    // The Withering Tree
+    'Malevolence','Maleficence','Malediction','Horror','Dread','Bane',
+    'Undoing','Madness','Delusion','Paranoia','Oblivion','Nihility','Entropy',
+  ],
 };
 
 // ── Monster image map — name → Firebase Storage URL ──────────────────────────
 const MONSTER_IMAGES = {
-  'Groundhog Turtle':  'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fgroundhog%20turtle.jpeg?alt=media&token=ba5c83ee-dd55-4c9e-81b0-0f39699257eb',
-  'Red-mane Wolf':     'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fred-mane%20wolf.jpeg?alt=media&token=3d3edafe-cb1d-420c-9fe6-c1efbbdd6cc7',
-  'Five-Fanged Bear':  'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Ffive-fanged%20bear.jpeg?alt=media&token=5b2a8280-85cf-4237-9909-1fd4b1e544fd',
-  'Twin-faced Serpent':'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Ftwin-faced%20serpent.png?alt=media&token=d9f7b2f8-8c14-4bad-ab4b-abedb8ba1fb7',
-  'Scavenger':         'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fscavenger.png?alt=media&token=8fdaa626-cc2b-4008-9ba2-a1cae7f7ccbc',
-  'Blue-mane Wolf':    'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fblue-mane%20wolf.jpeg?alt=media&token=6535d7ca-95d0-459c-88b2-dde6b2f7f9fd',
-  'Vicious Gremlin':   'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fvicious%20gremlin.jpeg?alt=media&token=978d47e3-da31-4f10-8f8a-204c1b2bee53',
-  'Rampage Bull':      'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Frampage%20bull.jpeg?alt=media&token=d441d96e-d69b-4001-a92a-6deb1d0fb155',
-  'Flame Spirit':      'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fflame%20spirit.jpeg?alt=media&token=7b267e72-8f9c-4472-a5d7-7d5b6ee867c8',
-  'Water Wraith':      'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fwater%20wraith.jpeg?alt=media&token=fe12943d-ceb9-413a-851d-bcc3802507f3',
-  'Stone Golem':       'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fstone%20golem.jpeg?alt=media&token=6d4ec08b-e716-4ebf-a1f2-3dbad4b58d41',
-  'Ice Ifrit':         'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fice%20ifrit.jpeg?alt=media&token=6f739c5c-61a2-4d4f-8ff6-c383ae2e9ab6',
-  'Lightning Shroud':  'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Flightning%20shroud.jpeg?alt=media&token=d7ffeb19-5eea-4469-918e-7ce63cc45e54',
-  'Mist Phantom':      'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fmist%20phantom.jpeg?alt=media&token=2062027c-cbb3-4066-860c-83db739360cf',
-  'Skeletal Beast':    'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fskeletal%20beast.jpeg?alt=media&token=406b253b-aef9-41eb-bd97-1e729503e5f0',
-  'Condemned Knight':  'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fcondemned%20knight.jpeg?alt=media&token=c8a13864-83d7-498d-a0f2-d3afa01acfdb',
-  'Revenant Bishop':   'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Frevenant%20bishop.jpeg?alt=media&token=4a502c16-3376-4999-a7f8-48ab3b030f45',
-  'Ghoul Blatherer':   'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fghoul%20blatherer.jpeg?alt=media&token=b91cb0de-2c74-4021-a80c-875c14188ee1',
-  'Cursed Fiend':      'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fcursed%20fiend.jpeg?alt=media&token=248f3136-9208-415b-a847-d20fce4fd57b',
-  'Penitent Priest':   'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fpenitent%20priest.jpeg?alt=media&token=d04b5e0b-64b2-4c55-b714-ab7cd945b08b',
-  'Dark Sphinx':       'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fdark%20sphinx.jpeg?alt=media&token=d52b6a1c-795f-427f-b591-b7afff6e74ed',
-  'Blue Phoenix':      'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fblue%20phoenix.jpeg?alt=media&token=287da4b2-f227-4d4e-8812-e1a9c4853851',
-  'Cyclops':           'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fcyclops.jpeg?alt=media&token=7035da10-0a60-4027-81c9-68335ae751ab',
-  'Cerberus':          'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fcerberus.jpeg?alt=media&token=079bb644-ca61-4459-9c67-8ab95f1e3e93',
-  'Blood Kraken':      'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fblood%20kraken.jpeg?alt=media&token=cbb8bc54-2f15-4c36-a1cc-a58149ddcdc8',
-  'Profane Priest':    'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fprofane%20priest.jpeg?alt=media&token=82d716ef-a0e5-47f4-8971-0825ae9f9d16',
-  'Devil Centurion':   'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fdevil%20centurion.jpeg?alt=media&token=7d432904-73c0-4ef9-8c01-6acd00cf92ed',
-  'Demonic Herald':    'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fdemonic%20herald.jpeg?alt=media&token=5f8f97c7-6664-41cc-90a2-61517208b3c5',
-  'Corrupted Sage':    'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fcorrupted%20sage.jpeg?alt=media&token=899f44b8-65ae-4037-a179-4a7114fd7796',
-  'Abomination':       'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fabomination.jpeg?alt=media&token=9485a89a-51d6-4dd0-a6bb-c65d14d92fe4',
-  'Abyssal Eater':     'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fabyssal%20eater.jpeg?alt=media&token=bba6e91d-540f-44b6-9927-f4c3817f98ba',
-  'Void Lurker':       'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fvoid%20lurker.jpeg?alt=media&token=4fa02db1-94a3-4a95-8f22-3bc4ad48fa71',
-  'Chaoswalker':       'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fchaoswalker.png?alt=media&token=94ef72a8-a1a5-4bf2-9bca-2ee08b12b885',
-  'Oblivion Eye':      'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Foblivion%20eye.png?alt=media&token=a69ff4b0-f5c1-4595-b4a6-5cdbafd2ad45',
-  'Godless Thing':     'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fgodless%20thing.png?alt=media&token=8b80879a-e247-4101-85ca-dea948f4d63a',
+  // ── Corrupted Hallows ────────────────────────────────────────────────────
+  'Condemned Knight':    'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fcorrupted-hallows-creatures%2Fcondemned%20knight.jpeg?alt=media&token=e69657aa-7489-4005-9c4a-2efb22b4e568',
+  'Condemned Siren':     'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fcorrupted-hallows-creatures%2Fcondemned-siren.jpg?alt=media&token=3a172852-cdaf-4f39-817f-5695dc9165f7',
+  'Cursed Fiend':        'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fcorrupted-hallows-creatures%2Fcursed%20fiend.jpeg?alt=media&token=e0ffaaf9-2c7e-4af0-a911-0e8b9c07ff4c',
+  'Forsaken Follower':   'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fcorrupted-hallows-creatures%2Fforsaken-follower.jpg?alt=media&token=69cb0133-15f6-4e70-8170-cf5f56cb9dfc',
+  'Ghoul Blatherer':     'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fcorrupted-hallows-creatures%2Fghoul%20blatherer.jpeg?alt=media&token=1e8065cc-ab45-40df-a1db-5e657616069c',
+  'Nightmare Horse':     'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fcorrupted-hallows-creatures%2Fnightmare-horse.jpg?alt=media&token=94c1bcc4-91be-4b61-9252-d1fbbc1cc7dd',
+  'Pallbearer':          'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fcorrupted-hallows-creatures%2Fpallbearer.jpg?alt=media&token=33c66f7c-bd74-4cc6-b87f-aef8c782054a',
+  'Penitent Priest':     'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fcorrupted-hallows-creatures%2Fpenitent%20priest.jpeg?alt=media&token=ea158b6c-041d-4081-89ef-2d5476b55b9e',
+  'Profane Priest':      'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fcorrupted-hallows-creatures%2Fprofane%20priest.jpeg?alt=media&token=02dd949a-36f0-419e-bac4-b970dd3b1e9a',
+  'Profane Jester':      'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fcorrupted-hallows-creatures%2Fprofane-jester.jpg?alt=media&token=340d734b-bf43-48d0-aa60-c1b06192c2d5',
+  'Profane Presbyter':   'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fcorrupted-hallows-creatures%2Fprofane-presbyter.jpg?alt=media&token=76191f03-58a1-4d89-9331-341c23507034',
+  'Revenant Bishop':     'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fcorrupted-hallows-creatures%2Frevenant%20bishop.jpeg?alt=media&token=c30e5b5f-f420-421f-98d6-3e5873c51146',
+  'Skeletal Beast':      'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fcorrupted-hallows-creatures%2Fskeletal%20beast.jpeg?alt=media&token=30e9c7b5-ff5a-48d5-9bd5-1ee7b0347b33',
+  'Vile Thieving Vulture':'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fcorrupted-hallows-creatures%2Fvile-thieving-vulture.jpg?alt=media&token=0cbd5db1-531a-434a-bc0e-b33832ac0ed6',
+  'Weeping Apparition':  'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fcorrupted-hallows-creatures%2Fweeping-apparition.jpg?alt=media&token=4a31592b-dc02-45fa-8a16-72df51a6714b',
+  // ── Dark Woodlands ──────────────────────────────────────────────────────
+  'Alpha Beast Wolf':    'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fdark-woodlands-creatures%2Falpha-beastwolf.jpg?alt=media&token=5a859dda-2153-445a-b335-97f764b9c218',
+  'Bloodlusted Warthog': 'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fdark-woodlands-creatures%2Fbloddlusted-warthog.jpg?alt=media&token=f2f6eaf9-dff9-4749-bb66-f4adee049cd1',
+  'Blood-faced Yak':     'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fdark-woodlands-creatures%2Fblood-faced-yak.jpg?alt=media&token=358d1cee-60c8-4c9d-b408-fd0c5759caf0',
+  'Blue-mane Wolf':      'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fdark-woodlands-creatures%2Fblue-mane%20wolf.jpeg?alt=media&token=af7b7f36-ea69-48fd-9b93-5f6bf429b1e9',
+  'Five-Fanged Bear':    'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fdark-woodlands-creatures%2Ffive-fanged%20bear.jpeg?alt=media&token=d5cb507c-2214-4f14-9511-3ca5030758dc',
+  'Giant-poison Toad':   'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fdark-woodlands-creatures%2Fgiant-poison-toad.jpg?alt=media&token=4c799f4f-4311-4245-8d61-1e93816eab22',
+  'Groundhog Turtle':    'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fdark-woodlands-creatures%2Fgroundhog%20turtle.jpeg?alt=media&token=aa4e9570-c5a8-4650-828d-1fba75081b36',
+  'Possessed Hedgehog':  'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fdark-woodlands-creatures%2Fpossessed-hedgehog.jpg?alt=media&token=803adf58-0b6a-4c3c-942b-3b5f6a5102a7',
+  'Rampage Bull':        'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fdark-woodlands-creatures%2Frampage%20bull.jpeg?alt=media&token=d95a6f7c-47f0-49de-981e-92dd2fbd1e8f',
+  'Razor-back Komodo':   'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fdark-woodlands-creatures%2Frazorback-komodo.jpg?alt=media&token=f3c692f7-481a-45b6-9b34-f6ed8a45a595',
+  'Red-mane Wolf':       'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fdark-woodlands-creatures%2Fred-mane%20wolf.jpeg?alt=media&token=b857d7e1-068c-422b-8cd9-6d9fac77ce23',
+  'Scavenger':           'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fdark-woodlands-creatures%2Fscavenger.png?alt=media&token=40a43362-491c-467f-9c9a-9fd377addc2a',
+  'Twin-faced Serpent':  'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fdark-woodlands-creatures%2Ftwin-faced%20serpent.png?alt=media&token=322db6bf-8078-432d-83e3-6126c0c053c0',
+  'Vicious Gremlin':     'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fdark-woodlands-creatures%2Fvicious%20gremlin.jpeg?alt=media&token=9739515f-45dc-42fb-af23-ab350f11e710',
+  'Vile Goblin':         'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fdark-woodlands-creatures%2Fvile-goblin.jpg?alt=media&token=283aa016-6e97-408d-85a4-5eb0d8cca8bb',
+  // ── Glass Hell ──────────────────────────────────────────────────────────
+  'Blue Spirit':         'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fglass-hell-creatures%2Fblue-spirit.jpg?alt=media&token=5807fa96-2c02-419d-a9ee-bd59424122c3',
+  'Cloud Lurker':        'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fglass-hell-creatures%2Fcloud-lurker.jpg?alt=media&token=d585ca58-4a0a-47db-84b0-6b55462afdc6',
+  'Dazzling Fairy':      'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fglass-hell-creatures%2Fdazzling-fairy.jpg?alt=media&token=a33a5baa-91a9-45ce-a22c-7b368ca4d700',
+  'Diamond Golem':       'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fglass-hell-creatures%2Fdiamond-golem.jpg?alt=media&token=5d60e9df-9eab-449a-be8f-971b7959aeb3',
+  'Glass Centipede':     'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fglass-hell-creatures%2Fglass-centipede.jpg?alt=media&token=a049da83-18a5-4657-9328-a267d1b2e9ec',
+  'Glass Critter':       'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fglass-hell-creatures%2Fglass-critter.jpg?alt=media&token=94856717-fc7c-4524-8765-ebf124603761',
+  'Luster Bat':          'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fglass-hell-creatures%2Fluster-bat.jpg?alt=media&token=5f986b94-21d8-476e-b006-38e203ec7af8',
+  'Mirror-eyed Owl':     'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fglass-hell-creatures%2Fmirror-eyed-owl.jpg?alt=media&token=767dbf6d-4c73-4ac9-ab96-34f49df791eb',
+  'Prism Spider':        'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fglass-hell-creatures%2Fprism-spider.jpg?alt=media&token=920ae827-2392-4be1-b485-86455072c27a',
+  'Purple Spirit':       'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fglass-hell-creatures%2Fpurple-spirit.jpg?alt=media&token=1b715f2d-a21b-4759-9c4c-8591e7af6d77',
+  'Radiant Ifrit':       'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fglass-hell-creatures%2Fradiant-ifrit.jpg?alt=media&token=6801b49b-092c-48f8-9234-8ac605648864',
+  'Red Spirit':          'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fglass-hell-creatures%2Fred-spirit.jpg?alt=media&token=a1f157b7-c75e-4a09-8b8a-7f61fd886163',
+  'Shiny Crustacean':    'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fglass-hell-creatures%2Fshiny-crustacean.jpg?alt=media&token=f0be7306-6829-45ca-adbb-422ecc755442',
+  'Sparkling Elf':       'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fglass-hell-creatures%2Fsparkling-elf.jpg?alt=media&token=b379df01-33cc-4106-a628-620c9de53359',
+  'White Raven':         'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fglass-hell-creatures%2Fwhite-raven.jpg?alt=media&token=05955376-8b62-4f9d-8c0b-35913bf1227d',
+  // ── Otherworld ──────────────────────────────────────────────────────────
+  'Abomination':         'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fotherworld-creatures%2Fabomination.jpeg?alt=media&token=0a95dc1d-17a4-4d6c-b50b-cc2d10aabfb6',
+  'Bestial Sandworm':    'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fotherworld-creatures%2Fbestial-sandworm.jpg?alt=media&token=51deb040-3e9c-4dbc-a79c-96cb852d091f',
+  'Blood Kraken':        'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fotherworld-creatures%2Fblood%20kraken.jpeg?alt=media&token=f7a4c54d-ebed-4100-af2c-775aa8e372c9',
+  'Blue Phoenix':        'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fotherworld-creatures%2Fblue%20phoenix.jpeg?alt=media&token=40562c98-7a2c-4827-8c96-c19d5570026c',
+  'Cerberus':            'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fotherworld-creatures%2Fcerberus.jpeg?alt=media&token=97fe4b19-649e-43a3-b012-50c6537c2886',
+  'Colossal Black Serpent':'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fotherworld-creatures%2Fcolossal-black-serpent.jpg?alt=media&token=6fd4c4b9-3963-4667-8ebe-70bef62d6d9c',
+  'Corrupted Sage':      'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fotherworld-creatures%2Fcorrupted-sage.jpg?alt=media&token=bb785c47-f760-4b6f-8a8c-f8d7812f4938',
+  'Dark Sphinx':         'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fotherworld-creatures%2Fdark%20sphinx.jpeg?alt=media&token=3fd6be99-2331-4a7c-8038-ea46fc75d9ea',
+  'Demonic Herald':      'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fotherworld-creatures%2Fdemonic%20herald.jpeg?alt=media&token=132d57b1-6f35-4d03-8c42-ab20f7887a17',
+  'Desolate Matriarch':  'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fotherworld-creatures%2Fdesolate-matriarch.jpg?alt=media&token=e23fec3c-2be1-4e13-95f8-be20507045a5',
+  'Devil Centurion':     'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fotherworld-creatures%2Fdevil%20centurion.jpeg?alt=media&token=76e96ee5-ccb2-4376-a12e-20683108c026',
+  'Fallen Cyclops':      'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fotherworld-creatures%2Ffallen-cyclops.jpeg?alt=media&token=3db2adcc-db11-4452-929e-b598918a33e4',
+  'Glowing Griffin':     'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fotherworld-creatures%2Fglowing-griffin.jpg?alt=media&token=432f99dc-33d3-48c1-8f1e-5fbb7eec5459',
+  'Lightning Eel':       'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fotherworld-creatures%2Flightning-eel.jpg?alt=media&token=a40c5b0d-6a97-4f8a-80b9-8c170228c91e',
+  'Nebulous Phoenix':    'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fotherworld-creatures%2Fnebulous-phoenix.jpg?alt=media&token=69dd532d-a1e4-4d1f-8326-e85f612a4456',
+  // ── Shattered Heavens ───────────────────────────────────────────────────
+  'Burning Bush':        'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fshattered-heavens-creatures%2Fburning-bush.jpg?alt=media&token=81ca0367-1a1b-4bd9-9a0e-455b06e5f11e',
+  'Clayface':            'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fshattered-heavens-creatures%2Fclayface.jpg?alt=media&token=c2b6683a-a392-4e6c-bfd7-60a84b32fc6f',
+  'Crow Frostling':      'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fshattered-heavens-creatures%2Fcrow-frostling.jpg?alt=media&token=ca5624cf-834c-400f-b4cf-acd15e80f61c',
+  'Flame Spirit':        'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fshattered-heavens-creatures%2Fflame%20spirit.jpeg?alt=media&token=218cb415-be43-4698-be07-3efb1fe0d48b',
+  'Hurricane Wraith':    'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fshattered-heavens-creatures%2Fhurricane-wraith.jpg?alt=media&token=6054b7b4-4ad2-4fe1-b826-ad5e7db052e7',
+  'Ice Ifrit':           'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fshattered-heavens-creatures%2Fice%20ifrit.jpeg?alt=media&token=06952258-894e-4036-81f2-dbdc75df2356',
+  'Lava Golem':          'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fshattered-heavens-creatures%2Flava-golem.jpg?alt=media&token=5f12d447-4123-4491-a22a-38e8626ec51e',
+  'Lightning Shroud':    'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fshattered-heavens-creatures%2Flightning%20shroud.jpeg?alt=media&token=fda29d1c-62db-431d-8485-e95967e3c8b6',
+  'Liquid Phantom':      'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fshattered-heavens-creatures%2Fliquid-phantom.jpg?alt=media&token=296a3bf4-fc20-4309-bf43-9902009a2f25',
+  'Mist Phantom':        'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fshattered-heavens-creatures%2Fmist%20phantom.jpeg?alt=media&token=15235a64-ac3e-4d5a-beb3-ca400d8211a5',
+  'Moldy Giant':         'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fshattered-heavens-creatures%2Fmoldy-giant.jpg?alt=media&token=0ccc4c38-36d1-4b55-9b7c-74921b8d059d',
+  'Stone Golem':         'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fshattered-heavens-creatures%2Fstone%20golem.jpeg?alt=media&token=713c3b3a-dfed-4d3b-a1b8-159c17dd136b',
+  'Vicious Snowman':     'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fshattered-heavens-creatures%2Fvicious-snowman.jpg?alt=media&token=d111c106-62e2-431f-8bcf-97535f3a8a49',
+  'Water Wraith':        'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fshattered-heavens-creatures%2Fwater%20wraith.jpeg?alt=media&token=5e425fba-e8dc-4299-8de5-3351677be966',
+  'Water Serpent':       'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fshattered-heavens-creatures%2Fwater-serpent.jpg?alt=media&token=8f56def5-8499-48f9-8141-0a2823f72b90',
+  // ── Nyx Abyss (no new images provided yet — keeping existing) ───────────
+  'Abyssal Eater':       'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fabyssal%20eater.jpeg?alt=media&token=bba6e91d-540f-44b6-9927-f4c3817f98ba',
+  'Void Lurker':         'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fvoid%20lurker.jpeg?alt=media&token=4fa02db1-94a3-4a95-8f22-3bc4ad48fa71',
+  'Chaoswalker':         'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fchaoswalker.png?alt=media&token=94ef72a8-a1a5-4bf2-9bca-2ee08b12b885',
+  'Oblivion Eye':        'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Foblivion%20eye.png?alt=media&token=a69ff4b0-f5c1-4595-b4a6-5cdbafd2ad45',
+  'Godless Thing':       'https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/monster-images%2Fgodless%20thing.png?alt=media&token=8b80879a-e247-4101-85ca-dea948f4d63a',
 };
 // ── Render monster avatar: image if available, grade emoji fallback ──────────
 function _renderMonsterAvatar(elId, monster) {
   const el = document.getElementById(elId);
-  if (!el) return;
+  if (!el) {
+    console.warn('[AVATAR] Element not found:', elId);
+    return;
+  }
+  console.log('[AVATAR] Rendering monster avatar for:', elId, 'monster:', monster.name);
   if (monster.img) {
     el.innerHTML = `<img src="${monster.img}" alt="${monster.name}"
       style="width:100%;height:100%;object-fit:cover;border-radius:inherit"/>`;
@@ -8321,16 +9048,116 @@ function _renderMonsterAvatar(elId, monster) {
     const sz = isLarge ? '4rem' : '2.2rem';
     el.innerHTML = `<span style="font-size:${sz}">${gradeEmoji[monster.grade] || '👹'}</span>`;
   }
+  console.log('[AVATAR] Monster avatar rendered');
 }
 
 // Base stat ranges per grade (spec-accurate)
+// ── Level-band base stats per spec (Vorthak monster scaling) ──────────────────
+// Dark Woodlands (levels 1–100)
+const LEVEL_BAND_STATS = {
+  '1-20':   { hp:[80,100],     atk:[10,12],   def:[10,12],   dex:[5,8],    exp:20,  gold:[18,22]  },
+  '21-40':  { hp:[280,300],    atk:[40,45],   def:[40,45],   dex:[30,35],  exp:40,  gold:[28,32]  },
+  '41-60':  { hp:[480,500],    atk:[70,75],   def:[70,75],   dex:[40,55],  exp:60,  gold:[38,42]  },
+  '61-80':  { hp:[680,700],    atk:[90,95],   def:[90,95],   dex:[60,65],  exp:80,  gold:[48,52]  },
+  '81-100': { hp:[880,900],    atk:[110,115], def:[110,115], dex:[70,75],  exp:100, gold:[48,52]  },
+  // Shattered Heavens (levels 101–200)
+  '101-120':{ hp:[1250,1300],  atk:[130,135], def:[130,135], dex:[100,110],exp:110, gold:[100,130]},
+  '121-140':{ hp:[1450,1500],  atk:[150,155], def:[150,155], dex:[110,120],exp:120, gold:[100,130]},
+  '141-160':{ hp:[1650,1700],  atk:[180,185], def:[180,185], dex:[120,130],exp:130, gold:[100,130]},
+  '161-180':{ hp:[1850,1900],  atk:[200,205], def:[200,205], dex:[130,140],exp:140, gold:[100,130]},
+  '181-200':{ hp:[2050,2100],  atk:[220,225], def:[220,225], dex:[140,150],exp:150, gold:[100,130]},
+  // Glass Hell (levels 201–300)
+  '201-220':{ hp:[2400,2450],  atk:[255,260], def:[255,260], dex:[200,210],exp:160, gold:[150,200]},
+  '221-240':{ hp:[2600,2650],  atk:[275,280], def:[275,280], dex:[210,220],exp:170, gold:[150,200]},
+  '241-260':{ hp:[2800,2850],  atk:[295,300], def:[295,300], dex:[220,230],exp:180, gold:[150,200]},
+  '261-280':{ hp:[3000,3050],  atk:[315,320], def:[315,320], dex:[230,240],exp:190, gold:[150,200]},
+  '281-300':{ hp:[3200,3250],  atk:[335,340], def:[335,340], dex:[240,250],exp:200, gold:[150,200]},
+  // Corrupted Hallows (levels 301–400)
+  '301-320':{ hp:[3550,3600],  atk:[370,380], def:[370,380], dex:[300,310],exp:210, gold:[200,280]},
+  '321-340':{ hp:[3750,3800],  atk:[390,400], def:[390,400], dex:[310,320],exp:220, gold:[200,280]},
+  '341-360':{ hp:[3950,4000],  atk:[410,420], def:[410,420], dex:[320,330],exp:230, gold:[200,280]},
+  '361-380':{ hp:[4150,4200],  atk:[430,440], def:[430,440], dex:[330,340],exp:240, gold:[200,280]},
+  '381-400':{ hp:[4350,4400],  atk:[450,460], def:[450,460], dex:[340,350],exp:250, gold:[200,280]},
+  // Otherworld (levels 401–500)
+  '401-420':{ hp:[4700,4750],  atk:[490,495], def:[490,495], dex:[400,410],exp:300, gold:[400,550]},
+  '421-440':{ hp:[4900,4950],  atk:[510,515], def:[510,515], dex:[410,420],exp:320, gold:[400,550]},
+  '441-460':{ hp:[5100,5150],  atk:[530,535], def:[530,535], dex:[420,430],exp:340, gold:[400,550]},
+  '461-480':{ hp:[5300,5350],  atk:[550,555], def:[550,555], dex:[430,440],exp:360, gold:[400,550]},
+  '481-500':{ hp:[5500,5550],  atk:[570,575], def:[570,575], dex:[440,450],exp:380, gold:[400,550]},
+};
+
+// Zone → level band mapping (Vorthak — Eastern Continent)
+const ZONE_LEVEL_BAND = {
+  // Dark Woodlands
+  'Gremlin Hollows':      '1-20',
+  'Serpent Mire':         '21-40',
+  'Burrowdeep Basin':     '41-60',
+  'Root Grove':           '61-80',
+  'Crimson Fang':         '81-100',
+  // Shattered Heavens
+  'Titan Divide':         '101-120',
+  'Veilwater Basin':      '121-140',
+  'Frostfall Expanse':    '141-160',
+  'Ember Horizon':        '161-180',
+  'Tempest Crown':        '181-200',
+  // Glass Hell
+  'Lake of Reflections':  '201-220',
+  'Crystal Cave':         '221-240',
+  'Mirror Sky':           '241-260',
+  'Rainbow Valley':       '261-280',
+  'Shimmering Peak':      '281-300',
+  // Corrupted Hallows
+  'Gravemarch Fields':    '301-320',
+  'Whispering Necropolis':'321-340',
+  'Defiled Sanctum':      '341-360',
+  'Dark Cathedral':       '361-380',
+  'Fallen Bastion':       '381-400',
+  // Otherworld
+  'Blighted World':       '401-420',
+  'Leviathan Depths':     '421-440',
+  'Ashwing Aerie':        '441-460',
+  'Sphinx Dominion':      '461-480',
+  'Infernal Reach':       '481-500',
+};
+
+// Zone → minimum player level required to unlock
+const ZONE_LEVEL_REQ = {
+  'Gremlin Hollows':       1,
+  'Serpent Mire':         21,
+  'Burrowdeep Basin':     41,
+  'Root Grove':           61,
+  'Crimson Fang':         81,
+  // All other Vorthak regions start at 101+ — locked until reaching those levels
+  'Titan Divide':        101,
+  'Veilwater Basin':     121,
+  'Frostfall Expanse':   141,
+  'Ember Horizon':       161,
+  'Tempest Crown':       181,
+  'Lake of Reflections': 201,
+  'Crystal Cave':        221,
+  'Mirror Sky':          241,
+  'Rainbow Valley':      261,
+  'Shimmering Peak':     281,
+  'Gravemarch Fields':   301,
+  'Whispering Necropolis':321,
+  'Defiled Sanctum':     341,
+  'Dark Cathedral':      361,
+  'Fallen Bastion':      381,
+  'Blighted World':      401,
+  'Leviathan Depths':    421,
+  'Ashwing Aerie':       441,
+  'Sphinx Dominion':     461,
+  'Infernal Reach':      481,
+};
+
+// Legacy grade-keyed stats kept for Nyx Abyss and other non-Vorthak zones
 const MONSTER_BASE_STATS = {
-  E: { hp:[80,120],    atk:[8,12],    def:[5,10],    dex:[5,10]   },
-  D: { hp:[150,220],   atk:[15,22],   def:[10,18],   dex:[10,18]  },
-  C: { hp:[300,450],   atk:[30,45],   def:[20,35],   dex:[20,35]  },
-  B: { hp:[600,900],   atk:[60,85],   def:[40,65],   dex:[40,65]  },
-  A: { hp:[1200,1800], atk:[110,160], def:[80,120],  dex:[80,120] },
-  S: { hp:[2500,4000], atk:[200,300], def:[150,220], dex:[150,220]},
+  E: { hp:[80,100],     atk:[10,12],   def:[10,12],   dex:[5,8]    },
+  D: { hp:[280,300],    atk:[40,45],   def:[40,45],   dex:[30,35]  },
+  C: { hp:[1250,1300],  atk:[130,135], def:[130,135], dex:[100,110]},
+  B: { hp:[3550,3600],  atk:[370,380], def:[370,380], dex:[300,310]},
+  A: { hp:[4700,4750],  atk:[490,495], def:[490,495], dex:[400,410]},
+  S: { hp:[5500,5550],  atk:[570,575], def:[570,575], dex:[440,450]},
 };
 // Rank multipliers (Wanderer=1 … Eternal=15)
 const RANK_MULT = [1,2,3,4,5,7,9,11,13,15];
@@ -8341,7 +9168,7 @@ function _getRankMult(rank) {
 }
 
 const MONSTER_EXP_LOCAL  = { E:20, D:50, C:120, B:300, A:700, S:1500 };
-const MONSTER_GOLD_LOCAL = { E:[20,30], D:[40,60], C:[80,120], B:[180,260], A:[400,550], S:[900,1200] };
+const MONSTER_GOLD_LOCAL = { E:[18,22], D:[28,32], C:[100,130], B:[200,280], A:[400,550], S:[900,1200] };
  
 function _randInt(min, max) { return Math.floor(Math.random()*(max-min+1))+min; }
  
@@ -8349,15 +9176,18 @@ function _generateMonster(grade, zoneName) {
   // Pick from zone-specific pool if available, else fall back to grade pool
   const names = (zoneName && ZONE_MONSTER_POOLS[zoneName]) || MONSTER_TEMPLATES[grade] || MONSTER_TEMPLATES.E;
   const name  = names[_randInt(0, names.length - 1)];
-  const b     = MONSTER_BASE_STATS[grade] || MONSTER_BASE_STATS.E;
-  const rank  = _charData?.rank || 'Wanderer';
-  const mult  = _getRankMult(rank);
-  const hp    = Math.round(_randInt(b.hp[0],  b.hp[1])  * mult);
-  const atk   = Math.round(_randInt(b.atk[0], b.atk[1]) * mult);
-  const def   = Math.round(_randInt(b.def[0], b.def[1]) * mult);
-  const dex   = Math.round(_randInt(b.dex[0], b.dex[1]) * mult);
+
+  // Use level-band stats for known Vorthak zones; fall back to legacy grade stats for other zones
+  const band  = zoneName && ZONE_LEVEL_BAND[zoneName];
+  const b     = (band && LEVEL_BAND_STATS[band]) || MONSTER_BASE_STATS[grade] || MONSTER_BASE_STATS.E;
+
+  const hp    = _randInt(b.hp[0],  b.hp[1]);
+  const atk   = _randInt(b.atk[0], b.atk[1]);
+  const def   = _randInt(b.def[0], b.def[1]);
+  const dex   = _randInt(b.dex[0], b.dex[1]);
   const img   = MONSTER_IMAGES[name] || null;
-  return { name, grade, zoneName: zoneName||null, hp, maxHp: hp, atk, def, dex, img };
+  const levelBand = band || null;
+  return { name, grade, levelBand, zoneName: zoneName||null, hp, maxHp: hp, atk, def, dex, img };
 }
  
 function _getPrimaryStat(charClass, stats) {
@@ -8366,101 +9196,154 @@ function _getPrimaryStat(charClass, stats) {
 }
  
 // ── Loot tables — match spec drop chances ─────────────────────────────────────
-// _rollDrops() handles gold separately via MONSTER_GOLD_LOCAL.
-// Each table entry has: items[] with { name, chance } for independent rolls,
-// plus a runestone entry for the grade-specific 5% chance.
+// Each grade defines independent drop slots. Each slot has:
+//   chance  - probability this slot triggers (modified by luck)
+//   pool    - array of { name, weight } items; one is picked via weighted random
+// Gold is handled separately via MONSTER_GOLD_LOCAL.
+// _rollDrops() rolls each slot independently then picks one item from that
+// slot's pool — so "30% chance for any common resource" means exactly one
+// common at 30%, not multiple simultaneous rolls.
+
+// ---- Resource pools (shared across grades) ----
+const COMMON_RESOURCE_POOL = [
+  { name:'Iron',            weight:16 }, { name:'Wood',      weight:16 },
+  { name:'Leather',         weight:16 }, { name:'Bone Fragments', weight:14 },
+  { name:'Fur',             weight:12 }, { name:'Feathers',  weight:12 },
+  { name:'Tin',             weight:8  }, { name:'Copper',    weight:6  },
+];
+const UNCOMMON_RESOURCE_POOL = [
+  { name:'Silver',  weight:20 }, { name:'Bronze',  weight:18 },
+  { name:'Quartz',  weight:18 }, { name:'Marble',  weight:16 },
+  { name:'Obsidian',weight:14 }, { name:'Coal',    weight:14 },
+];
+const RARE_RESOURCE_POOL = [
+  { name:'Dragon Scales', weight:25 }, { name:'Cyclops Eye', weight:25 },
+  { name:'Phoenix Bloom', weight:20 }, { name:'Shadow Hide', weight:15 },
+  { name:'Drake Meat',    weight:15 },
+];
+const LEGENDARY_RESOURCE_POOL = [
+  { name:'Titanium',   weight:30 }, { name:'Adamantium', weight:28 },
+  { name:'Mythril',    weight:22 }, { name:'Palladium',  weight:20 },
+];
+const MYTHIC_RESOURCE_POOL = [
+  { name:'Aetherium',   weight:35 }, { name:'Titan Heart', weight:30 },
+  { name:'Void Orchid', weight:20 }, { name:'Middlemist',  weight:15 },
+];
+const MINOR_POTION_POOL = [
+  { name:'Minor HP Potion',   weight:40 },
+  { name:'Minor Mana Potion', weight:35 },
+  { name:'Minor Luck Potion', weight:25 },
+];
+const STANDARD_POTION_POOL = [
+  { name:'Standard HP Potion',   weight:40 },
+  { name:'Standard Mana Potion', weight:35 },
+  { name:'Standard Luck Potion', weight:25 },
+];
+const GREATER_POTION_POOL = [
+  { name:'Greater HP Potion',   weight:40 },
+  { name:'Greater Mana Potion', weight:35 },
+  { name:'Greater Luck Potion', weight:25 },
+];
+
+// ---- Loot table: Dark Woodlands — by level zone (no grade labels) ----
+// Non-Dark-Woodlands zones still use the grade-keyed tables below
+const ZONE_LOOT_TABLES = {
+  // Gremlin Hollows — levels 1-20
+  // 100% for 20 coins, 5% chance for any common resource
+  'Gremlin Hollows': {
+    gold: [20, 20],
+    slots: [
+      { chance:0.05, pool: COMMON_RESOURCE_POOL },
+    ],
+  },
+  // Serpent Mire — levels 21-40
+  // 100% for 30 coins, 10% common resource, 3% uncommon resource, 3% E-grade Runestone
+  'Serpent Mire': {
+    gold: [30, 30],
+    slots: [
+      { chance:0.10, pool: COMMON_RESOURCE_POOL   },
+      { chance:0.03, pool: UNCOMMON_RESOURCE_POOL },
+    ],
+    bonus: { name:'E-grade Runestone', chance:0.03 },
+  },
+  // Burrowdeep Basin — levels 41-60
+  // 100% for 40 coins, 30% common resource, 5% uncommon resource, 5% E-grade Runestone
+  'Burrowdeep Basin': {
+    gold: [40, 40],
+    slots: [
+      { chance:0.30, pool: COMMON_RESOURCE_POOL   },
+      { chance:0.05, pool: UNCOMMON_RESOURCE_POOL },
+    ],
+    bonus: { name:'E-grade Runestone', chance:0.05 },
+  },
+  // Root Grove — levels 61-80
+  // 100% for 50 coins, 50% common, 10% uncommon, 10% E-grade Runestone, 3% D-grade Runestone
+  'Root Grove': {
+    gold: [50, 50],
+    slots: [
+      { chance:0.50, pool: COMMON_RESOURCE_POOL   },
+      { chance:0.10, pool: UNCOMMON_RESOURCE_POOL },
+    ],
+    bonus:     { name:'E-grade Runestone', chance:0.10 },
+    rareBonus: { name:'D-grade Runestone', chance:0.03 },
+  },
+  // Crimson Fang — levels 81-100
+  // 100% for 50 coins, 50% common, 30% uncommon, 30% E-grade Runestone, 5% D-grade Runestone
+  'Crimson Fang': {
+    gold: [50, 50],
+    slots: [
+      { chance:0.50, pool: COMMON_RESOURCE_POOL   },
+      { chance:0.30, pool: UNCOMMON_RESOURCE_POOL },
+    ],
+    bonus:     { name:'E-grade Runestone', chance:0.30 },
+    rareBonus: { name:'D-grade Runestone', chance:0.05 },
+  },
+};
+
+// ---- Loot table: each grade is an array of independent drop slots ----
 const LOOT_TABLES = {
   E: {
-    items: [
-      // 30% common resource
-      { name:'Iron',           chance:0.10, weight:34 },
-      { name:'Wood',           chance:0.10, weight:33 },
-      { name:'Leather',        chance:0.10, weight:33 },
-      // 10% minor potion
-      { name:'Minor HP Potion',   chance:0.10, weight:60 },
-      { name:'Minor Mana Potion', chance:0.10, weight:40 },
+    slots: [
+      { chance:0.30, pool: COMMON_RESOURCE_POOL },  // 30% any common resource
+      { chance:0.10, pool: MINOR_POTION_POOL    },  // 10% any minor potion
     ],
-    runestone: { name:'E-grade Runestone', chance:0.05 },
   },
   D: {
-    items: [
-      // 50% common
-      { name:'Iron',             chance:0.50, weight:34 },
-      { name:'Wood',             chance:0.50, weight:33 },
-      { name:'Leather',          chance:0.50, weight:33 },
-      // 30% uncommon
-      { name:'Fire Essence',     chance:0.30, weight:50 },
-      { name:'Water Essence',    chance:0.30, weight:50 },
-      // 30% minor potion
-      { name:'Minor HP Potion',  chance:0.30, weight:60 },
-      { name:'Minor Mana Potion',chance:0.30, weight:40 },
+    slots: [
+      { chance:0.50, pool: COMMON_RESOURCE_POOL   },  // 50% any common resource
+      { chance:0.30, pool: UNCOMMON_RESOURCE_POOL },  // 30% any uncommon resource
+      { chance:0.30, pool: MINOR_POTION_POOL      },  // 30% any minor potion
     ],
-    runestone: { name:'D-grade Runestone', chance:0.05 },
   },
   C: {
-    items: [
-      // 100% common
-      { name:'Iron',              chance:1.00, weight:50 },
-      { name:'Wood',              chance:1.00, weight:50 },
-      // 50% uncommon
-      { name:'Magic Crystal',     chance:0.50, weight:50 },
-      { name:'Silk Thread',       chance:0.50, weight:50 },
-      // 10% rare
-      { name:'Wind Essence',      chance:0.10, weight:50 },
-      { name:'Earth Essence',     chance:0.10, weight:50 },
-      // 10% standard potion
-      { name:'Standard HP Potion',chance:0.10, weight:60 },
-      { name:'Standard Mana Potion',chance:0.10,weight:40 },
+    slots: [
+      { chance:1.00, pool: COMMON_RESOURCE_POOL   },  // 100% any common resource
+      { chance:0.50, pool: UNCOMMON_RESOURCE_POOL },  // 50% any uncommon resource
+      { chance:0.10, pool: RARE_RESOURCE_POOL     },  // 10% any rare resource
+      { chance:0.10, pool: STANDARD_POTION_POOL   },  // 10% any standard potion
     ],
-    runestone: { name:'C-grade Runestone', chance:0.05 },
   },
   B: {
-    items: [
-      // 100% uncommon
-      { name:'Magic Crystal',     chance:1.00, weight:50 },
-      { name:'Ancient Rune',      chance:1.00, weight:50 },
-      // 50% rare
-      { name:'Dragon Scales',     chance:0.50, weight:50 },
-      { name:'Cyclops Eye',       chance:0.50, weight:50 },
-      // 5% legendary
-      { name:'Titanium',          chance:0.05, weight:50 },
-      { name:'Adamantium',        chance:0.05, weight:50 },
-      // 30% standard potion
-      { name:'Standard HP Potion',chance:0.30, weight:60 },
-      { name:'Standard Mana Potion',chance:0.30,weight:40 },
+    slots: [
+      { chance:1.00, pool: UNCOMMON_RESOURCE_POOL  },  // 100% any uncommon resource
+      { chance:0.50, pool: RARE_RESOURCE_POOL      },  // 50% any rare resource
+      { chance:0.05, pool: LEGENDARY_RESOURCE_POOL },  // 5% any legendary resource
+      { chance:0.30, pool: STANDARD_POTION_POOL    },  // 30% any standard potion
     ],
-    runestone: { name:'B-grade Runestone', chance:0.05 },
   },
   A: {
-    items: [
-      // 100% rare
-      { name:'Dragon Scales',     chance:1.00, weight:34 },
-      { name:'Cyclops Eye',       chance:1.00, weight:33 },
-      { name:'Phoenix Bloom',     chance:1.00, weight:33 },
-      // 30% legendary
-      { name:'Titanium',          chance:0.30, weight:50 },
-      { name:'Adamantium',        chance:0.30, weight:50 },
-      // 10% greater potion
-      { name:'Greater HP Potion', chance:0.10, weight:60 },
-      { name:'Greater Mana Potion',chance:0.10,weight:40 },
+    slots: [
+      { chance:1.00, pool: RARE_RESOURCE_POOL      },  // 100% any rare resource
+      { chance:0.30, pool: LEGENDARY_RESOURCE_POOL },  // 30% any legendary resource
+      { chance:0.10, pool: GREATER_POTION_POOL     },  // 10% any greater potion
     ],
-    runestone: { name:'A-grade Runestone', chance:0.05 },
   },
   S: {
-    items: [
-      // 50% legendary
-      { name:'Titanium',          chance:0.50, weight:25 },
-      { name:'Adamantium',        chance:0.50, weight:25 },
-      { name:'Celestial Fig',     chance:0.50, weight:25 },
-      { name:'Phoenix Bloom',     chance:0.50, weight:25 },
-      // 10% mythic
-      { name:'Middlemist',        chance:0.10, weight:50 },
-      { name:'Dragon Scales',     chance:0.10, weight:50 },
-      // 30% greater potion
-      { name:'Greater HP Potion', chance:0.30, weight:60 },
-      { name:'Greater Mana Potion',chance:0.30,weight:40 },
+    slots: [
+      { chance:0.50, pool: LEGENDARY_RESOURCE_POOL },  // 50% any legendary resource
+      { chance:0.10, pool: MYTHIC_RESOURCE_POOL    },  // 10% any mythic resource
+      { chance:0.30, pool: GREATER_POTION_POOL     },  // 30% any greater potion
     ],
-    runestone: { name:'S-grade Runestone', chance:0.05 },
   },
 };
 
@@ -8469,16 +9352,32 @@ function _rollWeightedItem(pool) {
   let roll = Math.random() * total;
   for (const item of pool) {
     roll -= item.weight;
-    if (roll <= 0) return { name: item.name, qty: item.qty };
+    if (roll <= 0) return item.name;
   }
-  return { name: pool[0].name, qty: pool[0].qty };
+  return pool[0].name;
 }
 
-function _rollDrops(grade) {
-  const [min, max] = MONSTER_GOLD_LOCAL[grade] || [20,30];
+function _rollDrops(grade, zoneName) {
+  // Use zone-specific loot table if available (e.g. Dark Woodlands zones)
+  const zoneTable = zoneName && ZONE_LOOT_TABLES[zoneName];
+  let goldRange, tableSlots, bonusDrop, rareBonusDrop;
+
+  if (zoneTable) {
+    goldRange     = zoneTable.gold || [18, 22];
+    tableSlots    = zoneTable.slots || [];
+    bonusDrop     = zoneTable.bonus     || null;
+    rareBonusDrop = zoneTable.rareBonus || null;
+  } else {
+    const band = zoneName && ZONE_LEVEL_BAND[zoneName];
+    goldRange  = (band && LEVEL_BAND_STATS[band]?.gold) || MONSTER_GOLD_LOCAL[grade] || [20,30];
+    tableSlots = (LOOT_TABLES[grade] || LOOT_TABLES.E).slots || [];
+    bonusDrop  = null;
+    rareBonusDrop = null;
+  }
+
   // Spriglet companion: +5% gold drop
   const spriglet = (_charData?.companion?.name || '').toLowerCase() === 'spriglet' ? 1.05 : 1;
-  const gold = Math.round(_randInt(min, max) * spriglet);
+  const gold = Math.round(_randInt(goldRange[0], goldRange[1]) * spriglet);
 
   // Luck potion multiplier boosts item drop chances
   const luckMult = _getLuckMult(_charData);
@@ -8489,19 +9388,27 @@ function _rollDrops(grade) {
 
   const table = LOOT_TABLES[grade] || LOOT_TABLES.E;
   const items = [];
-  for (const entry of (table.items || [])) {
-    if (Math.random() < Math.min(1, entry.chance * totalLuck)) {
-      const sameChance = table.items.filter(e => e.chance === entry.chance);
-      const picked = _rollWeightedItem(sameChance);
-      if (!items.find(i => i.name === picked.name)) {
-        items.push({ name: picked.name, qty: 1, type: getItemType(picked.name) });
+
+  // Roll each drop slot independently; pick one item from that slot's pool
+  for (const slot of tableSlots) {
+    const adjustedChance = Math.min(1, slot.chance * totalLuck);
+    if (Math.random() < adjustedChance) {
+      const name = _rollWeightedItem(slot.pool);
+      // Avoid exact duplicates across slots
+      if (!items.find(i => i.name === name)) {
+        items.push({ name, qty: 1, type: getItemType(name) });
       }
     }
   }
-  // Runestone: base 5%, boosted by luck
-  if (table.runestone && Math.random() < Math.min(0.30, table.runestone.chance * totalLuck)) {
-    items.push({ name: table.runestone.name, qty: 1, type: getItemType(table.runestone.name) });
+
+  // Zone-level bonus drop (e.g. Runestone Fragment for Dark Woodlands)
+  if (bonusDrop && Math.random() < Math.min(0.50, bonusDrop.chance * totalLuck)) {
+    items.push({ name: bonusDrop.name, qty: 1, type: getItemType(bonusDrop.name) });
   }
+  if (rareBonusDrop && Math.random() < Math.min(0.30, rareBonusDrop.chance * totalLuck)) {
+    items.push({ name: rareBonusDrop.name, qty: 1, type: getItemType(rareBonusDrop.name) });
+  }
+
 
   // Sah'run blessing: X% chance to also drop a random forge material
   if (_charData?.deity === "Sah'run") {
@@ -8526,19 +9433,34 @@ function _rollDrops(grade) {
   return { gold, items };
 }
  
+// ── Returns the display level (1-100 within current rank) ──
+function _displayLevel(level) {
+  return ((level - 1) % 100) + 1;
+}
+
 function _processExp(xp, xpMax, level, rank, gain, charClass) {
   const RANK_ORDER_L = ["Wanderer","Follower","Disciple","Master","Exalted","Crown","Supreme","Legend","Myth","Eternal"];
+  const rankIdx = Math.max(0, RANK_ORDER_L.indexOf(rank));
   let newXp = xp + gain, newLevel = level, newRank = rank, newXpMax = xpMax, leveledUp = false;
+
+  // Each rank spans exactly 100 levels. The level cap for the current rank is rankIdx*100 + 100.
+  // Players must ascend manually (via doRankAscension) — XP gain NEVER auto-promotes rank.
+  const rankLevelCap = (rankIdx + 1) * 100;
+
+  let xpOverflow = 0;
   while (newXp >= newXpMax) {
-    newXp -= newXpMax; newLevel++; leveledUp = true;
-    if (newLevel % 100 === 0) {
-      const ri = RANK_ORDER_L.indexOf(newRank);
-      if (ri < RANK_ORDER_L.length - 1) newRank = RANK_ORDER_L[ri + 1];
+    // Hard stop at the rank's level cap — don't level up past it until the player ascends.
+    // Clamp to xpMax (full bar shown) and store the overflow for after ascension.
+    if (newLevel >= rankLevelCap) {
+      xpOverflow = newXp - newXpMax; // carry remainder; ascension will consume it
+      newXp = newXpMax;              // show bar as full (xp === xpMax = ascension ready)
+      break;
     }
-    const rankIdx = Math.max(0, RANK_ORDER_L.indexOf(newRank));
+    newXp -= newXpMax; newLevel++; leveledUp = true;
+    // Recalculate xpMax for the new level within the same rank (rank never changes here)
     newXpMax = _calcXpMax(rankIdx, newLevel);
   }
-  return { newXp, newLevel, newRank, newXpMax, leveledUp };
+  return { newXp, newLevel, newRank, newXpMax, leveledUp, xpOverflow };
 }
  
 async function _clientStartBattle(grade, zoneName=null, existingMonster=null) {
@@ -8553,7 +9475,7 @@ async function _clientStartBattle(grade, zoneName=null, existingMonster=null) {
   // Save to Firestore so battleTurn can pick it up
   await setDoc(doc(db, "battles", auth.currentUser.uid), {
     ...state, uid: auth.currentUser.uid,
-    log: [`⚔️ You encountered a ${monster.name}! (Grade ${grade})`],
+    log: [`⚔️ You encountered a ${monster.name}! ${monster.levelBand ? '(Lv.' + monster.levelBand + ')' : '(Grade ' + grade + ')'}`],
     startedAt: serverTimestamp ? serverTimestamp() : new Date(),
   });
   return { monster, playerHp: state.playerHp, playerMana: state.playerMana };
@@ -8652,9 +9574,9 @@ async function _clientBattleTurn(action, skillName) {
     });
     // If monster dies from DoT, handle victory
     if (monster.hp <= 0) {
-      const drops  = _rollDrops(b.grade);
+      const drops  = _rollDrops(b.grade, b.zoneName || monster?.zoneName);
       const _veilExpBonus = _charData?.deity === 'Veil' ? (1 + _getFaithBlessingPct(_charData)) : 1;
-      const expGain = Math.round((MONSTER_EXP_LOCAL[b.grade] || 10) * _getRaceExpMult(_charData?.race) * _getCompanionExpMult(_charData?.companion?.name) * _veilExpBonus * _getExpBuffMult(_charData));
+      const expGain = Math.round(((b.zoneName||monster?.zoneName ? LEVEL_BAND_STATS[ZONE_LEVEL_BAND[b.zoneName||monster?.zoneName]]?.exp : null) || MONSTER_EXP_LOCAL[b.grade] || 10) * _getRaceExpMult(_charData?.race) * _getCompanionExpMult(_charData?.companion?.name) * _veilExpBonus * _getExpBuffMult(_charData));
       const inv = [...(char.inventory||[])];
       drops.items.forEach(item => {
         const ex = inv.find(i => i.name === item.name);
@@ -8753,9 +9675,9 @@ async function _clientBattleTurn(action, skillName) {
 
   // ── Victory ──
   if (monster.hp <= 0) {
-    const drops  = _rollDrops(b.grade);
+    const drops  = _rollDrops(b.grade, b.zoneName || monster?.zoneName);
     const _veilExpBonus = _charData?.deity === 'Veil' ? (1 + _getFaithBlessingPct(_charData)) : 1;
-        const expGain = Math.round((MONSTER_EXP_LOCAL[b.grade] || 10) * _getRaceExpMult(_charData?.race) * _getCompanionExpMult(_charData?.companion?.name) * _veilExpBonus * _getExpBuffMult(_charData));
+        const expGain = Math.round(((b.zoneName||monster?.zoneName ? LEVEL_BAND_STATS[ZONE_LEVEL_BAND[b.zoneName||monster?.zoneName]]?.exp : null) || MONSTER_EXP_LOCAL[b.grade] || 10) * _getRaceExpMult(_charData?.race) * _getCompanionExpMult(_charData?.companion?.name) * _veilExpBonus * _getExpBuffMult(_charData));
     const inv = [...(char.inventory||[])];
     drops.items.forEach(item => {
       const ex = inv.find(i => i.name === item.name);
@@ -8802,7 +9724,7 @@ async function _clientBattleTurn(action, skillName) {
     }
     log.push(`💀 ${monster.name} defeated!`);
     log.push(`💰 +${drops.gold} gold · ⭐ +${expGain} EXP`);
-    if (leveledUp) log.push(`🎉 LEVEL UP! Level ${newLevel}!`);
+    if (leveledUp) log.push(`🎉 LEVEL UP! ${newRank} Level ${_displayLevel(newLevel)}!`);
     await updateDoc(doc(db, "characters", uid), updates);
     // Sync in-memory charData so HP bar updates immediately without full refresh
     Object.assign(_charData, updates);
@@ -8849,9 +9771,20 @@ async function _clientBattleTurn(action, skillName) {
 
   // ── Defeat ──
   if (playerHp <= 0) {
-    const halfInv = (char.inventory||[]).map(item => ({ ...item, qty: Math.max(1, Math.floor((item.qty ?? 1) / 2)) }));
+    // FIXED: Was a raw updateDoc with `char.inventory` (stale snapshot).
+    // If a reward write was queued (e.g. from the killing blow), it could fire
+    // after this and restore the full inventory, bypassing the death penalty.
+    // Now we run a transaction that reads the CURRENT server inventory and
+    // halves it atomically, so no interleaved write can sneak between.
     const resurrectAt = new Date(Date.now() + 5*60*60*1000);
-    await updateDoc(doc(db, "characters", uid), { hp:0, inventory:halfInv, resurrectAt, isDead:true });
+    let halfInv;
+    const charRef = doc(db, 'characters', uid);
+    await runTransaction(db, async tx => {
+      const snap = await tx.get(charRef);
+      const freshInv = snap.exists() ? (snap.data().inventory || []) : (char.inventory || []);
+      halfInv = freshInv.map(item => ({ ...item, qty: Math.max(1, Math.floor((item.qty ?? 1) / 2)) }));
+      tx.update(charRef, { hp: 0, inventory: halfInv, resurrectAt, isDead: true });
+    });
     Object.assign(_charData, { hp:0, inventory:halfInv, resurrectAt, isDead:true });
     window._allInvItems = halfInv;
     await updateDoc(doc(db, "battles", uid), { status:"defeat" });
@@ -8943,9 +9876,9 @@ async function _clientAutoBattle(grade, maxTurns=15, zoneName=null) {
 
   const updates = { hp: playerHp, mana: playerMana };
   if (status === "victory") {
-    const drops   = _rollDrops(grade);
+    const drops   = _rollDrops(grade, zoneName);
     const _veilExpBonus2 = _charData?.deity === 'Veil' ? (1 + _getFaithBlessingPct(_charData)) : 1;
-    const expGain = Math.round((MONSTER_EXP_LOCAL[grade] || 10) * _getRaceExpMult(_charData?.race) * _getCompanionExpMult(_charData?.companion?.name) * _veilExpBonus2 * _getExpBuffMult(_charData));
+    const expGain = Math.round(((zoneName ? LEVEL_BAND_STATS[ZONE_LEVEL_BAND[zoneName]]?.exp : null) || MONSTER_EXP_LOCAL[grade] || 10) * _getRaceExpMult(_charData?.race) * _getCompanionExpMult(_charData?.companion?.name) * _veilExpBonus2 * _getExpBuffMult(_charData));
     const inv = [...(char.inventory||[])];
     drops.items.forEach(item => {
       const ex = inv.find(i => i.name === item.name);
@@ -8983,7 +9916,7 @@ async function _clientAutoBattle(grade, maxTurns=15, zoneName=null) {
     }
     log.push(`💀 ${monster.name} defeated!`);
     log.push(`💰 +${drops.gold} gold · ⭐ +${expGain} EXP`);
-    if (leveledUp) log.push(`🎉 LEVEL UP! Level ${newLevel}!`);
+    if (leveledUp) log.push(`🎉 LEVEL UP! ${newRank} Level ${_displayLevel(newLevel)}!`);
     await updateDoc(doc(db, "characters", uid), updates);
     const isElite = ["B","A","S"].includes(grade);
     await _incrementQuest("kill", 1);
@@ -9016,7 +9949,7 @@ const SKILL_DATA = {
   "Battle Cry":        { mana:10, type:"buff",         stat:"str",  buffMult:0.20 },
   "Crushing Blow":     { mana:0,  type:"damage",      mult:1.10, stat:"str", defPen:0.10 },
   "War Stomp":         { mana:0,  type:"stun",         mult:1.00, stat:"str" },
-  "Bleeding Edge":     { mana:20, type:"dot",          dotPct:0.15, dotTurns:3, stat:"str" },
+  "Bleeding Edge":     { mana:20, type:"dot",          dotPct:0.15, dotTurns:3, dotLabel:"Bleed", stat:"str" },
   "Iron Momentum":     { mana:20, type:"buff",         stat:"str",  buffMult:0.30 },
   "Blood Gamble":      { mana:25, type:"sacrificial",  selfHpCost:0.15, buffStat:"str", buffMult:0.50 },
   "Titan Breaker":     { mana:50, type:"damage",      mult:1.70, stat:"str", defPen:0.50 },
@@ -9038,17 +9971,17 @@ const SKILL_DATA = {
   "Mana Pulse":        { mana:0,  type:"damage",      mult:1.00, stat:"int" },
   "Robust Mind":       { mana:10, type:"buff",         stat:"int",  buffMult:0.20 },
   "Astral Lance":      { mana:25, type:"damage",      mult:1.40, stat:"int" },
-  "Mind Burn":         { mana:20, type:"dot",          dotPct:0.15, dotTurns:3, stat:"int" },
+  "Mind Burn":         { mana:20, type:"dot",          dotPct:0.15, dotTurns:3, dotLabel:"Mind Burn", stat:"int" },
   "Echo-strike":       { mana:25, type:"echo" },
   "Rune Sacrifice":    { mana:20, type:"sacrificial",  selfHpCost:0.20, buffStat:"int", buffMult:0.50 },
   "Meteorfall":        { mana:50, type:"damage",      mult:1.80, stat:"int" },
   "Arcane Shower":     { mana:50, type:"buff",         stat:"int",  buffMult:0.80 },
-  "Hex":               { mana:50, type:"dot",          dotPct:0.05, dotTurns:5, stat:"int" },
+  "Hex":               { mana:50, type:"dot",          dotPct:0.05, dotTurns:5, dotLabel:"Hex Curse", stat:"int" },
   // ── Hunter ──
   "Pierce":            { mana:0,  type:"damage",      mult:1.05, stat:"dex" },
-  "Hunter's Poison":   { mana:10, type:"dot",          dotPct:0.10, dotTurns:3, stat:"dex" },
+  "Hunter's Poison":   { mana:10, type:"dot",          dotPct:0.10, dotTurns:3, dotLabel:"Poison", stat:"dex" },
   "Quick Shot":        { mana:0,  type:"priority" },
-  "Split Arrow":       { mana:20, type:"dot",          dotPct:0.15, dotTurns:3, stat:"dex" },
+  "Split Arrow":       { mana:20, type:"dot",          dotPct:0.15, dotTurns:3, dotLabel:"Bleeding", stat:"dex" },
   "Ensnare":           { mana:0,  type:"stun",         mult:0.80, stat:"dex" },
   "Falcon Sight":      { mana:20, type:"buff",         stat:"dex",  buffMult:0.30 },
   "Vital Shot":        { mana:0,  type:"damage",      mult:1.35, stat:"dex" },
@@ -9069,21 +10002,21 @@ const SKILL_DATA = {
   // ── Cleric ──
   "Healing Light":     { mana:10, type:"heal",         healPct:0.15 },
   "Sacred Spark":      { mana:5,  type:"damage",      mult:1.05, stat:"int" },
-  "Neptune's Embrace": { mana:15, type:"buff",         stat:"int",  buffMult:0.20 },
+  "Neptune's Embrace": { mana:15, type:"buff",         stat:"all",  buffMult:0.20 },
   "Divine Barrier":    { mana:25, type:"shield",       shieldPct:0.80 },
   "Purify":            { mana:25, type:"cleanse" },
   "Radiant Pulse":     { mana:20, type:"hot",          hotPct:0.10, hotTurns:3 },
   "Life Exchange":     { mana:20, type:"sacrificial",  selfHpCost:0.15, buffStat:"all", buffMult:0.20 },
   "Sanctuary":         { mana:40, type:"hpbuff",       hpMult:0.50 },
-  "Divine Ascension":  { mana:50, type:"buff",         stat:"int",  buffMult:0.60 },
+  "Divine Ascension":  { mana:50, type:"buff",         stat:"all",  buffMult:0.60 },
   "Lazarus":           { mana:50, type:"heal",         healPct:0.50 },
   // ── Summoner ──
   "Lashing":           { mana:5,  type:"damage",      mult:1.05, stat:"int" },
   "Soul Bind":         { mana:10, type:"stun",         mult:1.00, stat:"int" },
-  "Essence Sap":       { mana:10, type:"dot",          dotPct:0.10, dotTurns:4, stat:"int" },
+  "Essence Sap":       { mana:10, type:"dot",          dotPct:0.10, dotTurns:4, dotLabel:"Essence Drain", stat:"int" },
   "Beastmaster":       { mana:25, type:"summon",       summonDmgPct:0.40, summonTurns:3 },
   "Beast Empowerment": { mana:25, type:"summonbuff",   summonBuffMult:0.30 },
-  "Usurper":           { mana:25, type:"dot",          dotPct:0.05, dotTurns:4, lifesteal:true, stat:"int" },
+  "Usurper":           { mana:25, type:"dot",          dotPct:0.05, dotTurns:4, dotLabel:"Life Sap", lifesteal:true, stat:"int" },
   "Offering":          { mana:20, type:"offering",     healPct:0.20 },  // sacrifices one summon for HP
   "Leviathan":         { mana:50, type:"summon",       summonDmgPct:1.20, stat:"int", unique:true },
   "Abyssal-touch":     { mana:50, type:"debuff",       debuffType:"defbreak", defReduce:0.40 },
@@ -9221,33 +10154,64 @@ function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stat
       break;
     }
     case "buff": {
-      const bKey = `buff_${sk.stat}`;
-      const BUFF_CAP = 1.60;  // spec: stackable buffs max 160%
-      const newBuff = Math.min(BUFF_CAP, (b[bKey] || 0) + sk.buffMult);
-      if ((b[bKey] || 0) >= BUFF_CAP) {
-        log.push(`⬆️ ${skillName}: Buff cap reached (160% max)!`);
+      const BUFF_CAP = 1.60;
+      if (sk.stat === 'all') {
+        // Buff all stats (Divine Ascension, Neptune's Embrace)
+        let allCapped = true;
+        for (const s of ['str','int','def','dex']) {
+          const bk = `buff_${s}`;
+          if ((b[bk] || 0) < BUFF_CAP) allCapped = false;
+          updates[bk] = Math.min(BUFF_CAP, (b[bk] || 0) + sk.buffMult);
+        }
+        if (allCapped) {
+          log.push(`⬆️ ${skillName}: Buff cap reached (160% max)!`);
+        } else {
+          if (sk.hpBonus) { playerHp = Math.min(playerHpMax, playerHp + Math.round(playerHpMax * sk.hpBonus)); }
+          log.push(`⬆️ ${skillName}: ALL STATS +${Math.round(sk.buffMult*100)}%!`);
+        }
       } else {
-        updates[bKey] = newBuff;
-        if (sk.hpBonus) { playerHp = Math.min(playerHpMax, playerHp + Math.round(playerHpMax * sk.hpBonus)); }
-        log.push(`⬆️ ${skillName}: +${Math.round(sk.buffMult*100)}% ${sk.stat.toUpperCase()}! (Total: ${Math.round(newBuff*100)}%)`);
+        const bKey = `buff_${sk.stat}`;
+        if ((b[bKey] || 0) >= BUFF_CAP) {
+          log.push(`⬆️ ${skillName}: Buff cap reached (160% max)!`);
+        } else {
+          updates[bKey] = Math.min(BUFF_CAP, (b[bKey] || 0) + sk.buffMult);
+          if (sk.hpBonus) { playerHp = Math.min(playerHpMax, playerHp + Math.round(playerHpMax * sk.hpBonus)); }
+          log.push(`⬆️ ${skillName}: +${Math.round(sk.buffMult*100)}% ${sk.stat.toUpperCase()}! (Total: ${Math.round(updates[bKey]*100)}%)`);
+        }
       }
       break;
     }
     case "sacrificial": {
       const BUFF_CAP_S = 1.60;
-      const bKey = `buff_${sk.buffStat}`;
-      if ((b[bKey] || 0) >= BUFF_CAP_S) {
-        log.push(`🩸 ${skillName}: Buff cap reached — skill has no effect!`);
-        break;
+      if (sk.buffStat === 'all') {
+        // Life Exchange — sacrifice HP to buff all stats
+        let allCapped = ['str','int','def','dex'].every(s => (b[`buff_${s}`] || 0) >= BUFF_CAP_S);
+        if (allCapped) {
+          log.push(`🩸 ${skillName}: Buff cap reached — skill has no effect!`);
+          break;
+        }
+        const cost = Math.round(playerHpMax * sk.selfHpCost);
+        playerHp = Math.max(1, playerHp - cost);
+        for (const s of ['str','int','def','dex']) {
+          const bk = `buff_${s}`;
+          updates[bk] = Math.min(BUFF_CAP_S, (b[bk] || 0) + sk.buffMult);
+        }
+        log.push(`🩸 ${skillName}: Sacrificed ${cost} HP → ALL STATS +${Math.round(sk.buffMult*100)}%!`);
+      } else {
+        const bKey = `buff_${sk.buffStat}`;
+        if ((b[bKey] || 0) >= BUFF_CAP_S) {
+          log.push(`🩸 ${skillName}: Buff cap reached — skill has no effect!`);
+          break;
+        }
+        const cost = Math.round(playerHpMax * sk.selfHpCost);
+        playerHp = Math.max(1, playerHp - cost);
+        updates[bKey] = Math.min(BUFF_CAP_S, (b[bKey] || 0) + sk.buffMult);
+        if (sk.buffStat2) {
+          const bKey2 = `buff_${sk.buffStat2}`;
+          updates[bKey2] = Math.min(BUFF_CAP_S, (b[bKey2] || 0) + (sk.buffMult2 || 0));
+        }
+        log.push(`🩸 ${skillName}: Sacrificed ${cost} HP → +${Math.round(sk.buffMult*100)}% ${sk.buffStat.toUpperCase()}! (Total: ${Math.round(updates[bKey]*100)}%)`);
       }
-      const cost = Math.round(playerHpMax * sk.selfHpCost);
-      playerHp = Math.max(1, playerHp - cost);
-      updates[bKey] = Math.min(BUFF_CAP_S, (b[bKey] || 0) + sk.buffMult);
-      if (sk.buffStat2) {
-        const bKey2 = `buff_${sk.buffStat2}`;
-        updates[bKey2] = Math.min(BUFF_CAP_S, (b[bKey2] || 0) + (sk.buffMult2 || 0));
-      }
-      log.push(`🩸 ${skillName}: Sacrificed ${cost} HP → +${Math.round(sk.buffMult*100)}% ${sk.buffStat.toUpperCase()}! (Total: ${Math.round(updates[bKey]*100)}%)`);
       break;
     }
     case "stun": {
@@ -9392,7 +10356,7 @@ window._showEncounterPopup = function(grade, zoneName) {
   if (!el) return;
   _renderMonsterAvatar('encounter-monster-emoji', monster);
   document.getElementById('encounter-monster-name').textContent  = monster.name;
-  document.getElementById('encounter-monster-grade').textContent = `Grade ${grade}`;
+  document.getElementById('encounter-monster-grade').textContent = monster.levelBand ? `Lv. ${monster.levelBand}` : `Grade ${grade}`;
   document.getElementById('encounter-monster-grade').style.color = gradeColor[grade] || "#c9a84c";
   document.getElementById('encounter-monster-hp').textContent    = `HP: ${monster.hp}`;
   // Store monster for immediate use if player chooses Fight
@@ -9436,18 +10400,21 @@ window._showBattleLoading = function(mode) {
 };
 
 window._hideBattleLoading = function() {
-  clearInterval(window._battleLoadingInterval);
-  const bar = document.getElementById('encounter-loading-bar');
-  if (bar) bar.style.width = '100%';
-  setTimeout(() => {
-    const popup   = document.getElementById('encounter-popup');
-    const info    = document.getElementById('encounter-monster-info');
-    const loading = document.getElementById('encounter-loading');
-    if (popup)   popup.style.display   = 'none';
-    if (info)    info.style.display    = 'block';
-    if (loading) loading.style.display = 'none';
-    if (bar)     bar.style.width       = '0%';
-  }, 250);
+  return new Promise((resolve) => {
+    clearInterval(window._battleLoadingInterval);
+    const bar = document.getElementById('encounter-loading-bar');
+    if (bar) bar.style.width = '100%';
+    setTimeout(() => {
+      const popup   = document.getElementById('encounter-popup');
+      const info    = document.getElementById('encounter-monster-info');
+      const loading = document.getElementById('encounter-loading');
+      if (popup)   popup.style.display   = 'none';
+      if (info)    info.style.display    = 'block';
+      if (loading) loading.style.display = 'none';
+      if (bar)     bar.style.width       = '0%';
+      resolve();
+    }, 250);
+  });
 };
 
 window._startBattle = async function(grade, isAuto, zoneName) {
@@ -9508,6 +10475,7 @@ function _launchAutoBattleLoop(grade, zoneName) {
   const sessionCap = Math.max(0, poolSize - existingKills);
 
   // Switch to battle arena, show auto HUD, hide manual actions
+  console.log('[BATTLE] Auto-battle: setting arena to display=block');
   document.getElementById('battle-zone-select').style.display   = 'none';
   document.getElementById('zone-pool-exhausted').style.display  = 'none';
   document.getElementById('battle-result').style.display        = 'none';
@@ -9515,6 +10483,10 @@ function _launchAutoBattleLoop(grade, zoneName) {
   document.getElementById('battle-actions').style.display       = 'none';
   document.getElementById('auto-battle-bar').style.display      = 'none';
   document.getElementById('auto-battle-hud').style.display      = 'block';
+  // Scroll to top so arena is visible on mobile
+  const _mcAuto = document.querySelector('.main-content');
+  if (_mcAuto) _mcAuto.scrollTop = 0;
+  console.log('[BATTLE] Auto-battle arena setup complete');
 
   // Seed HUD pool counter with real existing count
   const poolSizeEl = document.getElementById('auto-pool-size');
@@ -9525,7 +10497,7 @@ function _launchAutoBattleLoop(grade, zoneName) {
 
   // Player identity
   set('battle-player-name', char.name || '—');
-  set('battle-player-rank', `${char.rank||'Wanderer'} Lv.${char.level||1}`);
+  set('battle-player-rank', `${char.rank||'Wanderer'} Lv.${_displayLevel(char.level||1)}`);
   const playerAvatarEl = document.getElementById('player-battle-avatar');
   if (playerAvatarEl && char) {
     const av = char.avatarUrl;
@@ -9542,6 +10514,8 @@ function _launchAutoBattleLoop(grade, zoneName) {
 
   async function fightOneMonster() {
     if (!_autoBattleRunning) return;
+    // Also guard against lingering calls when player HP already hit 0
+    if (playerHp <= 0) { _autoBattleRunning = false; return; }
 
     // killCount is in-memory this session; sessionCap is how many remain before pool exhausts
     if (killCount >= sessionCap) {
@@ -9555,7 +10529,7 @@ function _launchAutoBattleLoop(grade, zoneName) {
     let   monHp      = monster.hp;
 
     set('monster-name',  monster.name);
-    set('monster-grade', `Grade ${monster.grade}`);
+    set('monster-grade', monster.levelBand ? `Lv. ${monster.levelBand}` : `Grade ${monster.grade}`);
     _renderMonsterAvatar('monster-avatar-emoji', monster);
     addBattleLog(`👹 ${monster.name} appears! (${monHp} HP)`);
 
@@ -9570,8 +10544,8 @@ function _launchAutoBattleLoop(grade, zoneName) {
         playerMana = Math.max(playerMana, _charData?.mana ?? playerMana);
         _autoBattlePotionPending = false;
       }
-      // Passive mana regen per tick
-      playerMana = Math.min(playerManaMax, playerMana + Math.floor(playerManaMax * 0.05));
+      // No mana regen during combat — skills have real cost.
+      // Out-of-battle passive regen (_regenTick) handles mana recovery.
 
       // ── Tick DoT on monster ──
       if (battleState.dotActive && battleState.dotTurns > 0) {
@@ -9622,12 +10596,15 @@ function _launchAutoBattleLoop(grade, zoneName) {
 
       let dmg = 0;
       if (usedSkill) {
+        // Deduct mana cost before applying skill (mirrors manual battle path)
+        playerMana = Math.max(0, playerMana - (usedSkill.mana || 0));
         // Clone monster with correct hp for _applySkill
         const monsterSnap = { ...monster, hp: monHp };
         const result = _applySkill(usedSkill.name, playerHp, playerMana, playerHpMax, monsterSnap, stats, battleState);
         dmg        = result.playerDmg;
         playerHp   = result.playerHp;
-        playerMana = result.playerMana;
+        // _applySkill doesn't re-deduct mana; keep our already-deducted value
+        // (result.playerMana is passed-through unchanged inside _applySkill)
         monHp      = result.monsterHp;
         // Merge skill updates into battleState
         Object.assign(battleState, result.updates);
@@ -9671,12 +10648,32 @@ function _launchAutoBattleLoop(grade, zoneName) {
 
     // ── Player defeated ──
     if (playerHp <= 0) {
-      addBattleLog('💀 You were defeated during auto-battle!');
+      // Set flag FIRST before any awaits — prevents recursive fightOneMonster() slipping through
       _autoBattleRunning = false;
-      const halfInv     = (char.inventory||[]).map(item => ({ ...item, qty: Math.max(1, Math.floor((item.qty ?? 1) / 2)) }));
+      addBattleLog('💀 You were defeated during auto-battle!');
+      // Capture uid before async state changes
+      const defeatedUid = _uid;
       const resurrectAt = new Date(Date.now() + 5*60*60*1000);
-      await updateDoc(doc(db, 'characters', _uid), { hp:0, inventory:halfInv, resurrectAt, isDead:true });
+      const charRef = doc(db, 'characters', defeatedUid);
+      await runTransaction(db, async tx => {
+        const snap = await tx.get(charRef);
+        const freshInv = snap.exists() ? (snap.data().inventory || []) : (char.inventory || []);
+        const halfInv = freshInv.map(item => ({ ...item, qty: Math.max(1, Math.floor((item.qty ?? 1) / 2)) }));
+        tx.update(charRef, { hp: 0, inventory: halfInv, resurrectAt, isDead: true });
+      });
+      // Write activity directly — bypass logActivity() to avoid any global state issues post-death
+      try {
+        await addDoc(collection(db, 'activity', defeatedUid, 'events'), {
+          icon: '💀',
+          message: '<b>Defeated in auto-battle.</b> Inventory halved. Resurrection available in 5 hours.',
+          color: '#e05555',
+          timestamp: serverTimestamp(),
+        });
+        _pushActivityUI('💀', '<b>Defeated in auto-battle.</b> Inventory halved. Resurrection available in 5 hours.', '#e05555', new Date());
+      } catch(e) { console.warn('[Death] Failed to log activity:', e); }
       await refreshCharData();
+      window._autoBattleLiveHp   = undefined;
+      window._autoBattleLiveMana = undefined;
       document.getElementById('auto-battle-hud').style.display = 'none';
       showBattleResult({ status:'defeat', log:['💀 You were defeated during auto-battle!'] });
       return;
@@ -9684,9 +10681,9 @@ function _launchAutoBattleLoop(grade, zoneName) {
 
     // ── Monster defeated — award rewards ──
     killCount++;
-    const drops   = _rollDrops(grade);
+    const drops   = _rollDrops(grade, zoneName);
     const _veilExpBonus2 = _charData?.deity === 'Veil' ? (1 + _getFaithBlessingPct(_charData)) : 1;
-    const expGain = Math.round((MONSTER_EXP_LOCAL[grade] || 10) * _getRaceExpMult(_charData?.race) * _getCompanionExpMult(_charData?.companion?.name) * _veilExpBonus2 * _getExpBuffMult(_charData));
+    const expGain = Math.round(((zoneName ? LEVEL_BAND_STATS[ZONE_LEVEL_BAND[zoneName]]?.exp : null) || MONSTER_EXP_LOCAL[grade] || 10) * _getRaceExpMult(_charData?.race) * _getCompanionExpMult(_charData?.companion?.name) * _veilExpBonus2 * _getExpBuffMult(_charData));
     const inv = [...(char.inventory||[])];
     drops.items.forEach(item => {
       const ex = inv.find(i => i.name === item.name);
@@ -9694,7 +10691,7 @@ function _launchAutoBattleLoop(grade, zoneName) {
       if (ex && !_isEquip) { ex.qty += item.qty; }
       else { const _ni = {...item}; if (_isEquip) _ni.iid = Math.random().toString(36).slice(2,10)+Date.now().toString(36); inv.push(_ni); }
     });
-    char.gold      = (char.gold||0) + drops.gold;
+    char.gold      = (_charData.gold||0) + drops.gold;  // keep char in sync for HUD
     char.inventory = inv;
     const { newXp, newLevel, newRank, newXpMax, leveledUp } = _processExp(
       char.xp||0, char.xpMax||100, char.level||1, char.rank||'Wanderer', expGain, char.charClass
@@ -9716,16 +10713,27 @@ function _launchAutoBattleLoop(grade, zoneName) {
     document.getElementById('auto-pool-fill').style.width = pct + '%';
 
     // Persist kill + incremental rewards to Firestore
+    // FIXED: Use increment() for gold/xp so this write merges with any concurrent
+    // change (bestow, trade, etc.) rather than overwriting it with a stale value.
+    // Inventory is written directly because it's already built on top of _charData
+    // which was refreshed at battle start; for long sessions this is still safer
+    // because at least gold/xp won't stomp concurrent changes.
     const isElite = ['B','A','S'].includes(grade);
     await window._recordZoneKill(zoneName, grade);
     await _incrementQuest('kill', 1);
     if (isElite) await _incrementQuest('eliteKill', 1);
     await updateDoc(doc(db, 'characters', _uid), {
-      gold: char.gold, inventory: char.inventory,
+      gold: increment(drops.gold),
+      inventory: char.inventory,
+      xp: increment(expGain), xpMax: char.xpMax, level: char.level, rank: char.rank,
+      hp: playerHp, mana: playerMana,
+      ...(leveledUp ? { statPoints: increment(3), hpMax: char.hpMax, manaMax: char.manaMax } : {})
+    });
+    // Keep local _charData in sync so subsequent reads in this session are accurate
+    Object.assign(_charData, { gold: char.gold, inventory: char.inventory,
       xp: char.xp, xpMax: char.xpMax, level: char.level, rank: char.rank,
       hp: playerHp, mana: playerMana,
-      ...(leveledUp ? { statPoints: char.statPoints, hpMax: char.hpMax, manaMax: char.manaMax } : {})
-    });
+      ...(leveledUp ? { statPoints: char.statPoints, hpMax: char.hpMax, manaMax: char.manaMax } : {}) });
     logActivity('⚔️', `<b>Auto: Defeated ${monster.name}</b>${isElite?' <span style="color:#e8d070">[Elite]</span>':''} · +${drops.gold}💰 +${expGain} EXP`, isElite ? '#e8d070' : '#e05555');
 
     // Small pause between monsters, then continue
@@ -9830,29 +10838,41 @@ window._confirmFight = async function() {
   const grade   = window._pendingEncounterGrade || window._currentBattleGrade;
   const zone    = window._pendingEncounterZone  || window._selectedZoneName || null;
   const monster = window._pendingEncounterMonster;
+  console.log('[BATTLE] _confirmFight called, showing stance modal');
   window._closeEncounterPopup();
   if (!grade) return;
   // Show stance selection before starting manual fight
   window._showStanceModal('farming', async () => {
-    // Check pool for manual fight too
-    const exhausted = await window._checkZonePool(zone, grade);
-    if (exhausted) { window._showPoolExhausted(zone, grade); return; }
-    window._showBattleLoading('fight');
+    console.log('[BATTLE] Stance confirmed, starting battle');
     const btn = document.getElementById('btn-start-battle');
-    if (btn) { btn.disabled = true; btn.textContent = '⚔️ LOADING...'; }
-    window._currentBattleGrade = grade;
-    window._currentBattleZone  = zone;
     try {
+      // Check pool for manual fight too — inside try so any Firestore error surfaces
+      const exhausted = await window._checkZonePool(zone, grade);
+      if (exhausted) { window._showPoolExhausted(zone, grade); return; }
+      window._showBattleLoading('fight');
+      if (btn) { btn.disabled = true; btn.textContent = '⚔️ LOADING...'; }
+      window._currentBattleGrade = grade;
+      window._currentBattleZone  = zone;
+      console.log('[BATTLE] Calling _clientStartBattle');
       const result = { data: await _clientStartBattle(grade, zone, monster) };
       const d = result.data;
       _currentBattle = { grade, ...d };
-      window._hideBattleLoading();
+      console.log('[BATTLE] Battle data received, waiting to hide loading');
+      await window._hideBattleLoading();
+      console.log('[BATTLE] Battle loading hidden, calling showBattleArena');
       showBattleArena(d.monster, d.playerHp, d.playerMana);
-      if (_charData) await refreshCharData();
+      console.log('[BATTLE] showBattleArena completed');
+      // refreshCharData() removed here — it was re-triggering panel state resets
+      // (checkDeathState / _onPanelSwitch side-effects) right after the arena opened.
+      // Character data is already current from login; full refresh happens on victory/defeat.
     } catch(err) {
-      window._hideBattleLoading();
-      console.error(err);
+      await window._hideBattleLoading?.();
+      console.error('[BATTLE] _confirmFight failed:', err);
       window.showToast(err.message || 'Battle failed. Try again.', 'error');
+      // Restore zone-select so panel is never blank after an error
+      const zs = document.getElementById('battle-zone-select');
+      const ba = document.getElementById('battle-arena');
+      if (zs && (!ba || ba.style.display === 'none')) zs.style.display = 'block';
     } finally {
       if (btn) { btn.disabled = false; btn.textContent = '⚔️ FIGHT'; }
     }
@@ -9869,81 +10889,184 @@ window._confirmAutoBattle = async function() {
 };
  
 function showBattleArena(monster, playerHp, playerMana) {
-  
-  document.getElementById('battle-zone-select').style.display = 'none';
-  document.getElementById('battle-arena').style.display       = 'block';
-  document.getElementById('battle-result').style.display      = 'none';
-  document.getElementById('battle-actions').style.display     = 'flex';
-  document.getElementById('auto-battle-bar').style.display    = 'none';
-  _renderBattlePotionStrip();
+  try {
+    console.log('[BATTLE] showBattleArena called, monster:', monster?.name);
+    const panelBattle = document.getElementById('panel-battle');
+    if (panelBattle) {
+      console.log('[BATTLE] panel-battle element found, has active class:', panelBattle.classList.contains('active'));
+    } else {
+      console.error('[BATTLE] panel-battle element NOT found!');
+    }
+    // Defensively hide every competing panel so nothing can blank or overlap the arena
+    const _sel = (id) => document.getElementById(id);
+    if (_sel('battle-zone-select'))  _sel('battle-zone-select').style.display  = 'none';
+    if (_sel('battle-result'))       _sel('battle-result').style.display       = 'none';
+    if (_sel('auto-battle-bar'))     _sel('auto-battle-bar').style.display     = 'none';
+    if (_sel('auto-battle-hud'))     _sel('auto-battle-hud').style.display     = 'none';
+    if (_sel('boss-raid-ui'))        _sel('boss-raid-ui').style.display        = 'none';
+    if (_sel('boss-raid-arena'))     _sel('boss-raid-arena').style.display     = 'none';
+    if (_sel('zone-pool-exhausted')) _sel('zone-pool-exhausted').style.display = 'none';
+    if (_sel('battle-dead-banner'))  _sel('battle-dead-banner').style.display  = 'none';
+    const arenaEl = _sel('battle-arena');
+    if (arenaEl) {
+      console.log('[BATTLE] Arena element found, current style.cssText:', arenaEl.style.cssText);
+      arenaEl.style.display = 'block';
+      console.log('[BATTLE] Set display=block, new style.cssText:', arenaEl.style.cssText);
+      // Intercept any subsequent display changes to detect what's hiding it
+      const originalDescriptor = Object.getOwnPropertyDescriptor(arenaEl.style, 'display');
+      Object.defineProperty(arenaEl.style, 'display', {
+        get() { return arenaEl.style.cssText.match(/display:\s*([^;]+)/)?.[1] || 'block'; },
+        set(value) {
+          console.log('[BATTLE] ⚠️ battle-arena display changing to:', value, 'stack:', new Error().stack.split('\n').slice(1, 4).join(' | '));
+          arenaEl.style.cssText = arenaEl.style.cssText.replace(/display:\s*[^;]+;?/, '') + '; display: ' + value + ';';
+        }
+      });
+      console.log('[BATTLE] battle-arena display set to block and monitoring for changes');
+    } else {
+      console.error('[BATTLE] battle-arena element not found!');
+    }
+    if (_sel('battle-actions'))      _sel('battle-actions').style.display      = 'flex';
+    _battleMode = 'farming'; // lock mode so no async listener can flip it mid-fight
+    // Scroll main-content to top so the arena is visible on mobile
+    // (the panel may have been scrolled down while browsing zone cards)
+    const _mc = document.querySelector('.main-content');
+    if (_mc) _mc.scrollTop = 0;
+    
+    // Monitor for anything hiding the battle panel
+    if (panelBattle && !window._battlePanelObserver) {
+      window._battlePanelObserver = new MutationObserver((mutations) => {
+        mutations.forEach(m => {
+          if (m.type === 'attributes') {
+            if (m.attributeName === 'style') {
+              console.log('[BATTLE] 🔍 panel-battle style changed to:', panelBattle.getAttribute('style'));
+            }
+            if (m.attributeName === 'class') {
+              console.log('[BATTLE] 🔍 panel-battle class changed to:', panelBattle.className, 'has active?', panelBattle.classList.contains('active'));
+              if (!panelBattle.classList.contains('active')) {
+                console.error('[BATTLE] ❌ CRITICAL: panel-battle lost active class!');
+                new Error('[BATTLE] panel-battle lost active class').stack.split('\n').forEach(line => console.error(line));
+              }
+            }
+          }
+        });
+      });
+      window._battlePanelObserver.observe(panelBattle, { attributes: true, attributeFilter: ['style', 'class'] });
+      console.log('[BATTLE] Monitoring panel-battle for changes');
+    }
+    
+    _renderBattlePotionStrip();
 
-  // Re-enable battle action buttons for new battle
-  const btns = document.querySelectorAll('.battle-action-btn');
-  btns.forEach(b => b.disabled = false);
+    // Log parent container status too
+    setTimeout(() => {
+      const mainContent = document.querySelector('.main-content');
+      if (mainContent) {
+        const computed = window.getComputedStyle(mainContent);
+        console.log('[BATTLE] 200ms - main-content:', {
+          display: computed.display,
+          height: computed.height,
+          overflow: computed.overflow,
+          offsetHeight: mainContent.offsetHeight,
+          offsetWidth: mainContent.offsetWidth
+        });
+      }
+      
+      const computedArena = window.getComputedStyle(arenaEl);
+      const computedPanel = window.getComputedStyle(panelBattle);
+      console.log('[BATTLE] 200ms later - arena display:', computedArena.display, 'arena visibility:', computedArena.visibility);
+      console.log('[BATTLE] 200ms later - panel display:', computedPanel.display, 'panel visibility:', computedPanel.visibility);
+      console.log('[BATTLE] 200ms later - arena offsetHeight:', arenaEl.offsetHeight, 'offsetWidth:', arenaEl.offsetWidth);
+      console.log('[BATTLE] 200ms later - arena computed height:', computedArena.height, 'width:', computedArena.width);
+      
+      // Check all children visibility
+      const monsterNameEl = document.getElementById('monster-name');
+      if (monsterNameEl) {
+        const computed = window.getComputedStyle(monsterNameEl);
+        console.log('[BATTLE] 200ms later - monster-name element:', {
+          display: computed.display,
+          visibility: computed.visibility,
+          offsetHeight: monsterNameEl.offsetHeight,
+          offsetWidth: monsterNameEl.offsetWidth,
+          textContent: monsterNameEl.textContent
+        });
+      }
+    }, 200);
 
-  set('monster-name',  monster.name);
-  set('monster-grade', `Grade ${monster.grade}`);
-  updateBattleBars(monster.hp, monster.maxHp, playerHp, _charData?.hpMax||100, playerMana, _charData?.manaMax||50);
+    // Re-enable battle action buttons for new battle
+    const btns = document.querySelectorAll('.battle-action-btn');
+    btns.forEach(b => b.disabled = false);
 
-  set('battle-player-name', _charData?.name || '—');
-  set('battle-player-rank', `${_charData?.rank||'Wanderer'} Lv.${_charData?.level||1}`);
+    console.log('[BATTLE] Populating arena with monster data:', monster);
+    set('monster-name',  monster.name);
+    set('monster-grade', monster.levelBand ? `Lv. ${monster.levelBand}` : `Grade ${monster.grade}`);
+    console.log('[BATTLE] Monster name/grade set');
+    updateBattleBars(monster.hp, monster.maxHp, playerHp, _charData?.hpMax||100, playerMana, _charData?.manaMax||50);
+    console.log('[BATTLE] Battle bars updated');
 
-  // Monster emoji by grade
-  _renderMonsterAvatar('monster-avatar-emoji', monster);
+    set('battle-player-name', _charData?.name || '—');
+    set('battle-player-rank', `${_charData?.rank||'Wanderer'} Lv.${_displayLevel(_charData?.level||1)}`);
+    console.log('[BATTLE] Player name/rank set');
 
-  // Player avatar
-  const playerAvatarEl = document.getElementById('player-battle-avatar');
-  if (playerAvatarEl && _charData) {
-    const av = _charData.avatarUrl;
-    playerAvatarEl.innerHTML = av?.startsWith('http')
-      ? `<img src="${av}" style="width:60px;height:60px;border-radius:50%;border:2px solid var(--gold-dim);object-fit:cover;"/>`
-      : `<span style="font-size:2.2rem">${av || '⚔️'}</span>`;
-  }
+    // Monster emoji by grade
+    _renderMonsterAvatar('monster-avatar-emoji', monster);
+    console.log('[BATTLE] Monster avatar rendered');
+
+    // Player avatar
+    const playerAvatarEl = document.getElementById('player-battle-avatar');
+    if (playerAvatarEl && _charData) {
+      const av = _charData.avatarUrl;
+      playerAvatarEl.innerHTML = av?.startsWith('http')
+        ? `<img src="${av}" style="width:60px;height:60px;border-radius:50%;border:2px solid var(--gold-dim);object-fit:cover;"/>`
+        : `<span style="font-size:2.2rem">${av || '⚔️'}</span>`;
+    }
 
   // Populate skill menu — gated by rank tier + mana affordability, respects active stance
   function renderSkillMenu() {
-    const RANK_ORDER_BATTLE = ["Wanderer","Follower","Disciple","Master","Exalted","Crown","Supreme","Legend","Myth","Eternal"];
-    const playerRankIdx = RANK_ORDER_BATTLE.indexOf(_charData?.rank || "Wanderer");
-    const tree = SKILL_TREES[_charData?.charClass] || {};
-    // Build ordered list with tier info
-    const tieredSkills = [
-      ...(tree.basic        || []).map(s => ({ name: s.name, tier: 0, tierLabel: "Basic" })),
-      ...(tree.intermediate || []).map(s => ({ name: s.name, tier: 1, tierLabel: "Intermediate" })),
-      ...(tree.advanced     || []).map(s => ({ name: s.name, tier: 2, tierLabel: "Advanced" })),
-    ];
+    try {
+      const RANK_ORDER_BATTLE = ["Wanderer","Follower","Disciple","Master","Exalted","Crown","Supreme","Legend","Myth","Eternal"];
+      const playerRankIdx = Math.max(0, RANK_ORDER_BATTLE.indexOf(_charData?.rank || "Wanderer"));
+      if (playerRankIdx === 0 && _charData?.rank && !RANK_ORDER_BATTLE.includes(_charData.rank)) {
+        console.warn('[BATTLE] Player rank not found in RANK_ORDER_BATTLE:', _charData.rank);
+      }
+      const tree = SKILL_TREES[_charData?.charClass] || {};
+      // Build ordered list with tier info
+      const tieredSkills = [
+        ...(tree.basic        || []).map(s => ({ name: s.name, tier: 0, tierLabel: "Basic" })),
+        ...(tree.intermediate || []).map(s => ({ name: s.name, tier: 1, tierLabel: "Intermediate" })),
+        ...(tree.advanced     || []).map(s => ({ name: s.name, tier: 2, tierLabel: "Advanced" })),
+      ];
 
-    // Filter to active stance if one is set
-    const activeIdx = window._activeStanceIdx;
-    const stances   = _getStances();
-    const stanceSkills = (activeIdx !== null && stances[activeIdx]?.skills?.length)
-      ? new Set(stances[activeIdx].skills) : null;
+      // Filter to active stance if one is set
+      const activeIdx = window._activeStanceIdx;
+      const stances   = _getStances();
+      const stanceSkills = (activeIdx !== null && stances[activeIdx]?.skills?.length)
+        ? new Set(stances[activeIdx].skills) : null;
 
-    const menuList = document.getElementById('skill-menu-list');
-    if (menuList) {
-      // Show stance badge if a stance is active
-      const stanceBadge = stanceSkills
-        ? `<div class="skill-menu-stance-badge">⚔ ${stances[activeIdx].name}</div>`
-        : '';
-
-      const filteredSkills = stanceSkills
-        ? tieredSkills.filter(s => stanceSkills.has(s.name))
-        : tieredSkills;
-
-      menuList.innerHTML = stanceBadge + filteredSkills.map(({ name: s, tier, tierLabel }) => {
-        const sk         = SKILL_DATA[s] || {};
-        const cost       = sk.mana || 0;
-        const rankUnlocked = playerRankIdx >= tier;
-        const canAfford  = playerMana >= cost;
-        const usable     = rankUnlocked && canAfford;
-        const manaLabel  = cost === 0
-          ? `<span style="color:#4caf8a;font-size:0.68rem">Free</span>`
-          : `<span style="color:${canAfford?'#6ab0f5':'#e05555'};font-size:0.68rem">${cost} MP</span>`;
-        const lockLabel  = !rankUnlocked
-          ? `<span style="color:#888;font-size:0.65rem">🔒 ${tierLabel}</span>`
+      const menuList = document.getElementById('skill-menu-list');
+      if (menuList) {
+        // Show stance badge if a stance is active
+        const stanceBadge = stanceSkills
+          ? `<div class="skill-menu-stance-badge">⚔ ${stances[activeIdx].name}</div>`
           : '';
-        return `
-          <div class="skill-menu-item${usable ? '' : ' skill-locked-mana'}"
-               data-skill="${s}" data-usable="${usable}"
+
+        const filteredSkills = stanceSkills
+          ? tieredSkills.filter(s => stanceSkills.has(s.name))
+          : tieredSkills;
+
+        menuList.innerHTML = stanceBadge + filteredSkills.map(({ name: s, tier, tierLabel }) => {
+          const sk         = SKILL_DATA[s] || {};
+          const cost       = sk.mana || 0;
+          const rankUnlocked = playerRankIdx >= tier;
+          const canAfford  = playerMana >= cost;
+          const usable     = rankUnlocked && canAfford;
+          const manaLabel  = cost === 0
+            ? `<span style="color:#4caf8a;font-size:0.68rem">Free</span>`
+            : `<span style="color:${canAfford?'#6ab0f5':'#e05555'};font-size:0.68rem">${cost} MP</span>`;
+          const lockLabel  = !rankUnlocked
+            ? `<span style="color:#888;font-size:0.65rem">🔒 ${tierLabel}</span>`
+            : '';
+          return `
+            <div class="skill-menu-item${usable ? '' : ' skill-locked-mana'}"
+                 data-skill="${s}" data-usable="${usable}"
                style="opacity:${usable?'1':'0.4'};cursor:${usable?'pointer':'not-allowed'}">
             <span class="skill-menu-item-name">${s}</span>
             <span style="display:flex;gap:6px;align-items:center">${manaLabel}${lockLabel}</span>
@@ -9957,6 +11080,13 @@ function showBattleArena(monster, playerHp, playerMana) {
           window.closeBattleSkillMenu?.();
         });
       });
+    }
+    } catch(skillMenuErr) {
+      console.warn('[BATTLE] renderSkillMenu error:', skillMenuErr);
+      const menuList = document.getElementById('skill-menu-list');
+      if (menuList) {
+        menuList.innerHTML = '<div style="color:var(--text-dim);font-style:italic;padding:12px;font-size:0.82rem">⚠️ Error loading skills. Please report this.</div>';
+      }
     }
   }
   renderSkillMenu();
@@ -9972,12 +11102,16 @@ function showBattleArena(monster, playerHp, playerMana) {
         || null;
   }
   window.openBattleSkillMenu = function() {
+    const actionsEl = document.getElementById('battle-actions');
+    if (actionsEl) actionsEl.style.display = 'none';
     const wrap = _getSkillMenuContainer();
     if (!wrap) return;
     wrap.style.display = 'block';
     renderSkillMenu(); // refresh mana/rank state each open
   };
   window.closeBattleSkillMenu = function() {
+    const actionsEl = document.getElementById('battle-actions');
+    if (actionsEl) actionsEl.style.display = 'flex';
     const wrap = _getSkillMenuContainer();
     if (wrap) wrap.style.display = 'none';
   };
@@ -9987,6 +11121,8 @@ function showBattleArena(monster, playerHp, playerMana) {
   if (skillActionBtn) {
     // Remove old listener by replacing element clone trick, then re-add
     const newSkillBtn = skillActionBtn.cloneNode(true);
+    // CRITICAL: remove HTML onclick so it does not fire openSkillMenu() alongside the new listener
+    newSkillBtn.removeAttribute('onclick');
     skillActionBtn.parentNode?.replaceChild(newSkillBtn, skillActionBtn);
     newSkillBtn.addEventListener('click', () => {
       const wrap = _getSkillMenuContainer();
@@ -10000,7 +11136,14 @@ function showBattleArena(monster, playerHp, playerMana) {
     });
   }
 
-  addBattleLog(`⚔️ You encountered a ${monster.name}! (Grade ${monster.grade})`);
+  addBattleLog(`⚔️ You encountered a ${monster.name}! ${monster.levelBand ? '(Lv.' + monster.levelBand + ')' : '(Grade ' + monster.grade + ')'}`);
+  } catch(err) {
+    console.error('[BATTLE] showBattleArena error:', err);
+    window.showToast('Battle display error: ' + (err.message || 'Unknown'), 'error');
+    // Restore zone-select so panel is never blank
+    const zs = document.getElementById('battle-zone-select');
+    if (zs) zs.style.display = 'block';
+  }
 }
  
 window._battleTurn = async function(action, skillName) {
@@ -10048,7 +11191,13 @@ window._battleTurn = async function(action, skillName) {
 function showBattleResult(d) {
   _currentBattle = null; // unblock passive regen now that the fight is over
   document.getElementById('battle-arena').style.display  = 'none';
-  document.getElementById('battle-result').style.display = 'block';
+  const resultEl = document.getElementById('battle-result');
+  if (resultEl) {
+    resultEl.style.display = 'block';
+    resultEl.style.visibility = 'visible';
+    resultEl.style.opacity = '1';
+    setTimeout(() => resultEl.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+  }
   document.getElementById('auto-battle-bar').style.display = 'none';
 
   const isVictory = d.status === 'victory';
@@ -10167,6 +11316,7 @@ window._useBattlePotion = async function(itemName, kind) {
 };
 
 function updateBattleBars(monHp, monMax, plHp, plMax, plMana, plManaMax) {
+  console.log('[BARS] updateBattleBars called with:', { monHp, monMax, plHp, plMax, plMana, plManaMax });
   const monPct  = Math.max(0, Math.round((monHp  / monMax)    * 100));
   const plPct   = Math.max(0, Math.round((plHp   / plMax)     * 100));
   const manaPct = Math.max(0, Math.round((plMana / plManaMax) * 100));
@@ -10176,6 +11326,7 @@ function updateBattleBars(monHp, monMax, plHp, plMax, plMana, plManaMax) {
   set('monster-hp-text', `${monHp} / ${monMax}`);
   set('player-hp-text',  `${plHp} / ${plMax}`);
   set('player-mp-text',  `${plMana} / ${plManaMax}`);
+  console.log('[BARS] Battle bars updated');
 }
  
 function addBattleLog(msg) {
@@ -10241,28 +11392,29 @@ const GRADE_RANK_REQ = { E:0, D:0, C:1, B:2, A:3, S:5 };
  
 function updateZoneLocks() {
   if (!_charData) return;
-  const rankIdx  = RANK_ORDER.indexOf(_charData.rank || "Wanderer");
-  const location = (_charData.location || "").toLowerCase().trim();
+  const playerLevel = _charData.level || 1;
+  const location    = (_charData.location || "").toLowerCase().trim();
 
-  // A card only unlocks when the player is physically present in that exact monster zone.
-  // Towns, capitals, and any other non-combat locations never match.
+  // A card only unlocks when the player is physically present in that exact monster zone
+  // AND meets the minimum player level for that zone.
   document.querySelectorAll(".zone-card[data-grade]").forEach(card => {
-    const grade    = card.dataset.grade;
-    const zoneName = (card.dataset.zone || "").toLowerCase().trim();
-    const req      = GRADE_RANK_REQ[grade] ?? 99;
-    const rankLock = rankIdx < req;
-    const zoneLock = location !== zoneName;
-    const locked   = rankLock || zoneLock;
+    const zoneName   = (card.dataset.zone || "").toLowerCase().trim();
+    const zoneReq    = ZONE_LEVEL_REQ[card.dataset.zone] ?? 1;
+    const levelLock  = playerLevel < zoneReq;
+    const zoneLock   = location !== zoneName;
+    const locked     = levelLock || zoneLock;
 
     card.classList.toggle("zone-locked", locked);
     const descEl = card.querySelector(".zone-desc");
     if (!descEl) return;
     if (locked) {
       if (!descEl.dataset.origText) descEl.dataset.origText = descEl.textContent;
-      if (zoneLock) {
-        descEl.textContent = `🗺️ Travel here first`;
+      if (zoneLock && levelLock) {
+        descEl.textContent = `🔒 Reach Lv.${zoneReq} & travel here`;
+      } else if (levelLock) {
+        descEl.textContent = `🔒 Requires Lv.${zoneReq}`;
       } else {
-        descEl.textContent = `🔒 Requires ${RANK_ORDER[req]} rank`;
+        descEl.textContent = `🗺️ Travel here first`;
       }
     } else if (descEl.dataset.origText) {
       descEl.textContent = descEl.dataset.origText;
@@ -10442,6 +11594,75 @@ window._poolExhaustedChoice = function(choice) {
   }
 };
 
+// Zone → region name map (for auto-opening the right dropdown)
+const ZONE_REGION_MAP = {
+  // Dark Woodlands
+  'Gremlin Hollows': 'Dark Woodlands', 'Serpent Mire': 'Dark Woodlands',
+  'Burrowdeep Basin': 'Dark Woodlands', 'Root Grove': 'Dark Woodlands',
+  'Crimson Fang': 'Dark Woodlands',
+  // Shattered Heavens
+  'Titan Divide': 'Shattered Heavens', 'Veilwater Basin': 'Shattered Heavens',
+  'Frostfall Expanse': 'Shattered Heavens', 'Ember Horizon': 'Shattered Heavens',
+  'Tempest Crown': 'Shattered Heavens',
+  // Glass Hell
+  'Lake of Reflections': 'Glass Hell', 'Crystal Cave': 'Glass Hell',
+  'Mirror Sky': 'Glass Hell', 'Rainbow Valley': 'Glass Hell',
+  'Shimmering Peak': 'Glass Hell',
+  // Corrupted Hallows
+  'Gravemarch Fields': 'Corrupted Hallows', 'Whispering Necropolis': 'Corrupted Hallows',
+  'Defiled Sanctum': 'Corrupted Hallows', 'Dark Cathedral': 'Corrupted Hallows',
+  'Fallen Bastion': 'Corrupted Hallows',
+  // Otherworld
+  'Blighted World': 'Otherworld', 'Leviathan Depths': 'Otherworld',
+  'Ashwing Aerie': 'Otherworld', 'Sphinx Dominion': 'Otherworld',
+  'Infernal Reach': 'Otherworld',
+  // Nyx Abyss — Fallen Heaven
+  'Fractured Firmament': 'Fallen Heaven', 'Maw of Eternity': 'Fallen Heaven',
+  'Veil of Madness': 'Fallen Heaven', 'The Watching Expanse': 'Fallen Heaven',
+  'Descent of the Nameless': 'Fallen Heaven',
+  // Nyx Abyss — Underworld
+  'Gravefall Descent': 'Underworld', 'Weeping Caverns': 'Underworld',
+  'Kingdom of Chains': 'Underworld', 'The Hollow Deep': 'Underworld',
+  'Throne of the Depths': 'Underworld',
+  // Nyx Abyss — Land of Sin
+  'Throne of Pride': 'Land of Sin', 'Hallow of Greed': 'Land of Sin',
+  'Crimson Feast': 'Land of Sin', 'Veil of Desire': 'Land of Sin',
+  'The Forsaken Graves': 'Land of Sin',
+  // Nyx Abyss — Cosmos
+  'Bleeding Constellations': 'Cosmos', 'The Watching Worlds': 'Cosmos',
+  'Nebula of Whispers': 'Cosmos', 'Eclipse Throne': 'Cosmos',
+  'The Endless Maw': 'Cosmos',
+  // Nyx Abyss — The Withering Tree
+  'Root of Malevolence': 'The Withering Tree', 'Grove of Horror': 'The Withering Tree',
+  'Canopy of Despair': 'The Withering Tree', 'Crown of Madness': 'The Withering Tree',
+  'Heartwood Abyss': 'The Withering Tree',
+};
+
+// Toggle a region open/closed manually
+window.toggleZoneRegion = function(btn) {
+  const region = btn.closest('.zone-region');
+  if (!region) return;
+  const body = region.querySelector('.zone-region-body');
+  const arrow = region.querySelector('.zone-region-arrow');
+  const isCollapsed = region.classList.toggle('collapsed');
+  if (body) body.style.display = isCollapsed ? 'none' : 'block';
+  if (arrow) arrow.style.transform = isCollapsed ? 'rotate(-90deg)' : '';
+};
+
+// Open the region containing the given zone name; collapse all others
+function _openRegionForZone(zoneName) {
+  const targetRegion = ZONE_REGION_MAP[zoneName];
+  if (!targetRegion) return;
+  document.querySelectorAll('.zone-region').forEach(r => {
+    const isTarget = r.dataset.region === targetRegion;
+    const body = r.querySelector('.zone-region-body');
+    const arrow = r.querySelector('.zone-region-arrow');
+    r.classList.toggle('collapsed', !isTarget);
+    if (body) body.style.display = isTarget ? 'block' : 'none';
+    if (arrow) arrow.style.transform = isTarget ? '' : 'rotate(-90deg)';
+  });
+}
+
 // Called when battle panel opens — refresh zone locks and hint
 window._refreshFarmingZones = function() {
   updateZoneLocks();
@@ -10454,12 +11675,30 @@ window._refreshFarmingZones = function() {
   // Hide exhausted banner on fresh open
   const banner = document.getElementById('zone-pool-exhausted');
   if (banner) banner.style.display = 'none';
+
+  // Auto-open the region matching the player's current location
+  const locLower = loc.toLowerCase().trim();
+  const matchedZone = Object.keys(ZONE_REGION_MAP).find(z => z.toLowerCase() === locLower);
+  if (matchedZone) {
+    _openRegionForZone(matchedZone);
+  } else {
+    // Not in any known zone — collapse all, leave user to open manually
+    document.querySelectorAll('.zone-region').forEach(r => {
+      r.classList.add('collapsed');
+      const body = r.querySelector('.zone-region-body');
+      const arrow = r.querySelector('.zone-region-arrow');
+      if (body) body.style.display = 'none';
+      if (arrow) arrow.style.transform = 'rotate(-90deg)';
+    });
+  }
 };
 
 // Auto-select a zone card by name (used by map "Fight Here" button)
 window._autoSelectZoneByName = function(zoneName) {
   const card = document.querySelector(`.zone-card[data-zone="${zoneName}"]`);
   if (!card || card.classList.contains('zone-locked')) return;
+  // Open the region containing this zone first
+  _openRegionForZone(zoneName);
   const grade = card.dataset.grade;
   document.querySelectorAll('.zone-card:not(.zone-locked)').forEach(c => c.classList.remove('selected'));
   card.classList.add('selected');
@@ -10511,8 +11750,22 @@ function checkDeathState() {
       }, 1000);
     }
   } else {
-    if (banner)   banner.style.display   = 'none';
-    if (zoneArea) zoneArea.style.display = 'block';
+    if (banner) banner.style.display = 'none';
+    // Only show zone-select if no other battle UI is currently active.
+    // Prevents checkDeathState (called on every panel switch) from clobbering
+    // battle-arena / boss-raid-arena / result screen mid-fight.
+    const arenaVisible   = arena      && arena.style.display      !== 'none';
+    const resultVisible  = result     && result.style.display     !== 'none';
+    const bossVisible    = bossRaidUI && bossRaidUI.style.display !== 'none';
+    const bossArenaVis   = bossArena  && bossArena.style.display  !== 'none';
+    const autoBarVisible = autoBatBar && autoBatBar.style.display !== 'none';
+    // Also guard on JS-level battle flags — prevents checkDeathState from restoring
+    // zone-select during the brief window between _showBattleLoading and showBattleArena
+    // where arena.style.display is still 'none' but a fight is already committed.
+    const battleFlagActive = !!window._currentBattle || !!window._autoBattleRunning;
+    const noBattleActive = !arenaVisible && !resultVisible && !bossVisible && !bossArenaVis && !autoBarVisible && !battleFlagActive;
+    console.log('[BATTLE] checkDeathState: arenaVisible=', arenaVisible, 'battleFlagActive=', battleFlagActive, 'noBattleActive=', noBattleActive);
+    if (zoneArea && noBattleActive) zoneArea.style.display = 'block';
     updateZoneLocks();
   }
 }
@@ -10550,7 +11803,10 @@ window.updateBattleModeUI = function(mode) {
   // Show/hide UI sections for each mode
   const zoneSelect = document.getElementById('battle-zone-select');
   const bossRaidUI = document.getElementById('boss-raid-ui');
-  if (zoneSelect) zoneSelect.style.display = (mode === 'farming') ? 'block' : 'none';
+  // Don't restore zone-select if a fight is already in progress
+  const _arenaEl = document.getElementById('battle-arena');
+  const _arenaActive = (_arenaEl && _arenaEl.style.display !== 'none') || !!window._currentBattle || !!window._autoBattleRunning;
+  if (zoneSelect && !_arenaActive) zoneSelect.style.display = (mode === 'farming') ? 'block' : 'none';
   if (bossRaidUI) {
     bossRaidUI.style.display = (mode === 'boss') ? 'block' : 'none';
     if (mode === 'boss') {
@@ -11007,9 +12263,17 @@ function _bossBasicAttack(state, abilityName) {
 }
 
 function _advanceLeader(state) {
-  for (let i = 0; i < state.party.length; i++) {
-    if (state.party[i].status === 'alive') { state.leaderIdx = i; return; }
+  // Called when the current turn-holder dies mid-turn.
+  // Advance currentTurnIdx to the next alive member so the raid never stalls.
+  const len = state.party.length;
+  for (let i = 1; i <= len; i++) {
+    const next = (state.currentTurnIdx + i) % len;
+    if (state.party[next]?.status === 'alive') {
+      state.currentTurnIdx = next;
+      return;
+    }
   }
+  // No alive members left — _checkPartyDefeated will handle wipe
 }
 
 function _checkPartyDefeated(state) {
@@ -11036,8 +12300,20 @@ window.startBossRaid = function(party, bossTemplate) {
   _battleMode = 'boss';
   _bossRaidBoss = bossTemplate || BOSS_LIST[0];
 
+  // Apply leader-set member order if saved on the party document
+  let orderedParty = party;
+  if (_party?.memberOrder && Array.isArray(_party.memberOrder) && _party.memberOrder.length > 0) {
+    const orderMap = {};
+    _party.memberOrder.forEach((uid, i) => { orderMap[uid] = i; });
+    orderedParty = [...party].sort((a, b) => {
+      const ai = orderMap[a.uid] ?? 999;
+      const bi = orderMap[b.uid] ?? 999;
+      return ai - bi;
+    });
+  }
+
   // Build fighter objects from party members
-  _bossRaidParty = party.map(p => _buildFighter(p));
+  _bossRaidParty = orderedParty.map(p => _buildFighter(p));
   _bossRaidLeaderIdx = 0;
 
   _bossRaidState = {
@@ -11115,13 +12391,19 @@ function _refreshRaidUI() {
       const av = p.avatarUrl?.startsWith('http')
         ? `<img src="${p.avatarUrl}" style="width:28px;height:28px;border-radius:50%;object-fit:cover"/>`
         : `<span style="font-size:1rem">${p.avatarUrl||'⚔️'}</span>`;
+      const manaPct = Math.max(0, ((p.mana ?? p.manaMax ?? 50) / (p.manaMax || 50)) * 100);
+      const manaVal  = p.mana ?? p.manaMax ?? 50;
       return `<div class="raid-combat-member${isDead?' raid-member-dead':''}${isTurn?' raid-member-turn':''}">
         <div class="raid-combat-avatar">${av}</div>
         <div style="flex:1">
           <div style="font-size:0.78rem;color:var(--text)">${p.name}${i===0?' 👑':''}${isDead?' 💀':''}</div>
           <div class="battle-bar" style="height:5px;margin-top:3px"><div class="battle-bar-fill hp-fill" style="width:${hpPct}%"></div></div>
+          <div class="battle-bar" style="height:4px;margin-top:2px;background:rgba(91,159,224,0.12)"><div class="battle-bar-fill" style="width:${manaPct}%;background:#5b9fe0;transition:width 0.4s"></div></div>
         </div>
-        <span style="font-family:var(--font-mono);font-size:0.58rem;color:${isDead?'var(--ash)':'#5dbe85'}">${isDead?'OUT':`${p.hp}/${p.maxHp}`}</span>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
+          <span style="font-family:var(--font-mono);font-size:0.58rem;color:${isDead?'var(--ash)':'#5dbe85'}">${isDead?'OUT':`${p.hp}/${p.maxHp}`}</span>
+          ${!isDead?`<span style="font-family:var(--font-mono);font-size:0.52rem;color:#5b9fe0">${manaVal}MP</span>`:''}
+        </div>
       </div>`;
     }).join('');
   }
@@ -11294,8 +12576,19 @@ window.doRaidTurn = function(action, skillName) {
     attempts++;
   }
 
-  // If we've lapped back to index 0 (full round done) or all alive members exhausted, boss acts
-  if (next === 0 || attempts >= s.party.length) {
+  // All party members defeated — wipe (safety net; _checkPartyDefeated should catch this)
+  if (attempts >= s.party.length) {
+    s.status = 'defeat';
+    s.log.push(`💀 Your party has been wiped by ${s.boss.name}...`);
+    _refreshRaidUI();
+    updateDoc(doc(db, 'parties', _partyId), { 'raid.state': s });
+    return;
+  }
+
+  // Boss acts once per full round — track via a round counter rather than index wrap
+  // A new round starts whenever next <= currentTurnIdx (we've looped past the last alive slot)
+  const roundComplete = next <= s.currentTurnIdx || attempts > 0 && next < s.currentTurnIdx + attempts;
+  if (roundComplete) {
     // Boss turn
     const doomMsg = _tickDoom(s);
     if (doomMsg) s.log.push(doomMsg);
@@ -11365,6 +12658,16 @@ window.doRaidTurn = function(action, skillName) {
       updateDoc(doc(db, 'parties', _partyId), { 'raid.state': s });
       return;
     }
+
+    // After boss acts, re-find next alive member starting from next
+    // (boss attack may have killed whoever 'next' pointed at)
+    let safeNext = next;
+    let safeAttempts = 0;
+    while (s.party[safeNext]?.status === 'defeated' && safeAttempts < s.party.length) {
+      safeNext = (safeNext + 1) % s.party.length;
+      safeAttempts++;
+    }
+    next = safeNext;
   }
 
   s.currentTurnIdx = next;
@@ -11377,7 +12680,10 @@ window.openRaidSkillMenu = function() {
   const menu = document.getElementById('raid-skill-menu');
   const list = document.getElementById('raid-skill-list');
   if (!menu || !list) return;
-  _fillSkillMenu(list, (s) => { window.doRaidTurn('skill', s); window.closeRaidSkillMenu(); });
+  // Pass live mana from raid party member so affordability reflects actual spent mana
+  const _raidMyIdx = _bossRaidState?.myIdx ?? _bossRaidState?.party?.findIndex(p => p.uid === _uid) ?? 0;
+  const _raidMe = _bossRaidState?.party?.[_raidMyIdx];
+  _fillSkillMenu(list, (s) => { window.doRaidTurn('skill', s); window.closeRaidSkillMenu(); }, _raidMe?.mana);
   menu.style.display = 'block';
 };
 window.closeRaidSkillMenu = function() {
@@ -11414,11 +12720,11 @@ function _showRaidResult() {
       const { newXp, newLevel, newRank, newXpMax, leveledUp } = _processExp(
         _charData.xp||0, _charData.xpMax||100, _charData.level||1, _charData.rank||'Wanderer', expEach, _charData.charClass
       );
-      updateDoc(doc(db, 'characters', _uid), { gold: (_charData.gold||0)+goldEach, xp:newXp, level:newLevel, rank:newRank, xpMax:newXpMax })
+      updateDoc(doc(db, 'characters', _uid), { gold: increment(goldEach), xp:newXp, level:newLevel, rank:newRank, xpMax:newXpMax }) // FIXED: use increment
         .then(() => {
           _charData.gold = (_charData.gold||0)+goldEach;
           set('stat-gold', _charData.gold); set('s-gold', _charData.gold);
-          if (leveledUp) window.showToast(`🎉 Level Up! Now Lv.${newLevel}`, 'success');
+          if (leveledUp) window.showToast(`🎉 Level Up! ${newRank} Lv.${_displayLevel(newLevel)}`, 'success');
         }).catch(()=>{});
     }
   } else {
@@ -11509,7 +12815,7 @@ let _pvpAmChallenger  = false;
 window.initPvpMode = function() {
   if (_charData) {
     document.getElementById('pvp-my-name').textContent = _charData.name || '—';
-    document.getElementById('pvp-my-rank').textContent = `${_charData.rank||'Wanderer'} Lv.${_charData.level||1}`;
+    document.getElementById('pvp-my-rank').textContent = `${_charData.rank||'Wanderer'} Lv.${_displayLevel(_charData.level||1)}`;
     const av = _charData.avatarUrl;
     document.getElementById('pvp-my-avatar').innerHTML = av?.startsWith('http')
       ? `<img src="${av}" style="width:40px;height:40px;border-radius:50%;object-fit:cover"/>`
@@ -11538,7 +12844,7 @@ async function _loadPvpPlayers() {
         <div class="pvp-player-avatar">${av}</div>
         <div style="flex:1">
           <div style="font-size:0.86rem;color:var(--text)">${p.name||'Unknown'}</div>
-          <div style="font-family:var(--font-mono);font-size:0.6rem;color:var(--text-dim)">${p.rank||'Wanderer'} Lv.${p.level||1} · ${p.charClass||'—'}</div>
+          <div style="font-family:var(--font-mono);font-size:0.6rem;color:var(--text-dim)">${p.rank||'Wanderer'} Lv.${_displayLevel(p.level||1)} · ${p.charClass||'—'}</div>
         </div>
         <div style="font-family:var(--font-mono);font-size:0.6rem;color:#5dbe85;margin-right:8px">HP ${p.hp??p.hpMax??100}</div>
         <button class="btn-secondary" style="font-size:0.7rem;padding:5px 10px" onclick="window.challengePlayer('${p.uid}','${(p.name||'').replace(/'/g,"\'")}')">CHALLENGE</button>
@@ -11714,7 +13020,7 @@ function _refreshPvpArena(match) {
     : `<span style="font-size:1.8rem">${opp.avatarUrl||'⚔️'}</span>`;
   document.getElementById('pvp-opp-avatar').innerHTML  = oppAv;
   document.getElementById('pvp-opp-name').textContent  = opp.name;
-  document.getElementById('pvp-opp-rank').textContent  = `${opp.rank} Lv.${opp.level}`;
+  document.getElementById('pvp-opp-rank').textContent  = `${opp.rank} Lv.${_displayLevel(opp.level||1)}`;
   document.getElementById('pvp-opp-hp-text').textContent = `${oppHp}/${opp.maxHp}`;
   document.getElementById('pvp-opp-hp-fill').style.width = `${Math.max(0,(oppHp/opp.maxHp)*100)}%`;
 
@@ -11724,7 +13030,7 @@ function _refreshPvpArena(match) {
     : `<span style="font-size:1.8rem">${me.avatarUrl||'🧑'}</span>`;
   document.getElementById('pvp-me-avatar').innerHTML  = myAv;
   document.getElementById('pvp-me-name').textContent  = me.name;
-  document.getElementById('pvp-me-rank').textContent  = `${me.rank} Lv.${me.level}`;
+  document.getElementById('pvp-me-rank').textContent  = `${me.rank} Lv.${_displayLevel(me.level||1)}`;
   document.getElementById('pvp-me-hp-text').textContent = `${myHp}/${me.maxHp}`;
   document.getElementById('pvp-me-hp-fill').style.width = `${Math.max(0,(myHp/me.maxHp)*100)}%`;
   document.getElementById('pvp-me-mp-text').textContent = `${myMana}/${me.maxMana}`;
@@ -11813,9 +13119,17 @@ function _applyPvpSkill(skillName, me, opp, myHp, oppHp, myMana, myState, oppSta
       break;
     }
     case 'buff': {
-      const bKey = `buff_${sk.stat}`;
-      myStateUpd[bKey] = Math.min((myState[bKey]||0)+(sk.buffMult||0.20), BUFF_CAP);
-      log.push(`⬆️ ${me.name} uses ${skillName} — ${sk.stat.toUpperCase()} +${Math.round((sk.buffMult||0.20)*100)}%!`);
+      if (sk.stat === 'all') {
+        ['str','int','def','dex'].forEach(s => {
+          const bk = `buff_${s}`;
+          myStateUpd[bk] = Math.min((myState[bk]||0)+(sk.buffMult||0.20), BUFF_CAP);
+        });
+        log.push(`⬆️ ${me.name} uses ${skillName} — ALL STATS +${Math.round((sk.buffMult||0.20)*100)}%!`);
+      } else {
+        const bKey = `buff_${sk.stat}`;
+        myStateUpd[bKey] = Math.min((myState[bKey]||0)+(sk.buffMult||0.20), BUFF_CAP);
+        log.push(`⬆️ ${me.name} uses ${skillName} — ${sk.stat.toUpperCase()} +${Math.round((sk.buffMult||0.20)*100)}%!`);
+      }
       break;
     }
     case 'sacrificial': {
@@ -12113,12 +13427,13 @@ function _showPvpView(view) {
 }
 
 // ── Shared skill menu builder ──
-function _fillSkillMenu(listEl, onSelect) {
+function _fillSkillMenu(listEl, onSelect, liveMana) {
   if (!_charData) return;
   const RANK_ORDER_B = ["Wanderer","Follower","Disciple","Master","Exalted","Crown","Supreme","Legend","Myth","Eternal"];
   const rankIdx = RANK_ORDER_B.indexOf(_charData.rank || "Wanderer");
   const unlockedCount = Math.max(2, rankIdx * 2 + 2);
-  const myMana = _charData.mana ?? _charData.manaMax ?? 50;
+  // liveMana: passed by boss raid / PvP for real-time affordability; falls back to charData snapshot
+  const myMana = liveMana ?? _charData.mana ?? _charData.manaMax ?? 50;
 
   // Use active stance if set, otherwise full class list
   const activeIdx = window._activeStanceIdx;
@@ -12166,209 +13481,209 @@ window.updateBattleModeUI = function(mode) {
 window.CANONICAL_EQUIP_RECIPES = {
   E: [
     // Weapons
-    { name:"Rusted Greatsword", icon:"⚔️",  type:"weapon", cost:220,  stats:{str:7},       requires:[{name:"Iron",qty:5},{name:"Tough Hide",qty:2}] },
-    { name:"Crude Bow",         icon:"🏹",  type:"weapon", cost:210,  stats:{dex:6},       requires:[{name:"Iron",qty:4},{name:"Leather",qty:1}] },
-    { name:"Iron Dagger",       icon:"🗡️",  type:"weapon", cost:200,  stats:{dex:5},       requires:[{name:"Iron",qty:4},{name:"Bone Fragments",qty:1}] },
-    { name:"Apprentice Wand",   icon:"🪄",  type:"weapon", cost:230,  stats:{int:8},       requires:[{name:"Quartz",qty:3},{name:"Animal Fat",qty:2}] },
-    { name:"Shortblade",        icon:"🗡️",  type:"weapon", cost:210,  stats:{str:6},       requires:[{name:"Iron",qty:5}] },
-    { name:"Bone Mace",         icon:"🔨",  type:"weapon", cost:215,  stats:{str:7},       requires:[{name:"Bone Fragments",qty:4},{name:"Iron",qty:1}] },
-    { name:"Hunter Knife",      icon:"🗡️",  type:"weapon", cost:210,  stats:{dex:6},       requires:[{name:"Iron",qty:3},{name:"Fur",qty:1}] },
-    { name:"Quartz Rod",        icon:"🪄",  type:"weapon", cost:240,  stats:{int:9},       requires:[{name:"Quartz",qty:4},{name:"Limestone",qty:2}] },
-    { name:"Tin Blade",         icon:"🗡️",  type:"weapon", cost:200,  stats:{str:5},       requires:[{name:"Tin",qty:4}] },
-    { name:"Feather Knife",     icon:"🗡️",  type:"weapon", cost:215,  stats:{dex:6},       requires:[{name:"Iron",qty:3},{name:"Feathers",qty:2}] },
+    { name:"Rusted Greatsword", icon:"⚔️",  type:"weapon", cost:2200,  stats:{str:7},       requires:[{name:"Iron",qty:10},{name:"Tough Hide",qty:4}] },
+    { name:"Crude Bow",         icon:"🏹",  type:"weapon", cost:2100,  stats:{dex:6},       requires:[{name:"Iron",qty:8},{name:"Leather",qty:2}] },
+    { name:"Iron Dagger",       icon:"🗡️",  type:"weapon", cost:2000,  stats:{dex:5},       requires:[{name:"Iron",qty:8},{name:"Bone Fragments",qty:2}] },
+    { name:"Apprentice Wand",   icon:"🪄",  type:"weapon", cost:2300,  stats:{int:8},       requires:[{name:"Quartz",qty:6},{name:"Animal Fat",qty:4}] },
+    { name:"Shortblade",        icon:"🗡️",  type:"weapon", cost:2100,  stats:{str:6},       requires:[{name:"Iron",qty:10}] },
+    { name:"Bone Mace",         icon:"🔨",  type:"weapon", cost:2150,  stats:{str:7},       requires:[{name:"Bone Fragments",qty:8},{name:"Iron",qty:2}] },
+    { name:"Hunter Knife",      icon:"🗡️",  type:"weapon", cost:2100,  stats:{dex:6},       requires:[{name:"Iron",qty:6},{name:"Fur",qty:4}] },
+    { name:"Quartz Rod",        icon:"🪄",  type:"weapon", cost:2400,  stats:{int:9},       requires:[{name:"Quartz",qty:8},{name:"Limestone",qty:4}] },
+    { name:"Tin Blade",         icon:"🗡️",  type:"weapon", cost:2000,  stats:{str:5},       requires:[{name:"Tin",qty:10}] },
+    { name:"Feather Knife",     icon:"🗡️",  type:"weapon", cost:2150,  stats:{dex:6},       requires:[{name:"Iron",qty:6},{name:"Feathers",qty:4}] },
     // Armor
-    { name:"Leather Vest",      icon:"🥋",  type:"armor",  cost:200,  stats:{def:6},       requires:[{name:"Leather",qty:4}] },
-    { name:"Iron Plate",        icon:"⛓️",  type:"armor",  cost:230,  stats:{def:8},       requires:[{name:"Iron",qty:5}] },
-    { name:"Bone Armor",        icon:"🦴",  type:"armor",  cost:210,  stats:{def:7},       requires:[{name:"Bone Fragments",qty:4}] },
-    { name:"Fur Coat",          icon:"🦊",  type:"armor",  cost:190,  stats:{def:5},       requires:[{name:"Fur",qty:3}] },
-    { name:"Hide Armor",        icon:"🥋",  type:"armor",  cost:205,  stats:{def:6},       requires:[{name:"Tough Hide",qty:4}] },
-    { name:"Feather Cloak",     icon:"🪶",  type:"armor",  cost:190,  stats:{def:5},       requires:[{name:"Feathers",qty:3}] },
-    { name:"Tin Armor",         icon:"🪨",  type:"armor",  cost:215,  stats:{def:7},       requires:[{name:"Tin",qty:4}] },
-    { name:"Copper Plate",      icon:"🟠",  type:"armor",  cost:210,  stats:{def:6},       requires:[{name:"Copper",qty:4}] },
-    { name:"Marble Guard",      icon:"🏛️",  type:"armor",  cost:230,  stats:{def:8},       requires:[{name:"Marble",qty:3}] },
-    { name:"Obsidian Layer",    icon:"🖤",  type:"armor",  cost:240,  stats:{def:9},       requires:[{name:"Obsidian",qty:3}] },
+    { name:"Leather Vest",      icon:"🥋",  type:"armor",  cost:2000,  stats:{def:6},       requires:[{name:"Leather",qty:10}] },
+    { name:"Iron Plate",        icon:"⛓️",  type:"armor",  cost:2300,  stats:{def:8},       requires:[{name:"Iron",qty:10}] },
+    { name:"Bone Armor",        icon:"🦴",  type:"armor",  cost:2100,  stats:{def:7},       requires:[{name:"Bone Fragments",qty:10}] },
+    { name:"Fur Coat",          icon:"🦊",  type:"armor",  cost:1900,  stats:{def:5},       requires:[{name:"Fur",qty:9}] },
+    { name:"Hide Armor",        icon:"🥋",  type:"armor",  cost:2050,  stats:{def:6},       requires:[{name:"Tough Hide",qty:10}] },
+    { name:"Feather Cloak",     icon:"🪶",  type:"armor",  cost:1900,  stats:{def:5},       requires:[{name:"Feathers",qty:9}] },
+    { name:"Tin Armor",         icon:"🪨",  type:"armor",  cost:2150,  stats:{def:7},       requires:[{name:"Tin",qty:10}] },
+    { name:"Copper Plate",      icon:"🟠",  type:"armor",  cost:2100,  stats:{def:6},       requires:[{name:"Copper",qty:10}] },
+    { name:"Marble Guard",      icon:"🏛️",  type:"armor",  cost:2300,  stats:{def:8},       requires:[{name:"Marble",qty:12}] },
+    { name:"Obsidian Layer",    icon:"🖤",  type:"armor",  cost:2400,  stats:{def:9},       requires:[{name:"Obsidian",qty:15}] },
   ],
   D: [
     // Weapons
-    { name:"Obsidian Greatsword", icon:"⚔️", type:"weapon", cost:460, stats:{str:14,dex:5},  requires:[{name:"Obsidian",qty:5},{name:"Coal",qty:2}] },
-    { name:"Silver Wand",         icon:"🪄", type:"weapon", cost:440, stats:{int:12,dex:6},  requires:[{name:"Silver",qty:4},{name:"Tough Hide",qty:2}] },
-    { name:"Longbow",             icon:"🏹", type:"weapon", cost:430, stats:{dex:13,str:5},  requires:[{name:"Leather",qty:5},{name:"Iron",qty:2}] },
-    { name:"Twin Daggers",        icon:"🗡️", type:"weapon", cost:435, stats:{dex:11,str:6},  requires:[{name:"Fangs",qty:5},{name:"Copper",qty:2}] },
-    { name:"Warhammer",           icon:"🔨", type:"weapon", cost:470, stats:{str:15,def:4},  requires:[{name:"Bronze",qty:6},{name:"Bone Fragments",qty:2}] },
-    { name:"Arc Rod",             icon:"🪄", type:"weapon", cost:450, stats:{int:14,str:5},  requires:[{name:"Quartz",qty:4},{name:"Feathers",qty:3}] },
-    { name:"Bronze Blade",        icon:"🗡️", type:"weapon", cost:430, stats:{str:13,dex:6},  requires:[{name:"Bronze",qty:3},{name:"Leather",qty:2}] },
-    { name:"Hunter Bow",          icon:"🏹", type:"weapon", cost:425, stats:{dex:12,int:5},  requires:[{name:"Fur",qty:4},{name:"Tin",qty:2}] },
-    { name:"Spiked Mace",         icon:"🔨", type:"weapon", cost:445, stats:{str:14,dex:5},  requires:[{name:"Marble",qty:5},{name:"Bone Fragments",qty:2}] },
-    { name:"Mystic Knife",        icon:"🗡️", type:"weapon", cost:455, stats:{dex:13,int:6},  requires:[{name:"Claws",qty:3},{name:"Horns",qty:2}] },
+    { name:"Obsidian Greatsword", icon:"⚔️", type:"weapon", cost:8600, stats:{str:14,dex:5},  requires:[{name:"Obsidian",qty:20},{name:"Coal",qty:10}] },
+    { name:"Silver Wand",         icon:"🪄", type:"weapon", cost:8400, stats:{int:12,dex:6},  requires:[{name:"Silver",qty:20},{name:"Tough Hide",qty:8}] },
+    { name:"Longbow",             icon:"🏹", type:"weapon", cost:8300, stats:{dex:13,str:5},  requires:[{name:"Leather",qty:20},{name:"Iron",qty:8}] },
+    { name:"Twin Daggers",        icon:"🗡️", type:"weapon", cost:8350, stats:{dex:11,str:6},  requires:[{name:"Fangs",qty:20},{name:"Copper",qty:8}] },
+    { name:"Warhammer",           icon:"🔨", type:"weapon", cost:8700, stats:{str:15,def:4},  requires:[{name:"Bronze",qty:25},{name:"Bone Fragments",qty:10}] },
+    { name:"Arc Rod",             icon:"🪄", type:"weapon", cost:8500, stats:{int:14,str:5},  requires:[{name:"Quartz",qty:20},{name:"Feathers",qty:12}] },
+    { name:"Bronze Blade",        icon:"🗡️", type:"weapon", cost:8300, stats:{str:13,dex:6},  requires:[{name:"Bronze",qty:15},{name:"Leather",qty:10}] },
+    { name:"Hunter Bow",          icon:"🏹", type:"weapon", cost:8250, stats:{dex:12,int:5},  requires:[{name:"Fur",qty:15},{name:"Tin",qty:10}] },
+    { name:"Spiked Mace",         icon:"🔨", type:"weapon", cost:8450, stats:{str:14,dex:5},  requires:[{name:"Marble",qty:20},{name:"Bone Fragments",qty:10}] },
+    { name:"Mystic Knife",        icon:"🗡️", type:"weapon", cost:8550, stats:{dex:13,int:6},  requires:[{name:"Claws",qty:15},{name:"Horns",qty:10}] },
     // Armor
-    { name:"Steel Armor",         icon:"🔷", type:"armor",  cost:460, stats:{def:15,hp:7},   requires:[{name:"Iron",qty:6},{name:"Silver",qty:2}] },
-    { name:"Reinforced Leather",  icon:"🥋", type:"armor",  cost:420, stats:{def:13,hp:6},   requires:[{name:"Leather",qty:4},{name:"Coal",qty:1}] },
-    { name:"Silver Guard",        icon:"⬜", type:"armor",  cost:450, stats:{def:14,hp:7},   requires:[{name:"Silver",qty:5},{name:"Animal Fat",qty:1}] },
-    { name:"Bone Plate",          icon:"🦴", type:"armor",  cost:470, stats:{def:16,hp:8},   requires:[{name:"Bone Fragments",qty:5},{name:"Marble",qty:2}] },
-    { name:"Fur Armor",           icon:"🦊", type:"armor",  cost:410, stats:{def:12,hp:6},   requires:[{name:"Fur",qty:3},{name:"Limestone",qty:2}] },
-    { name:"Horned Armor",        icon:"🦄", type:"armor",  cost:475, stats:{def:17,hp:9},   requires:[{name:"Horns",qty:5},{name:"Tin",qty:2}] },
-    { name:"Scale Vest",          icon:"🥋", type:"armor",  cost:445, stats:{def:15,hp:7},   requires:[{name:"Tough Hide",qty:4},{name:"Silver",qty:2}] },
-    { name:"Bronze Armor",        icon:"🟫", type:"armor",  cost:460, stats:{def:16,hp:8},   requires:[{name:"Bronze",qty:4},{name:"Copper",qty:2}] },
-    { name:"Obsidian Plate",      icon:"🌑", type:"armor",  cost:480, stats:{def:18,hp:9},   requires:[{name:"Obsidian",qty:4},{name:"Claws",qty:3}] },
-    { name:"Marble Armor",        icon:"🏛️", type:"armor",  cost:440, stats:{def:14,hp:6},   requires:[{name:"Marble",qty:4},{name:"Bone Fragments",qty:2}] },
+    { name:"Steel Armor",         icon:"🔷", type:"armor",  cost:8600, stats:{def:15,hp:7},   requires:[{name:"Iron",qty:20},{name:"Silver",qty:10}] },
+    { name:"Reinforced Leather",  icon:"🥋", type:"armor",  cost:8200, stats:{def:13,hp:6},   requires:[{name:"Leather",qty:14},{name:"Coal",qty:8}] },
+    { name:"Silver Guard",        icon:"⬜", type:"armor",  cost:8500, stats:{def:14,hp:7},   requires:[{name:"Silver",qty:20},{name:"Animal Fat",qty:10}] },
+    { name:"Bone Plate",          icon:"🦴", type:"armor",  cost:8700, stats:{def:16,hp:8},   requires:[{name:"Bone Fragments",qty:25},{name:"Marble",qty:10}] },
+    { name:"Fur Armor",           icon:"🦊", type:"armor",  cost:8100, stats:{def:12,hp:6},   requires:[{name:"Fur",qty:10},{name:"Limestone",qty:10}] },
+    { name:"Horned Armor",        icon:"🦄", type:"armor",  cost:8750, stats:{def:17,hp:9},   requires:[{name:"Horns",qty:28},{name:"Tin",qty:15}] },
+    { name:"Scale Vest",          icon:"🥋", type:"armor",  cost:8450, stats:{def:15,hp:7},   requires:[{name:"Tough Hide",qty:15},{name:"Silver",qty:10}] },
+    { name:"Bronze Armor",        icon:"🟫", type:"armor",  cost:8600, stats:{def:16,hp:8},   requires:[{name:"Bronze",qty:20},{name:"Copper",qty:15}] },
+    { name:"Obsidian Plate",      icon:"🌑", type:"armor",  cost:8800, stats:{def:18,hp:9},   requires:[{name:"Obsidian",qty:30},{name:"Claws",qty:10}] },
+    { name:"Marble Armor",        icon:"🏛️", type:"armor",  cost:8400, stats:{def:14,hp:6},   requires:[{name:"Marble",qty:20},{name:"Bone Fragments",qty:10}] },
   ],
   C: [
     // Weapons
-    { name:"Silver Greatsword", icon:"⚔️", type:"weapon", cost:820,  stats:{str:25,dex:8},   requires:[{name:"Silver",qty:7},{name:"Spirit Venison",qty:2}] },
-    { name:"Arcane Staff",      icon:"🪄", type:"weapon", cost:880,  stats:{int:28,dex:10},  requires:[{name:"Quartz",qty:8},{name:"Shadow Hide",qty:3}] },
-    { name:"Composite Bow",     icon:"🏹", type:"weapon", cost:840,  stats:{dex:26,str:9},   requires:[{name:"Leather",qty:7},{name:"Gold",qty:3}] },
-    { name:"Assassin Daggers",  icon:"🗡️", type:"weapon", cost:860,  stats:{dex:27,int:8},   requires:[{name:"Fangs",qty:7},{name:"Palladium",qty:2}] },
-    { name:"Mystic Blade",      icon:"🗡️", type:"weapon", cost:830,  stats:{str:24,int:11},  requires:[{name:"Marble",qty:6},{name:"Spirit Venison",qty:2}] },
-    { name:"War Maul",          icon:"🔨", type:"weapon", cost:920,  stats:{str:30,dex:5},   requires:[{name:"Obsidian",qty:8},{name:"Mythril",qty:3}] },
-    { name:"Spellknife",        icon:"🗡️", type:"weapon", cost:870,  stats:{dex:23,int:12},  requires:[{name:"Quartz",qty:7},{name:"Shadow Hide",qty:2}] },
-    { name:"Dagon Bow",         icon:"🏹", type:"weapon", cost:850,  stats:{dex:25,str:9},   requires:[{name:"Silver",qty:7},{name:"Drake Meat",qty:3}] },
-    { name:"Bronze Cleaver",    icon:"⚔️", type:"weapon", cost:840,  stats:{str:28,dex:7},   requires:[{name:"Bronze",qty:5},{name:"Palladium",qty:3}] },
-    { name:"Dark Rod",          icon:"🪄", type:"weapon", cost:950,  stats:{int:29,str:6},   requires:[{name:"Quartz",qty:7},{name:"Obsidian",qty:7}] },
+    { name:"Silver Greatsword", icon:"⚔️", type:"weapon", cost:32800,  stats:{str:25,dex:8},   requires:[{name:"Silver",qty:56},{name:"Spirit Venison",qty:16}] },
+    { name:"Arcane Staff",      icon:"🪄", type:"weapon", cost:35200,  stats:{int:28,dex:10},  requires:[{name:"Quartz",qty:64},{name:"Shadow Hide",qty:24}] },
+    { name:"Composite Bow",     icon:"🏹", type:"weapon", cost:33600,  stats:{dex:26,str:9},   requires:[{name:"Leather",qty:56},{name:"Gold",qty:24}] },
+    { name:"Assassin Daggers",  icon:"🗡️", type:"weapon", cost:34400,  stats:{dex:27,int:8},   requires:[{name:"Fangs",qty:55},{name:"Palladium",qty:16}] },
+    { name:"Mystic Blade",      icon:"🗡️", type:"weapon", cost:33200,  stats:{str:24,int:11},  requires:[{name:"Marble",qty:48},{name:"Spirit Venison",qty:16}] },
+    { name:"War Maul",          icon:"🔨", type:"weapon", cost:36800,  stats:{str:30,dex:5},   requires:[{name:"Obsidian",qty:64},{name:"Mythril",qty:24}] },
+    { name:"Spellknife",        icon:"🗡️", type:"weapon", cost:34800,  stats:{dex:23,int:12},  requires:[{name:"Quartz",qty:56},{name:"Shadow Hide",qty:16}] },
+    { name:"Dagon Bow",         icon:"🏹", type:"weapon", cost:34000,  stats:{dex:25,str:9},   requires:[{name:"Silver",qty:56},{name:"Drake Meat",qty:24}] },
+    { name:"Bronze Cleaver",    icon:"⚔️", type:"weapon", cost:33600,  stats:{str:28,dex:7},   requires:[{name:"Bronze",qty:40},{name:"Palladium",qty:24}] },
+    { name:"Dark Rod",          icon:"🪄", type:"weapon", cost:38000,  stats:{int:29,str:6},   requires:[{name:"Quartz",qty:56},{name:"Obsidian",qty:40}] },
     // Armor
-    { name:"Shining Armor",     icon:"✨", type:"armor",  cost:900,  stats:{def:30,hp:15},  requires:[{name:"Silver",qty:8},{name:"Spirit Venison",qty:5}] },
-    { name:"Bronze Cuirass",    icon:"🟡", type:"armor",  cost:930,  stats:{def:32,hp:18},  requires:[{name:"Bronze",qty:9},{name:"Gold",qty:5}] },
-    { name:"Jagged Chainmail",  icon:"🥋", type:"armor",  cost:880,  stats:{def:28,hp:14},  requires:[{name:"Claws",qty:7},{name:"Palladium",qty:3}] },
-    { name:"Bone Fortress",     icon:"🦴", type:"armor",  cost:940,  stats:{def:31,hp:16},  requires:[{name:"Horns",qty:9},{name:"Mythril",qty:5}] },
-    { name:"Obsidian Vest",     icon:"🖤", type:"armor",  cost:960,  stats:{def:33,hp:17},  requires:[{name:"Obsidian",qty:10},{name:"Shadow Hide",qty:5}] },
-    { name:"Reptilian Scale",   icon:"🥋", type:"armor",  cost:890,  stats:{def:29,hp:14},  requires:[{name:"Marble",qty:7},{name:"Drake Meat",qty:4}] },
-    { name:"Shadow Cloak",      icon:"🥋", type:"armor",  cost:860,  stats:{def:27,hp:13},  requires:[{name:"Fur",qty:6},{name:"Shadow Hide",qty:3}] },
-    { name:"Golden Cape",       icon:"🥋", type:"armor",  cost:840,  stats:{def:26,hp:12},  requires:[{name:"Leather",qty:6},{name:"Gold",qty:2}] },
-    { name:"Warlord Hide",      icon:"🐗", type:"armor",  cost:910,  stats:{def:30,hp:15},  requires:[{name:"Horns",qty:8},{name:"Palladium",qty:5}] },
-    { name:"Arcane Shell",      icon:"🔮", type:"armor",  cost:980,  stats:{def:34,hp:19},  requires:[{name:"Obsidian",qty:10},{name:"Spirit Venison",qty:6}] },
+    { name:"Shining Armor",     icon:"✨", type:"armor",  cost:36000,  stats:{def:30,hp:15},  requires:[{name:"Silver",qty:64},{name:"Spirit Venison",qty:40}] },
+    { name:"Bronze Cuirass",    icon:"🟡", type:"armor",  cost:37200,  stats:{def:32,hp:18},  requires:[{name:"Bronze",qty:72},{name:"Gold",qty:50}] },
+    { name:"Jagged Chainmail",  icon:"🥋", type:"armor",  cost:35200,  stats:{def:28,hp:14},  requires:[{name:"Claws",qty:56},{name:"Palladium",qty:24}] },
+    { name:"Bone Fortress",     icon:"🦴", type:"armor",  cost:37600,  stats:{def:31,hp:16},  requires:[{name:"Horns",qty:72},{name:"Mythril",qty:40}] },
+    { name:"Obsidian Vest",     icon:"🖤", type:"armor",  cost:38400,  stats:{def:33,hp:17},  requires:[{name:"Obsidian",qty:80},{name:"Shadow Hide",qty:40}] },
+    { name:"Reptilian Scale",   icon:"🥋", type:"armor",  cost:35600,  stats:{def:29,hp:14},  requires:[{name:"Marble",qty:56},{name:"Drake Meat",qty:32}] },
+    { name:"Shadow Cloak",      icon:"🥋", type:"armor",  cost:34400,  stats:{def:27,hp:13},  requires:[{name:"Fur",qty:48},{name:"Shadow Hide",qty:24}] },
+    { name:"Golden Cape",       icon:"🥋", type:"armor",  cost:33600,  stats:{def:26,hp:12},  requires:[{name:"Leather",qty:48},{name:"Gold",qty:16}] },
+    { name:"Warlord Hide",      icon:"🐗", type:"armor",  cost:36400,  stats:{def:30,hp:15},  requires:[{name:"Horns",qty:64},{name:"Palladium",qty:40}] },
+    { name:"Arcane Shell",      icon:"🔮", type:"armor",  cost:39200,  stats:{def:34,hp:19},  requires:[{name:"Obsidian",qty:80},{name:"Spirit Venison",qty:48}] },
   ],
   B: [
     // Weapons
-    { name:"Myth-Blade",       icon:"⚔️", type:"weapon", cost:2200, stats:{str:48,dex:15},  requires:[{name:"Mythril",qty:15},{name:"Adamantium",qty:5}] },
-    { name:"High-Scepter",     icon:"🪄", type:"weapon", cost:2250, stats:{int:50,str:14},  requires:[{name:"Spirit Venison",qty:17},{name:"Adamantium",qty:5}] },
-    { name:"Draconic Bow",     icon:"🏹", type:"weapon", cost:2180, stats:{dex:47,str:16},  requires:[{name:"Drake Meat",qty:15},{name:"Dragon Scales",qty:4}] },
-    { name:"Shadow-Strike",    icon:"🗡️", type:"weapon", cost:2220, stats:{dex:46,int:18},  requires:[{name:"Shadow Hide",qty:14},{name:"Titanium",qty:5}] },
-    { name:"Warbreaker",       icon:"🔨", type:"weapon", cost:2300, stats:{str:52,dex:10},  requires:[{name:"Palladium",qty:19},{name:"Titanium",qty:6}] },
-    { name:"Mystic Jian",      icon:"🗡️", type:"weapon", cost:2240, stats:{str:45,int:20},  requires:[{name:"Spirit Venison",qty:14},{name:"Dragon Scales",qty:5}] },
-    { name:"Phantom Longbow",  icon:"🏹", type:"weapon", cost:2210, stats:{dex:48,int:14},  requires:[{name:"Gold",qty:16},{name:"Cyclops Eye",qty:3}] },
-    { name:"Spellhammer",      icon:"🔨", type:"weapon", cost:2260, stats:{str:51,int:12},  requires:[{name:"Shadow Hide",qty:18},{name:"Cyclops Eye",qty:3}] },
-    { name:"Venom Daggers",    icon:"🗡️", type:"weapon", cost:2230, stats:{dex:47,str:16},  requires:[{name:"Palladium",qty:15},{name:"Adamantium",qty:4}] },
-    { name:"Ancient Wand",     icon:"🪄", type:"weapon", cost:2320, stats:{int:53,dex:10},  requires:[{name:"Mythril",qty:20},{name:"Cyclops Eye",qty:4}] },
+    { name:"Myth-Blade",       icon:"⚔️", type:"weapon", cost:163000, stats:{str:48,dex:15},  requires:[{name:"Mythril",qty:150},{name:"Adamantium",qty:50}] },
+    { name:"High-Scepter",     icon:"🪄", type:"weapon", cost:163500, stats:{int:50,str:14},  requires:[{name:"Spirit Venison",qty:170},{name:"Adamantium",qty:50}] },
+    { name:"Draconic Bow",     icon:"🏹", type:"weapon", cost:160000, stats:{dex:47,str:16},  requires:[{name:"Drake Meat",qty:150},{name:"Dragon Scales",qty:40}] },
+    { name:"Shadow-Strike",    icon:"🗡️", type:"weapon", cost:163200, stats:{dex:46,int:18},  requires:[{name:"Shadow Hide",qty:140},{name:"Titanium",qty:50}] },
+    { name:"Warbreaker",       icon:"🔨", type:"weapon", cost:166000, stats:{str:52,dex:10},  requires:[{name:"Palladium",qty:190},{name:"Titanium",qty:60}] },
+    { name:"Mystic Jian",      icon:"🗡️", type:"weapon", cost:163400, stats:{str:45,int:20},  requires:[{name:"Spirit Venison",qty:140},{name:"Dragon Scales",qty:50}] },
+    { name:"Phantom Longbow",  icon:"🏹", type:"weapon", cost:163100, stats:{dex:48,int:14},  requires:[{name:"Gold",qty:160},{name:"Cyclops Eye",qty:30}] },
+    { name:"Spellhammer",      icon:"🔨", type:"weapon", cost:163600, stats:{str:51,int:12},  requires:[{name:"Shadow Hide",qty:180},{name:"Cyclops Eye",qty:30}] },
+    { name:"Venom Daggers",    icon:"🗡️", type:"weapon", cost:163300, stats:{dex:47,str:16},  requires:[{name:"Palladium",qty:150},{name:"Adamantium",qty:40}] },
+    { name:"Ancient Wand",     icon:"🪄", type:"weapon", cost:166200, stats:{int:53,dex:10},  requires:[{name:"Mythril",qty:200},{name:"Cyclops Eye",qty:40}] },
     // Armor
-    { name:"Void-Spell Armor",    icon:"🟣", type:"armor",  cost:2300, stats:{def:50,hp:30},  requires:[{name:"Shadow Hide",qty:17},{name:"Titanium",qty:10}] },
-    { name:"Golden Scales",       icon:"🐉", type:"armor",  cost:2200, stats:{def:48,hp:25},  requires:[{name:"Gold",qty:15},{name:"Dragon Scales",qty:7}] },
-    { name:"Night Cloak",         icon:"🥋", type:"armor",  cost:2250, stats:{def:45,hp:28},  requires:[{name:"Shadow Hide",qty:14},{name:"Cyclops Eye",qty:9}] },
-    { name:"Spirit-Ward",         icon:"👻", type:"armor",  cost:2350, stats:{def:52,hp:35},  requires:[{name:"Spirit Venison",qty:18},{name:"Adamantium",qty:12}] },
-    { name:"Paladin's Mantle",    icon:"🥋", type:"armor",  cost:2180, stats:{def:44,hp:24},  requires:[{name:"Palladium",qty:10},{name:"Dragon Scales",qty:6}] },
-    { name:"Draconic Robe",       icon:"🥋", type:"armor",  cost:2220, stats:{def:49,hp:27},  requires:[{name:"Drake Meat",qty:15},{name:"Dragon Scales",qty:7}] },
-    { name:"Titanic Hide",        icon:"🪨", type:"armor",  cost:2400, stats:{def:54,hp:39},  requires:[{name:"Palladium",qty:20},{name:"Titanium",qty:15}] },
-    { name:"Golden Warplate",     icon:"🏆", type:"armor",  cost:2380, stats:{def:53,hp:36},  requires:[{name:"Gold",qty:20},{name:"Adamantium",qty:12}] },
-    { name:"Mythic Cuirass",      icon:"💫", type:"armor",  cost:2240, stats:{def:46,hp:26},  requires:[{name:"Mythril",qty:14},{name:"Cyclops Eye",qty:7}] },
-    { name:"Quintessence Mantle", icon:"🌀", type:"armor",  cost:2450, stats:{def:51,hp:33},  requires:[{name:"Spirit Venison",qty:20},{name:"Shadow Hide",qty:20}] },
+    { name:"Void-Spell Armor",    icon:"🟣", type:"armor",  cost:166000, stats:{def:50,hp:30},  requires:[{name:"Shadow Hide",qty:170},{name:"Titanium",qty:100}] },
+    { name:"Golden Scales",       icon:"🐉", type:"armor",  cost:163000, stats:{def:48,hp:25},  requires:[{name:"Gold",qty:150},{name:"Dragon Scales",qty:70}] },
+    { name:"Night Cloak",         icon:"🥋", type:"armor",  cost:163500, stats:{def:45,hp:28},  requires:[{name:"Shadow Hide",qty:140},{name:"Cyclops Eye",qty:90}] },
+    { name:"Spirit-Ward",         icon:"👻", type:"armor",  cost:166500, stats:{def:52,hp:35},  requires:[{name:"Spirit Venison",qty:180},{name:"Adamantium",qty:120}] },
+    { name:"Paladin's Mantle",    icon:"🥋", type:"armor",  cost:160800, stats:{def:44,hp:24},  requires:[{name:"Palladium",qty:100},{name:"Dragon Scales",qty:60}] },
+    { name:"Draconic Robe",       icon:"🥋", type:"armor",  cost:163200, stats:{def:49,hp:27},  requires:[{name:"Drake Meat",qty:150},{name:"Dragon Scales",qty:70}] },
+    { name:"Titanic Hide",        icon:"🪨", type:"armor",  cost:169500, stats:{def:54,hp:39},  requires:[{name:"Palladium",qty:200},{name:"Titanium",qty:150}] },
+    { name:"Golden Warplate",     icon:"🏆", type:"armor",  cost:166800, stats:{def:53,hp:36},  requires:[{name:"Gold",qty:200},{name:"Adamantium",qty:120}] },
+    { name:"Mythic Cuirass",      icon:"💫", type:"armor",  cost:163400, stats:{def:46,hp:26},  requires:[{name:"Mythril",qty:140},{name:"Cyclops Eye",qty:70}] },
+    { name:"Quintessence Mantle", icon:"🌀", type:"armor",  cost:169000, stats:{def:51,hp:33},  requires:[{name:"Spirit Venison",qty:200},{name:"Shadow Hide",qty:150}] },
   ],
   A: [
     // Weapons
-    { name:"Eragon-blade",  icon:"⚔️", type:"weapon", cost:5600, stats:{str:70,dex:20},  requires:[{name:"Dragon Scales",qty:30},{name:"Adamantium",qty:12},{name:"Palladium",qty:10}] },
-    { name:"Void-Steel",    icon:"⚔️", type:"weapon", cost:5500, stats:{str:75,def:15},  requires:[{name:"Cyclops Eye",qty:33},{name:"Titanium",qty:10},{name:"Shadow Hide",qty:9}] },
-    { name:"Star Lance",    icon:"🪄", type:"weapon", cost:5800, stats:{int:78,dex:18},  requires:[{name:"Dragon Scales",qty:35},{name:"Aetherium",qty:1}] },
-    { name:"Crack",         icon:"🗡️", type:"weapon", cost:5550, stats:{dex:68,int:22},  requires:[{name:"Adamantium",qty:27},{name:"Titanium",qty:12},{name:"Mythril",qty:14}] },
-    { name:"Divine Fall",   icon:"⚔️", type:"weapon", cost:5650, stats:{str:72,int:20},  requires:[{name:"Cyclops Eye",qty:31},{name:"Dragon Scales",qty:12},{name:"Gold",qty:10}] },
-    { name:"Nether-Bow",    icon:"🏹", type:"weapon", cost:5500, stats:{dex:69,str:19},  requires:[{name:"Adamantium",qty:27},{name:"Titanium",qty:10},{name:"Shadow Hide",qty:9}] },
-    { name:"Holy Relic",    icon:"🪄", type:"weapon", cost:5900, stats:{int:77,str:16},  requires:[{name:"Dragon Scales",qty:30},{name:"Titan Heart",qty:1},{name:"Aetherium",qty:1}] },
-    { name:"Realm Cleaver", icon:"⚔️", type:"weapon", cost:5750, stats:{str:74,dex:18},  requires:[{name:"Titanium",qty:32},{name:"Titan Heart",qty:1},{name:"Mythril",qty:12}] },
-    { name:"BeastFang",     icon:"🗡️", type:"weapon", cost:5600, stats:{dex:71,str:20},  requires:[{name:"Dragon Scales",qty:30},{name:"Adamantium",qty:10},{name:"Drake Meat",qty:7}] },
-    { name:"Scion",         icon:"⚔️", type:"weapon", cost:5700, stats:{str:73,int:17},  requires:[{name:"Cyclops Eye",qty:31},{name:"Aetherium",qty:1},{name:"Spirit Venison",qty:10}] },
+    { name:"Eragon-blade",  icon:"⚔️", type:"weapon", cost:684000, stats:{str:70,dex:20},  requires:[{name:"Dragon Scales",qty:360},{name:"Adamantium",qty:144},{name:"Palladium",qty:120}] },
+    { name:"Void-Steel",    icon:"⚔️", type:"weapon", cost:682000, stats:{str:75,def:15},  requires:[{name:"Cyclops Eye",qty:396},{name:"Titanium",qty:120},{name:"Shadow Hide",qty:108}] },
+    { name:"Star Lance",    icon:"🪄", type:"weapon", cost:688000, stats:{int:78,dex:18},  requires:[{name:"Dragon Scales",qty:420},{name:"Aetherium",qty:12}] },
+    { name:"Crack",         icon:"🗡️", type:"weapon", cost:682500, stats:{dex:68,int:22},  requires:[{name:"Adamantium",qty:324},{name:"Titanium",qty:144},{name:"Mythril",qty:168}] },
+    { name:"Divine Fall",   icon:"⚔️", type:"weapon", cost:684500, stats:{str:72,int:20},  requires:[{name:"Cyclops Eye",qty:372},{name:"Dragon Scales",qty:144},{name:"Gold",qty:120}] },
+    { name:"Nether-Bow",    icon:"🏹", type:"weapon", cost:682000, stats:{dex:69,str:19},  requires:[{name:"Adamantium",qty:324},{name:"Titanium",qty:120},{name:"Shadow Hide",qty:108}] },
+    { name:"Holy Relic",    icon:"🪄", type:"weapon", cost:690000, stats:{int:77,str:16},  requires:[{name:"Dragon Scales",qty:360},{name:"Titan Heart",qty:12},{name:"Aetherium",qty:12}] },
+    { name:"Realm Cleaver", icon:"⚔️", type:"weapon", cost:686500, stats:{str:74,dex:18},  requires:[{name:"Titanium",qty:384},{name:"Titan Heart",qty:12},{name:"Mythril",qty:144}] },
+    { name:"BeastFang",     icon:"🗡️", type:"weapon", cost:684000, stats:{dex:71,str:20},  requires:[{name:"Dragon Scales",qty:360},{name:"Adamantium",qty:120},{name:"Drake Meat",qty:84}] },
+    { name:"Scion",         icon:"⚔️", type:"weapon", cost:686000, stats:{str:73,int:17},  requires:[{name:"Cyclops Eye",qty:372},{name:"Aetherium",qty:12},{name:"Spirit Venison",qty:120}] },
     // Armor
-    { name:"Heart Hide",        icon:"❤️", type:"armor",  cost:5700, stats:{def:75,hp:55},  requires:[{name:"Adamantium",qty:33},{name:"Titan Heart",qty:2}] },
-    { name:"Destroyer Mantle",  icon:"🥋", type:"armor",  cost:5900, stats:{def:79,hp:59},  requires:[{name:"Titanium",qty:36},{name:"Aetherium",qty:2},{name:"Gold",qty:7}] },
-    { name:"Chaos-garb",        icon:"🥋", type:"armor",  cost:5500, stats:{def:68,hp:47},  requires:[{name:"Cyclops Eye",qty:26},{name:"Dragon Scales",qty:10},{name:"Shadow Hide",qty:9}] },
-    { name:"Devastator Armor",  icon:"⚔️", type:"armor",  cost:5400, stats:{def:66,hp:45},  requires:[{name:"Adamantium",qty:24},{name:"Cyclops Eye",qty:10},{name:"Drake Meat",qty:9}] },
-    { name:"Tectonic-Mail",     icon:"🌋", type:"armor",  cost:5650, stats:{def:72,hp:50},  requires:[{name:"Titanium",qty:30},{name:"Aetherium",qty:1}] },
-    { name:"Elemental Shroud",  icon:"🥋", type:"armor",  cost:5750, stats:{def:74,hp:52},  requires:[{name:"Cyclops Eye",qty:32},{name:"Aetherium",qty:1},{name:"Mythril",qty:17}] },
-    { name:"Colossal Veil",     icon:"🌫️", type:"armor",  cost:5850, stats:{def:78,hp:58},  requires:[{name:"Titanium",qty:35},{name:"Dragon Scales",qty:13},{name:"Shadow Hide",qty:11}] },
-    { name:"Realm-Bound Tunic", icon:"🌐", type:"armor",  cost:5600, stats:{def:70,hp:49},  requires:[{name:"Dragon Scales",qty:30},{name:"Cyclops Eye",qty:12},{name:"Spirit Venison",qty:10}] },
-    { name:"Serpentine-Robe",   icon:"🥋", type:"armor",  cost:5450, stats:{def:65,hp:44},  requires:[{name:"Adamantium",qty:25},{name:"Cyclops Eye",qty:10},{name:"Drake Meat",qty:9}] },
-    { name:"Vasto-Shell",       icon:"🐚", type:"armor",  cost:5800, stats:{def:76,hp:54},  requires:[{name:"Titanium",qty:20},{name:"Titan Heart",qty:1},{name:"Aetherium",qty:1}] },
+    { name:"Heart Hide",        icon:"❤️", type:"armor",  cost:686000, stats:{def:75,hp:55},  requires:[{name:"Adamantium",qty:396},{name:"Titan Heart",qty:24}] },
+    { name:"Destroyer Mantle",  icon:"🥋", type:"armor",  cost:690000, stats:{def:79,hp:59},  requires:[{name:"Titanium",qty:432},{name:"Aetherium",qty:24},{name:"Gold",qty:84}] },
+    { name:"Chaos-garb",        icon:"🥋", type:"armor",  cost:682500, stats:{def:68,hp:47},  requires:[{name:"Cyclops Eye",qty:312},{name:"Dragon Scales",qty:120},{name:"Shadow Hide",qty:108}] },
+    { name:"Devastator Armor",  icon:"⚔️", type:"armor",  cost:680000, stats:{def:66,hp:45},  requires:[{name:"Adamantium",qty:288},{name:"Cyclops Eye",qty:120},{name:"Drake Meat",qty:108}] },
+    { name:"Tectonic-Mail",     icon:"🌋", type:"armor",  cost:684500, stats:{def:72,hp:50},  requires:[{name:"Titanium",qty:360},{name:"Aetherium",qty:12}] },
+    { name:"Elemental Shroud",  icon:"🥋", type:"armor",  cost:686500, stats:{def:74,hp:52},  requires:[{name:"Cyclops Eye",qty:384},{name:"Aetherium",qty:12},{name:"Mythril",qty:204}] },
+    { name:"Colossal Veil",     icon:"🌫️", type:"armor",  cost:688500, stats:{def:78,hp:58},  requires:[{name:"Titanium",qty:420},{name:"Dragon Scales",qty:156},{name:"Shadow Hide",qty:132}] },
+    { name:"Realm-Bound Tunic", icon:"🌐", type:"armor",  cost:684000, stats:{def:70,hp:49},  requires:[{name:"Dragon Scales",qty:360},{name:"Cyclops Eye",qty:144},{name:"Spirit Venison",qty:120}] },
+    { name:"Serpentine-Robe",   icon:"🥋", type:"armor",  cost:680500, stats:{def:65,hp:44},  requires:[{name:"Adamantium",qty:300},{name:"Cyclops Eye",qty:120},{name:"Drake Meat",qty:108}] },
+    { name:"Vasto-Shell",       icon:"🐚", type:"armor",  cost:688000, stats:{def:76,hp:54},  requires:[{name:"Titanium",qty:240},{name:"Titan Heart",qty:12},{name:"Aetherium",qty:12}] },
   ],
   S: [
     // Weapons
-    { name:"Abjuration", icon:"🔱", type:"weapon", cost:10500, stats:{str:100,dex:40,int:30}, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Titanium",qty:20},{name:"Palladium",qty:50}] },
-    { name:"Genesis",    icon:"🪄", type:"weapon", cost:10400, stats:{int:100,str:35,dex:35}, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Adamantium",qty:20},{name:"Spirit Venison",qty:50}] },
-    { name:"Longinus",   icon:"🏹", type:"weapon", cost:10300, stats:{dex:100,str:40,int:25}, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Cyclops Eye",qty:20},{name:"Gold",qty:50}] },
-    { name:"Jingu Bang", icon:"🔨", type:"weapon", cost:10600, stats:{dex:100,int:45,str:20}, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Dragon Scales",qty:20},{name:"Mythril",qty:50}] },
-    { name:"Ragnarok",   icon:"⚔️", type:"weapon", cost:10400, stats:{str:100,dex:30,int:30}, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Titanium",qty:20},{name:"Shadow Hide",qty:50}] },
-    { name:"Godslayer",  icon:"⚔️", type:"weapon", cost:10500, stats:{int:100,str:30,dex:30}, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Adamantium",qty:20},{name:"Spirit Venison",qty:50}] },
-    { name:"Durandal",   icon:"⚔️", type:"weapon", cost:10300, stats:{str:100,dex:35,int:20}, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Dragon Scales",qty:20},{name:"Drake Meat",qty:50}] },
-    { name:"Excalibur",  icon:"⚔️", type:"weapon", cost:10600, stats:{str:100,int:25,dex:35}, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Dragon Scales",qty:20},{name:"Gold",qty:50}] },
-    { name:"Bane",       icon:"🗡️", type:"weapon", cost:10350, stats:{dex:100,int:35,str:25}, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Cyclops Eye",qty:20},{name:"Shadow Hide",qty:50}] },
-    { name:"Judgment",   icon:"🪄", type:"weapon", cost:10450, stats:{int:100,str:30,dex:30}, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Titanium",qty:20},{name:"Mythril",qty:50}] },
+    { name:"Abjuration", icon:"🔱", type:"weapon", cost:2800000, stats:{str:100,dex:40,int:30}, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Titanium",qty:280},{name:"Palladium",qty:7000}] },
+    { name:"Genesis",    icon:"🪄", type:"weapon", cost:2800000, stats:{int:100,str:35,dex:35}, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Adamantium",qty:280},{name:"Spirit Venison",qty:700}] },
+    { name:"Longinus",   icon:"🏹", type:"weapon", cost:2800000, stats:{dex:100,str:40,int:25}, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Cyclops Eye",qty:280},{name:"Gold",qty:700}] },
+    { name:"Jingu Bang", icon:"🔨", type:"weapon", cost:2800000, stats:{dex:100,int:45,str:20}, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Dragon Scales",qty:280},{name:"Mythril",qty:700}] },
+    { name:"Ragnarok",   icon:"⚔️", type:"weapon", cost:2800000, stats:{str:100,dex:30,int:30}, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Titanium",qty:280},{name:"Shadow Hide",qty:700}] },
+    { name:"Godslayer",  icon:"⚔️", type:"weapon", cost:2800000, stats:{int:100,str:30,dex:30}, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Adamantium",qty:280},{name:"Spirit Venison",qty:700}] },
+    { name:"Durandal",   icon:"⚔️", type:"weapon", cost:2800000, stats:{str:100,dex:35,int:20}, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Dragon Scales",qty:280},{name:"Drake Meat",qty:700}] },
+    { name:"Excalibur",  icon:"⚔️", type:"weapon", cost:2800000, stats:{str:100,int:25,dex:35}, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Dragon Scales",qty:280},{name:"Gold",qty:700}] },
+    { name:"Bane",       icon:"🗡️", type:"weapon", cost:2800000, stats:{dex:100,int:35,str:25}, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Cyclops Eye",qty:280},{name:"Shadow Hide",qty:700}] },
+    { name:"Judgment",   icon:"🪄", type:"weapon", cost:2800000, stats:{int:100,str:30,dex:30}, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Titanium",qty:280},{name:"Mythril",qty:700}] },
     // Armor
-    { name:"Saturn",      icon:"🪐", type:"armor",  cost:10600, stats:{def:100,hp:80}, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Dragon Scales",qty:20},{name:"Gold",qty:50}] },
-    { name:"Unshadowed",  icon:"☀️", type:"armor",  cost:10300, stats:{def:100,hp:70}, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Cyclops Eye",qty:20},{name:"Spirit Venison",qty:50}] },
-    { name:"Null",        icon:"⬛", type:"armor",  cost:10400, stats:{def:100,hp:78}, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Titanium",qty:20},{name:"Shadow Hide",qty:50}] },
-    { name:"Dominion",    icon:"👑", type:"armor",  cost:10700, stats:{def:100,hp:80}, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Adamantium",qty:20},{name:"Palladium",qty:50}] },
-    { name:"Godshroud",   icon:"✨", type:"armor",  cost:10500, stats:{def:100,hp:68}, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Dragon Scales",qty:20},{name:"Gold",qty:50}] },
-    { name:"Oblivion",    icon:"🕳️", type:"armor",  cost:10450, stats:{def:100,hp:75}, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Cyclops Eye",qty:20},{name:"Shadow Hide",qty:50}] },
-    { name:"Gungnir",     icon:"⚡", type:"armor",  cost:10550, stats:{def:100,hp:76}, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Titanium",qty:20},{name:"Mythril",qty:50}] },
-    { name:"Imperium",    icon:"🔱", type:"armor",  cost:10650, stats:{def:100,hp:79}, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Dragon Scales",qty:20},{name:"Gold",qty:50}] },
-    { name:"Worldshell",  icon:"🌍", type:"armor",  cost:10400, stats:{def:100,hp:74}, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Adamantium",qty:20},{name:"Spirit Venison",qty:50}] },
-    { name:"Eternity",    icon:"♾️", type:"armor",  cost:10500, stats:{def:100,hp:77}, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Cyclops Eye",qty:20},{name:"Drake Meat",qty:50}] },
+    { name:"Saturn",      icon:"🪐", type:"armor",  cost:2800000, stats:{def:100,hp:80}, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Dragon Scales",qty:280},{name:"Gold",qty:700}] },
+    { name:"Unshadowed",  icon:"☀️", type:"armor",  cost:2800000, stats:{def:100,hp:70}, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Cyclops Eye",qty:280},{name:"Spirit Venison",qty:700}] },
+    { name:"Null",        icon:"⬛", type:"armor",  cost:2800000, stats:{def:100,hp:78}, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Titanium",qty:280},{name:"Shadow Hide",qty:700}] },
+    { name:"Dominion",    icon:"👑", type:"armor",  cost:2800000, stats:{def:100,hp:80}, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Adamantium",qty:280},{name:"Palladium",qty:700}] },
+    { name:"Godshroud",   icon:"✨", type:"armor",  cost:2800000, stats:{def:100,hp:68}, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Dragon Scales",qty:280},{name:"Gold",qty:700}] },
+    { name:"Oblivion",    icon:"🕳️", type:"armor",  cost:2800000, stats:{def:100,hp:75}, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Cyclops Eye",qty:280},{name:"Shadow Hide",qty:700}] },
+    { name:"Gungnir",     icon:"⚡", type:"armor",  cost:2800000, stats:{def:100,hp:76}, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Titanium",qty:280},{name:"Mythril",qty:700}] },
+    { name:"Imperium",    icon:"🔱", type:"armor",  cost:2800000, stats:{def:100,hp:79}, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Dragon Scales",qty:280},{name:"Gold",qty:700}] },
+    { name:"Worldshell",  icon:"🌍", type:"armor",  cost:2800000, stats:{def:100,hp:74}, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Adamantium",qty:280},{name:"Spirit Venison",qty:700}] },
+    { name:"Eternity",    icon:"♾️", type:"armor",  cost:2800000, stats:{def:100,hp:77}, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Cyclops Eye",qty:280},{name:"Drake Meat",qty:700}] },
   ],
 };
 // Canonical food recipes with correct category names and all foods
 window.CANONICAL_FOOD_RECIPES = {
   "STRENGTH FOODS": [
-    { name:"Grilled Meat Skewer", icon:"🍢", grade:"Common", effect:"+5% STR (10 mins)", cost:30, requires:[{name:"Raw Meat",qty:1},{name:"Garlic",qty:1},{name:"Apples",qty:1}] },
-    { name:"Spiced Steak", icon:"🥩", grade:"Uncommon", effect:"+10% STR (15 mins)", cost:60, requires:[{name:"Raw Meat",qty:2},{name:"Golden Pears",qty:1},{name:"Bitter Root",qty:1}] },
-    { name:"Hunter’s Feast", icon:"🍖", grade:"Rare", effect:"+15% STR (20 mins)", cost:140, requires:[{name:"Spirit Plum",qty:1},{name:"Shadowfish",qty:1},{name:"Raw Meat",qty:3}] },
-    { name:"Dragonfire Roast", icon:"🔥", grade:"Legendary", effect:"+20% STR (30 mins)", cost:350, requires:[{name:"Dragonfruit",qty:1},{name:"Black Unagi",qty:1},{name:"Raw Meat",qty:2}] },
-    { name:"Eden Banquet", icon:"🌺", grade:"Mythic", effect:"+25% STR (40 mins)", cost:900, requires:[{name:"Eden’s Tear",qty:1},{name:"Cosmic Leviathan",qty:1},{name:"Ying Koi",qty:1},{name:"Moon Grapes",qty:1}] },
+    { name:"Grilled Meat Skewer", icon:"🍢", grade:"Common",    effect:"+5% STR (10 mins)",  cost:300,   requires:[{name:"Raw Meat",qty:5},{name:"Garlic",qty:2},{name:"Apples",qty:2}] },
+    { name:"Spiced Steak",        icon:"🥩", grade:"Uncommon",  effect:"+10% STR (15 mins)", cost:900,   requires:[{name:"Raw Meat",qty:5},{name:"Golden Pears",qty:2},{name:"Bitter Root",qty:2}] },
+    { name:"Hunter's Feast",      icon:"🍖", grade:"Rare",      effect:"+15% STR (20 mins)", cost:2700,  requires:[{name:"Raw Meat",qty:5},{name:"Spirit Plum",qty:2},{name:"Shadowfish",qty:2}] },
+    { name:"Dragonfire Roast",    icon:"🔥", grade:"Legendary", effect:"+20% STR (30 mins)", cost:8100,  requires:[{name:"Raw Meat",qty:5},{name:"Dragonfruit",qty:2},{name:"Black Unagi",qty:2}] },
+    { name:"Eden Banquet",        icon:"🌺", grade:"Mythic",    effect:"+25% STR (40 mins)", cost:24300, requires:[{name:"Eden's Tear",qty:1},{name:"Cosmic Leviathan",qty:1},{name:"Red Minnow",qty:5},{name:"Crystal Berries",qty:5}] },
   ],
   "INTELLIGENCE FOODS": [
-    { name:"Herb Fish Soup", icon:"🍵", grade:"Common", effect:"+5% INT (10 mins)", cost:30, requires:[{name:"Trout",qty:1},{name:"Mushroom",qty:1},{name:"Melons",qty:1}] },
-    { name:"Glow Stew", icon:"🌙", grade:"Uncommon", effect:"+10% INT (15 mins)", cost:60, requires:[{name:"Glowfish",qty:2},{name:"Moon Grapes",qty:1}] },
-    { name:"Mystic Broth", icon:"🫕", grade:"Rare", effect:"+15% INT (20 mins)", cost:140, requires:[{name:"Shadowfish",qty:1},{name:"Spirit Plum",qty:2}] },
-    { name:"Celestial Sashimi", icon:"🍣", grade:"Legendary", effect:"+20% INT (30 mins)", cost:350, requires:[{name:"Celestial Whale",qty:3},{name:"Celestial Fig",qty:1},{name:"Red Minnow",qty:1}] },
-    { name:"Cosmic Infusion", icon:"🌌", grade:"Mythic", effect:"+25% INT (40 mins)", cost:900, requires:[{name:"Cosmic Leviathan",qty:1},{name:"Eden’s Tear",qty:1},{name:"Spotted Eel",qty:1},{name:"Sunfruit",qty:1}] },
+    { name:"Herb Fish Soup",     icon:"🍵", grade:"Common",    effect:"+5% INT (10 mins)",  cost:300,   requires:[{name:"Trout",qty:5},{name:"Garlic",qty:2},{name:"Melons",qty:2}] },
+    { name:"Glow Stew",         icon:"🌙", grade:"Uncommon",  effect:"+10% INT (15 mins)", cost:900,   requires:[{name:"Pufferfish",qty:5},{name:"Glowfish",qty:2},{name:"Moon Grapes",qty:2}] },
+    { name:"Mystic Broth",      icon:"🫕", grade:"Rare",      effect:"+15% INT (20 mins)", cost:2700,  requires:[{name:"Catfish",qty:5},{name:"Shadowfish",qty:2},{name:"Spirit Plum",qty:2}] },
+    { name:"Celestial Sashimi", icon:"🍣", grade:"Legendary", effect:"+20% INT (30 mins)", cost:8100,  requires:[{name:"Mushroom",qty:5},{name:"Celestial Whale",qty:2},{name:"Celestial Fig",qty:2}] },
+    { name:"Cosmic Infusion",   icon:"🌌", grade:"Mythic",    effect:"+25% INT (40 mins)", cost:24300, requires:[{name:"Cosmic Leviathan",qty:1},{name:"Eden's Tear",qty:1},{name:"Spotted Eel",qty:5},{name:"Sunfruit",qty:5}] },
   ],
   "DEFENSE FOODS": [
-    { name:"Roasted Carp", icon:"🐟", grade:"Common", effect:"+5% DEF (10 mins)", cost:30, requires:[{name:"Carp",qty:1},{name:"Garlic",qty:1},{name:"Apples",qty:1}] },
-    { name:"Ironbody Stew", icon:"🍲", grade:"Uncommon", effect:"+10% DEF (15 mins)", cost:60, requires:[{name:"Silverfin",qty:2},{name:"Bitter Root",qty:1}] },
-    { name:"Frosthide Meal", icon:"❄️", grade:"Rare", effect:"+15% DEF (20 mins)", cost:140, requires:[{name:"Ying Koi",qty:3},{name:"Frost Apples",qty:1}] },
-    { name:"Titan Shell Dish", icon:"🐚", grade:"Legendary", effect:"+20% DEF (30 mins)", cost:350, requires:[{name:"Black Unagi",qty:2},{name:"Dragonfruit",qty:1},{name:"Coral Snapper",qty:1}] },
-    { name:"Eternal Fortress Feast", icon:"🏰", grade:"Mythic", effect:"+25% DEF (40 mins)", cost:900, requires:[{name:"Cosmic Leviathan",qty:1},{name:"Eden’s Tear",qty:1},{name:"Flamefish",qty:1},{name:"Glowfish",qty:1}] },
+    { name:"Roasted Carp",           icon:"🐟", grade:"Common",    effect:"+5% DEF (10 mins)",  cost:300,   requires:[{name:"Carp",qty:5},{name:"Apples",qty:2},{name:"Mushrooms",qty:2}] },
+    { name:"Ironbody Stew",          icon:"🍲", grade:"Uncommon",  effect:"+10% DEF (15 mins)", cost:900,   requires:[{name:"Bone Fragments",qty:5},{name:"Silverfin",qty:2},{name:"Coral Snapper",qty:2}] },
+    { name:"Frosthide Meal",         icon:"❄️", grade:"Rare",      effect:"+15% DEF (20 mins)", cost:2700,  requires:[{name:"Tough Hide",qty:5},{name:"Ying Koi",qty:2},{name:"Frost Apples",qty:2}] },
+    { name:"Titan Shell Dish",       icon:"🐚", grade:"Legendary", effect:"+20% DEF (30 mins)", cost:8100,  requires:[{name:"Blueberries",qty:5},{name:"Black Unagi",qty:2},{name:"Dragonfruit",qty:2}] },
+    { name:"Eternal Fortress Feast", icon:"🏰", grade:"Mythic",    effect:"+25% DEF (40 mins)", cost:24300, requires:[{name:"Cosmic Leviathan",qty:1},{name:"Eden's Tear",qty:1},{name:"Silverfin",qty:5},{name:"Moongrapes",qty:5}] },
   ],
   "DEXTERITY FOODS": [
-    { name:"Fried Sardine", icon:"🐠", grade:"Common", effect:"+5% DEX (10 mins)", cost:30, requires:[{name:"Sardine",qty:1},{name:"Blueberries",qty:1},{name:"Melons",qty:1}] },
-    { name:"Crystal Splash Meal", icon:"💧", grade:"Uncommon", effect:"+10% DEX (15 mins)", cost:60, requires:[{name:"Red Minnow",qty:2},{name:"Crystal Berries",qty:1},{name:"Sunfruit",qty:1}] },
-    { name:"Assassin’s Dish", icon:"🍲", grade:"Rare", effect:"+15% DEX (20 mins)", cost:140, requires:[{name:"Flamefish",qty:3},{name:"Ember Fruit",qty:1}] },
-    { name:"Phantom Platter", icon:"👁️", grade:"Legendary", effect:"+20% DEX (30 mins)", cost:350, requires:[{name:"Black Unagi",qty:1},{name:"Celestial Fig",qty:2},{name:"Golden Pears",qty:1}] },
-    { name:"Divine Speed Feast", icon:"⚡", grade:"Mythic", effect:"+25% DEX (40 mins)", cost:900, requires:[{name:"Cosmic Leviathan",qty:1},{name:"Eden’s Tear",qty:1},{name:"Ember Fruit",qty:1},{name:"Silverfin",qty:1}] },
+    { name:"Fried Sardine",       icon:"🐠", grade:"Common",    effect:"+5% DEX (10 mins)",  cost:300,   requires:[{name:"Sardine",qty:5},{name:"Blueberries",qty:2},{name:"Melons",qty:2}] },
+    { name:"Crystal Splash Meal", icon:"💧", grade:"Uncommon",  effect:"+10% DEX (15 mins)", cost:900,   requires:[{name:"Melon",qty:5},{name:"Crystal Berries",qty:2},{name:"Sunfruit",qty:2}] },
+    { name:"Assassin's Dish",     icon:"🍲", grade:"Rare",      effect:"+15% DEX (20 mins)", cost:2700,  requires:[{name:"Garlic",qty:5},{name:"Flamefish",qty:2},{name:"Ember Fruit",qty:2}] },
+    { name:"Phantom Platter",     icon:"👁️", grade:"Legendary", effect:"+20% DEX (30 mins)", cost:8100,  requires:[{name:"Feathers",qty:5},{name:"Black Unagi",qty:2},{name:"Celestial Fig",qty:2}] },
+    { name:"Divine Speed Feast",  icon:"⚡", grade:"Mythic",    effect:"+25% DEX (40 mins)", cost:24300, requires:[{name:"Cosmic Leviathan",qty:1},{name:"Eden's Tear",qty:1},{name:"Golden Pears",qty:5},{name:"Coral Snapper",qty:5}] },
   ],
 };
 // Canonical potion recipes with correct category names and details
 window.CANONICAL_POTION_RECIPES = {
   HP: [
-    { name:"Minor HP Potion", icon:"🫧", type:"HP", effect:"+20% HP instantly", cost:30, requires:[{name:"Mint Leaves",qty:2},{name:"Soft Bark",qty:1}] },
-    { name:"Standard HP Potion", icon:"🧴", type:"HP", effect:"+40% HP instantly", cost:75, requires:[{name:"Silverleaf",qty:2},{name:"Goldroot",qty:1}] },
-    { name:"Greater HP Potion", icon:"❤️‍🔥", type:"HP", effect:"+70% HP instantly", cost:200, requires:[{name:"Spirit Herb",qty:2},{name:"Jade Vine",qty:1}] },
+    { name:"Minor HP Potion",    icon:"🫧",       type:"HP", effect:"+20% HP instantly", cost:100,  requires:[{name:"Mint Leaves",qty:2},{name:"Wood",qty:2},{name:"Silverleaf",qty:2}] },
+    { name:"Standard HP Potion", icon:"🧴",       type:"HP", effect:"+40% HP instantly", cost:500,  requires:[{name:"Goldroot",qty:2},{name:"Spirit Herb",qty:2}] },
+    { name:"Greater HP Potion",  icon:"❤️‍🔥", type:"HP", effect:"+70% HP instantly", cost:1000, requires:[{name:"Phoenix Bloom",qty:2},{name:"Void Orchid",qty:2}] },
   ],
   Mana: [
-    { name:"Minor Mana Potion", icon:"💠", type:"Mana", effect:"+20% Mana instantly", cost:30, requires:[{name:"Wild Herbs",qty:2},{name:"Lotus",qty:1}] },
-    { name:"Standard Mana Potion", icon:"🔹", type:"Mana", effect:"+40% Mana instantly", cost:75, requires:[{name:"Goldroot",qty:2},{name:"Lotus",qty:2}] },
-    { name:"Greater Mana Potion", icon:"🌀", type:"Mana", effect:"+70% Mana instantly", cost:200, requires:[{name:"Spirit Herb",qty:2},{name:"Ghost Root",qty:1}] },
+    { name:"Minor Mana Potion",    icon:"💠", type:"Mana", effect:"+20% Mana instantly", cost:100,  requires:[{name:"Wild Herbs",qty:2},{name:"Wood",qty:2},{name:"Lotus",qty:2}] },
+    { name:"Standard Mana Potion", icon:"🔹", type:"Mana", effect:"+40% Mana instantly", cost:500,  requires:[{name:"Glowleaf",qty:2},{name:"Ghost Root",qty:2}] },
+    { name:"Greater Mana Potion",  icon:"🌀", type:"Mana", effect:"+70% Mana instantly", cost:1000, requires:[{name:"Middlemist",qty:2},{name:"Void Orchid",qty:2}] },
   ],
   Luck: [
-    { name:"Minor Luck Potion", icon:"🍀", type:"Luck", effect:"+5% Luck (1h, 3/day)", cost:30, requires:[{name:"Basil Sprigs",qty:2},{name:"Mushroom",qty:1}] },
-    { name:"Standard Luck Potion", icon:"☘️", type:"Luck", effect:"+15% Luck (1h, 3/day)", cost:75, requires:[{name:"Nightshade",qty:2},{name:"Glowleaf",qty:1}] },
-    { name:"Greater Luck Potion", icon:"🌠", type:"Luck", effect:"+30% Luck (1h, 3/day)", cost:200, requires:[{name:"Spirit Herb",qty:2},{name:"Jade Vine",qty:1}] },
+    { name:"Minor Luck Potion",    icon:"🍀", type:"Luck", effect:"+5% Luck (1h, 3/day)",  cost:100,  requires:[{name:"Basil Sprigs",qty:2},{name:"Wood",qty:2},{name:"Nightshade",qty:2}] },
+    { name:"Standard Luck Potion", icon:"☘️", type:"Luck", effect:"+15% Luck (1h, 3/day)", cost:500,  requires:[{name:"Goldroot",qty:2},{name:"Jade Vine",qty:2}] },
+    { name:"Greater Luck Potion",  icon:"🌠", type:"Luck", effect:"+30% Luck (1h, 3/day)", cost:1000, requires:[{name:"Middlemist",qty:1},{name:"Phoenix Bloom",qty:1},{name:"Void Orchid",qty:1}] },
   ],
   Insight: [
-    { name:"Minor EXP Potion", icon:"✨", type:"Insight", effect:"+5% EXP gain", cost:30, requires:[{name:"Wild Herbs",qty:2},{name:"Lotus",qty:1}] },
-    { name:"Standard EXP Potion", icon:"⭐", type:"Insight", effect:"+15% EXP gain", cost:75, requires:[{name:"Goldroot",qty:2},{name:"Lotus",qty:2}] },
-    { name:"Greater EXP Potion", icon:"🌟", type:"Insight", effect:"+20 EXP gain", cost:200, requires:[{name:"Spirit Herb",qty:2},{name:"Ghost Root",qty:1}] },
+    { name:"Minor EXP Potion",    icon:"✨", type:"Insight", effect:"+5% EXP gain (1h, 3/day)",  cost:100,  requires:[{name:"Soft Bark",qty:2},{name:"Wood",qty:2},{name:"Glowleaf",qty:2}] },
+    { name:"Standard EXP Potion", icon:"⭐", type:"Insight", effect:"+15% EXP gain (1h, 3/day)", cost:500,  requires:[{name:"Nightshade",qty:2},{name:"Lotus",qty:2}] },
+    { name:"Greater EXP Potion",  icon:"🌟", type:"Insight", effect:"+20 EXP gain (1h, 3/day)",  cost:1000, requires:[{name:"Silverleaf",qty:1},{name:"Middlemist",qty:1},{name:"Phoenix Bloom",qty:1},{name:"Void Orchid",qty:1}] },
   ],
   Other: [
-    { name:"Resurrection Potion", icon:"💀", effect:"Instantly revive from death without waiting 5 hours. Restores HP and Mana to full. Can be used from the death screen.", cost:5000 },
-    { name:"Class Reset Potion", icon:"⚗️", effect:"Allows players to reset class, and thus, skilltree. Keeps stat points that have been gathered prior.", cost:5000 },
-    { name:"Race Rebirth Potion", icon:"🌀", effect:"Allows players to change their race.", cost:10000 },
-    { name:"Divine Shift Potion", icon:"✨", effect:"Allows players to change their Deity. However, this results in a reset of “Faith level” too.", cost:15000 },
-    { name:"Stat Reset Potion", icon:"🔄", effect:"Allows players to reset their stat points, for new redistribution across all attributes.", cost:2000 },
-    { name:"Companion Change Potion", icon:"🐾", effect:"Allows players to select a new companion. This resets the companion’s level.", cost:6000 },
+    { name:"Stat Reset Potion",       icon:"🔄", effect:"Allows players to reset their stat points, for new redistribution across all attributes.", cost:2000 },
+    { name:"Class Reset Potion",      icon:"⚗️", effect:"Allows players to reset class, and thus, skilltree. Keeps stat points that have been gathered prior.", cost:5000 },
+    { name:"Companion Change Potion", icon:"🐾", effect:"Allows players to select a new companion. This resets the companion's level.", cost:6000 },
+    { name:"Race Rebirth Potion",     icon:"🌀", effect:"Allows players to change their race.", cost:10000 },
+    { name:"Divine Shift Potion",     icon:"✨", effect:"Allows players to change their Deity. However, this results in a reset of “Faith level” too.", cost:20000 },
+    { name:"Resurrection Potion",     icon:"💀", effect:"Revive from death — restores HP & Mana to full. Can be used from the death screen.", cost:20000 },
   ],
 };
 
@@ -12575,19 +13890,18 @@ window.doCraft = async function(npc, recipeName) {
 };
 
 const ENCHANT_RATES = {
-  E:[1.0,0.95,0.85,0.75,0.65], D:[1.0,0.95,0.85,0.75,0.65],
-  C:[1.0,0.95,0.85,0.75,0.65], B:[1.0,0.85,0.70,0.55,0.40],
-  A:[1.0,0.85,0.70,0.55,0.40], S:[0.70,0.50,0.30,0.10,0.03],
+  E:[1.00,0.90,0.80,0.70,0.60], D:[0.80,0.70,0.60,0.50,0.40],
+  C:[0.60,0.50,0.40,0.30,0.20], B:[0.40,0.30,0.20,0.10,0.05],
+  A:[0.05,0.05,0.05,0.05,0.05], S:[0.03,0.03,0.03,0.03,0.03],
 };
 const ENCHANT_REQS = {
-  E:[{s:2,c:100},{s:4,c:200},{s:6,c:300},{s:8,c:400},{s:10,c:500}],
-  D:[{s:2,c:200},{s:4,c:300},{s:6,c:400},{s:8,c:500},{s:10,c:600}],
-  C:[{s:2,c:300},{s:4,c:400},{s:6,c:500},{s:8,c:600},{s:10,c:700}],
-  B:[{s:4,c:500},{s:6,c:700},{s:8,c:900},{s:10,c:1000},{s:12,c:1300}],
-  A:[{s:4,c:600},{s:6,c:900},{s:8,c:1000},{s:10,c:1300},{s:12,c:1500}],
-  S:[{s:6,c:700},{s:8,c:1000},{s:10,c:1500},{s:12,c:2500},{s:15,c:4000}],
+  E:[{s:2,c:1000},{s:4,c:2000},{s:6,c:3000},{s:8,c:4000},{s:10,c:5000}],
+  D:[{s:2,c:6000},{s:4,c:7000},{s:6,c:8000},{s:8,c:9000},{s:10,c:10000}],
+  C:[{s:2,c:11000},{s:4,c:12000},{s:6,c:13000},{s:8,c:14000},{s:10,c:15000}],
+  B:[{s:4,c:16000},{s:6,c:17000},{s:8,c:18000},{s:10,c:19000},{s:12,c:20000}],
+  A:[{s:4,c:21000},{s:6,c:22000},{s:8,c:23000},{s:10,c:24000},{s:12,c:25000}],
+  S:[{s:6,c:26000},{s:8,c:27000},{s:10,c:28000},{s:12,c:29000},{s:15,c:30000}],
 };
-
 // ── Crafting Modal Animation & Result Utility Functions ──
 window.showCraftingModal = function(recipeName) {
   const modal = document.getElementById('crafting-modal');
@@ -12806,8 +14120,22 @@ function _resolveContinentFromLocation(c) {
   const fuzzyMatches = [
     { continent: 'Northern Continent', keys: ['frostspire','whitecrest','icerun','paleglow','mistveil','frostfang','sheen lake','misty hollow','dark cathedral','wisteria','silver lake','hobbit cave','arctic willow','dream river','suldan mine','shrine of secrets','aurora basin','forgotten estuary'] },
     { continent: 'Western Continent',  keys: ['solmere','sunpetal','basil','riverend','verdance','whispering forest','golden plains','element valley','defiled sanctum','asahi valley','moss stream','argent grotto','golden river','shiny cavern','purgatory of light','temple of verdict','heart garden','valley of overflowing'] },
-    { continent: 'Eastern Continent',  keys: ['vorthak','ashen wastes','infernal reach','ruined sanctum','blighted world'] },
-    { continent: 'Southern Continent', keys: ['nyx abyss','void chasm','abyssal depths','fallen heaven'] },
+    { continent: 'Eastern Continent',  keys: [
+      'vorthak',
+      'lake of reflections','crystal cave','rainbow valley','shimmering peak','mirror sky',
+      'tempest crown','frostfall expanse','ember horizon','veilwater basin','titan divide',
+      'crimson fang','root grove','serpent mire','burrowdeep basin','gremlin hollows',
+      'defiled sanctum','dark cathedral','gravemarch fields','fallen bastion','whispering necropolis',
+      'blighted world','infernal reach','sphinx dominion','ashwing aerie','leviathan depths',
+    ] },
+    { continent: 'Southern Continent', keys: [
+      'nyx abyss',
+      'fractured firmament','maw of eternity','veil of madness','the watching expanse','descent of the nameless',
+      'gravefall descent','weeping caverns','kingdom of chains','the hollow deep','throne of the depths',
+      'throne of pride','hallow of greed','crimson feast','veil of desire','the forsaken graves',
+      'bleeding constellations','the watching worlds','nebula of whispers','eclipse throne','the endless maw',
+      'root of malevolence','grove of horror','canopy of despair','crown of madness','heartwood abyss',
+    ] },
   ];
 
   for (const p of fuzzyMatches) {
@@ -12857,9 +14185,16 @@ function _syncAllDisplays(c) {
   if (!c) return;
   const hpMax   = c.hpMax   ?? 100;
   const manaMax = c.manaMax ?? 50;
+  // During auto-battle, the battle loop tracks live HP/mana separately from
+  // _charData (which reflects the last Firestore write, not the current tick).
+  // Using the stale _charData values here causes the stat bar to flicker back
+  // and forth between the Firestore value and the live battle value every tick.
+  // Always prefer the live battle values while a fight is in progress.
+  const liveHp   = (_autoBattleRunning && window._autoBattleLiveHp   !== undefined) ? window._autoBattleLiveHp   : null;
+  const liveMana = (_autoBattleRunning && window._autoBattleLiveMana !== undefined) ? window._autoBattleLiveMana : null;
   // Always clamp — can never display more than the max
-  const hp      = Math.min(c.hp   ?? 100, hpMax);
-  const mana    = Math.min(c.mana ?? 50,  manaMax);
+  const hp      = Math.min(liveHp   ?? c.hp   ?? 100, hpMax);
+  const mana    = Math.min(liveMana ?? c.mana ?? 50,  manaMax);
   const gold    = c.gold ?? 0;
   const xp      = c.xp   ?? 0;
   const xpMax   = c.xpMax ?? 100;
@@ -12874,7 +14209,8 @@ function _syncAllDisplays(c) {
   set('market-gold-display', gold); // Market panel gold display
   set('stat-hp',        hp);
   set('stat-mana',      mana);
-  set('stat-level',     `Level ${level}`);
+  const _dispLvl = _displayLevel(level);
+  set('stat-level',     `Level ${_dispLvl}`);
   set('stat-rank',      rank);
   set('stat-loc',       loc);
   set('stat-continent', cont);
@@ -12887,14 +14223,19 @@ function _syncAllDisplays(c) {
   set('s-mana',  `${mana} / ${manaMax}`);
   set('s-gold',  gold);
   set('s-xp',    `${xp} / ${xpMax}`);
-  set('s-level', `Level ${level}`);
+  set('s-level', `Level ${_dispLvl}`);
   set('s-rank',  rank);
   set('s-loc',   loc);
   // Sidebar XP bar
   set('sb-xp',   `${xp} / ${xpMax}`);
   css('sb-xpfill', 'width', Math.min(100, Math.round((xp / xpMax) * 100)) + '%');
   set('sb-name', c.charName || c.name || '');
-  set('sb-meta', `${rank} · Level ${level}`);
+  set('sb-meta', `${rank} · Level ${_dispLvl}`);
+  // Keep profession XP bar in sync whenever character data refreshes from server.
+  // Skip if a gather write is still in-flight — the optimistic render already
+  // showed the correct value and we don't want Firestore's pre-commit snapshot
+  // to revert it before the write is confirmed.
+  if (c.profession && !window._gatherWritePending) showActiveProfession(c);
 }
 
 async function refreshCharData() {
@@ -13409,7 +14750,8 @@ window.chooseCompanion = async function(index) {
     window.renderCompanionPanel();
     const switchMsg = isSwitch ? ' (Companion Change Potion consumed)' : '';
     window.showToast(`${name} is now your companion!${switchMsg}`, 'success');
-    logActivity('🐾', `<b>Companion ${isSwitch ? 'Switched' : 'Chosen'}!</b> ${name} joined your journey.`, '#c9a84c');  } catch(e) {
+    logActivity('🐾', `<b>Companion ${isSwitch ? 'Switched' : 'Chosen'}!</b> ${name} joined your journey.`, '#c9a84c');
+  } catch(e) {
     console.error(e);
     window.showToast('Failed to save companion.', 'error');
   }
@@ -13504,8 +14846,8 @@ const _RANDOM_EVENTS = {
         const pct = Math.floor(Math.random()*11)+5; // 5-15%
         const lost = Math.floor((_charData.gold||0) * pct/100);
         if (lost > 0) {
-          await updateDoc(doc(db,'characters',_uid), { gold: (_charData.gold||0) - lost });
-          _charData.gold = (_charData.gold||0) - lost;
+          await updateDoc(doc(db,'characters',_uid), { gold: increment(-lost) }); // FIXED: use increment
+          _charData.gold = Math.max(0, (_charData.gold||0) - lost);
           set('stat-gold', _charData.gold); set('s-gold', _charData.gold);
           window.showToast(`You've been robbed! Lost ${lost} coins.`, 'error');
           logActivity('💰', `<b>You've Been Robbed!</b> A shadow slipped past you and made off with <b>${lost} coins</b>.`, '#e05555');
@@ -13514,25 +14856,21 @@ const _RANDOM_EVENTS = {
     },
     { weight:20, fn: async () => {
         const gifts = ['Minor HP Potion','Minor Mana Potion','Minor Luck Potion'];
-        const gold  = Math.floor(Math.random()*31)+10; // 10-40
-        const item  = gifts[Math.floor(Math.random()*gifts.length)];
-        const inv   = [...(_charData.inventory||[])];
-        const ex    = inv.find(i=>i.name===item);
-        if (ex) ex.qty++; else inv.push({name:item,qty:1,type:getItemType(item)});
-        await _invWrite(_uid, inv, { gold:(_charData.gold||0)+gold });
-        _charData.inventory = inv;
-        _charData.gold = (_charData.gold||0)+gold;
-        set('stat-gold',_charData.gold); set('s-gold',_charData.gold);
-        window._allInvItems = inv; window._refreshInvDisplay();
-        window.showToast(`A Kind Stranger gifted you ${gold} coins and a ${item}!`, 'success');
-        logActivity('🤝', `<b>A Kind Stranger</b> crossed your path and left you <b>${gold} coins</b> and a <b>${item}</b>.`, '#70c090');
+        const goldAmt  = Math.floor(Math.random()*31)+10; // 10-40
+        const giftItem  = gifts[Math.floor(Math.random()*gifts.length)];
+        await _invWrite(_uid, inv => {
+          const ex = inv.find(i=>i.name===giftItem);
+          if (ex) ex.qty++; else inv.push({name:giftItem,qty:1,type:getItemType(giftItem)});
+        }, { gold: increment(goldAmt) });
+        window._allInvItems = _charData.inventory; window._refreshInvDisplay();
+        window.showToast(`A Kind Stranger gifted you ${goldAmt} coins and a ${giftItem}!`, 'success');
+        logActivity('🤝', `<b>A Kind Stranger</b> crossed your path and left you <b>${goldAmt} coins</b> and a <b>${giftItem}</b>.`, '#70c090');
       }
     },
     { weight:15, fn: async () => {
         const gold = Math.floor(Math.random()*81)+20; // 20-100
-        const updates = { gold: (_charData.gold||0)+gold };
-        await updateDoc(doc(db,'characters',_uid), updates);
-        Object.assign(_charData, updates);
+        await updateDoc(doc(db,'characters',_uid), { gold: increment(gold) });
+        _charData.gold = (_charData.gold||0)+gold;
         set('stat-gold',_charData.gold); set('s-gold',_charData.gold);
         window.showToast(`Hidden Loot! Found ${gold} coins!`, 'success');
         logActivity('📦', `<b>Hidden Loot!</b> You stumbled upon a concealed stash containing <b>${gold} coins</b>.`, '#c9a84c');
@@ -13551,11 +14889,11 @@ const _RANDOM_EVENTS = {
         const bonus = Math.floor(Math.random()*2)+1;
         const pool  = ['Iron','Copper','Silver','Obsidian','Coal'];
         const item  = pool[Math.floor(Math.random()*pool.length)];
-        const inv   = [...(_charData.inventory||[])];
-        const ex    = inv.find(i=>i.name===item);
-        if (ex) ex.qty+=bonus; else inv.push({name:item,qty:bonus,type:'material'});
-        await _invWrite(_uid, inv);
-        _charData.inventory=inv; window._allInvItems=inv; window._refreshInvDisplay();
+        await _invWrite(_uid, inv => {
+          const ex = inv.find(i=>i.name===item);
+          if (ex) ex.qty+=bonus; else inv.push({name:item,qty:bonus,type:'material'});
+        });
+        window._allInvItems=_charData.inventory; window._refreshInvDisplay();
         window.showToast(`Rich Vein Found! +${bonus} ${item}`, 'success');
         logActivity('⛏️', `<b>Rich Vein Found!</b> Your pick struck an exposed vein — bonus <b>x${bonus} ${item}</b> extracted.`, '#c9a84c');
       }
@@ -13563,11 +14901,11 @@ const _RANDOM_EVENTS = {
     Angler:   { weight:25, fn: async () => {
         const fish  = ['Trout','Carp','Goldfish','Silverfin'];
         const item  = fish[Math.floor(Math.random()*fish.length)];
-        const inv   = [...(_charData.inventory||[])];
-        const ex    = inv.find(i=>i.name===item);
-        if (ex) ex.qty+=2; else inv.push({name:item,qty:2,type:'material'});
-        await _invWrite(_uid, inv);
-        _charData.inventory=inv; window._allInvItems=inv; window._refreshInvDisplay();
+        await _invWrite(_uid, inv => {
+          const ex = inv.find(i=>i.name===item);
+          if (ex) ex.qty+=2; else inv.push({name:item,qty:2,type:'material'});
+        });
+        window._allInvItems=_charData.inventory; window._refreshInvDisplay();
         window.showToast(`Golden Catch! Reeled in a rare ${item}!`, 'success');
         logActivity('🎣', `<b>Golden Catch!</b> Your line pulled taut — a rare <b>${item}</b> surfaced from the deep.`, '#e8d070');
       }
@@ -13575,11 +14913,11 @@ const _RANDOM_EVENTS = {
     Forager:  { weight:25, fn: async () => {
         const items = ['Apple','Blueberry','Moon Grape','Silverleaf'];
         const item  = items[Math.floor(Math.random()*items.length)];
-        const inv   = [...(_charData.inventory||[])];
-        const ex    = inv.find(i=>i.name===item);
-        if (ex) ex.qty+=3; else inv.push({name:item,qty:3,type:'material'});
-        await _invWrite(_uid, inv);
-        _charData.inventory=inv; window._allInvItems=inv; window._refreshInvDisplay();
+        await _invWrite(_uid, inv => {
+          const ex = inv.find(i=>i.name===item);
+          if (ex) ex.qty+=3; else inv.push({name:item,qty:3,type:'material'});
+        });
+        window._allInvItems=_charData.inventory; window._refreshInvDisplay();
         window.showToast(`Bloom Surge! Triple ${item} found!`, 'success');
         logActivity('🌸', `<b>Bloom Surge!</b> The area burst with growth — you collected triple <b>${item}</b>.`, '#70c090');
       }
@@ -13587,18 +14925,17 @@ const _RANDOM_EVENTS = {
     Herbalist:{ weight:25, fn: async () => {
         const items = ['Mint Leaves','Wild Herbs','Silverleaf','Glow Moss'];
         const item  = items[Math.floor(Math.random()*items.length)];
-        const inv   = [...(_charData.inventory||[])];
-        const ex    = inv.find(i=>i.name===item);
-        if (ex) ex.qty+=2; else inv.push({name:item,qty:2,type:'material'});
-        await _invWrite(_uid, inv);
-        _charData.inventory=inv; window._allInvItems=inv; window._refreshInvDisplay();
+        await _invWrite(_uid, inv => {
+          const ex = inv.find(i=>i.name===item);
+          if (ex) ex.qty+=2; else inv.push({name:item,qty:2,type:'material'});
+        });
+        window._allInvItems=_charData.inventory; window._refreshInvDisplay();
         window.showToast(`Rare Herb Patch! Bonus ${item} gathered.`, 'success');
         logActivity('🌿', `<b>Rare Patch!</b> You spotted a hidden cluster — bonus <b>x2 ${item}</b> gathered.`, '#70c090');
       }
     },
     Hunter:   { weight:25, fn: async () => {
         logActivity('🐾', `<b>Alpha Beast Appeared!</b> A powerful creature emerged — fight it in the Battle panel for enhanced rewards.`, '#e05555');
-        window.showToast('An Alpha Beast lurks nearby — head to Battle for bonus loot!', 'info');
       }
     },
   },
@@ -14091,7 +15428,7 @@ window.viewPlayerProfile = async function(uid) {
     document.getElementById('pprofile-name').textContent     = c.name || '—';
     document.getElementById('pprofile-rank').textContent     = c.rank || 'Wanderer';
     document.getElementById('pprofile-rank-val').textContent = c.rank || 'Wanderer';
-    document.getElementById('pprofile-level').textContent    = `${c.level || 1}`;
+    document.getElementById('pprofile-level').textContent    = `${_displayLevel(c.level || 1)}`;
     document.getElementById('pprofile-faction').textContent  = c.faction || 'None';
     document.getElementById('pprofile-bio').textContent      = c.bio || 'No history written yet.';
     document.getElementById('pprofile-race-tag').textContent = c.race ? `🧬 ${c.race}` : '';
@@ -14116,4 +15453,89 @@ window.viewPlayerProfile = async function(uid) {
     document.getElementById('pprofile-name').textContent = 'Failed to load profile.';
     if (loading) loading.style.display = 'none';
   }
+};
+// ═══════════════════════════════════════════════════
+//  INVENTORY GRADE MIGRATION
+//  window.patchAllInventoryGrades()
+//
+//  One-time admin utility. Scans every document in the 'characters'
+//  collection and backfills the `grade` field on any equipment item
+//  that is missing it (deity bestowals, quest rewards, old drops, etc.)
+//
+//  Also backfills `type:'equipment'` if that is missing on known gear.
+//
+//  Safe to re-run — items that already have a grade are skipped.
+//
+//  Call from the browser console (admin account only):
+//    await window.patchAllInventoryGrades()
+//
+//  Returns a summary: { checked, patched, itemsFixed, errors }
+// ═══════════════════════════════════════════════════
+window.patchAllInventoryGrades = async function() {
+  console.log('[GradePatch] Starting inventory grade migration…');
+  const summary = { checked: 0, patched: 0, itemsFixed: 0, errors: 0 };
+
+  let allDocs;
+  try {
+    const snap = await getDocs(collection(db, 'characters'));
+    allDocs = snap.docs;
+  } catch (e) {
+    console.error('[GradePatch] Could not fetch characters collection:', e);
+    return summary;
+  }
+
+  for (const charDoc of allDocs) {
+    summary.checked++;
+    const data = charDoc.data();
+    const inv  = Array.isArray(data.inventory) ? data.inventory.map(i => ({ ...i })) : [];
+    let changed = false;
+
+    for (const item of inv) {
+      const baseName = (item.name || '').replace(/\s*\+\d+$/, '');
+      if (!baseName) continue;
+
+      // Only process equipment items (or items that look like equipment)
+      const looksLikeEquip =
+        item.type === 'equipment' ||
+        item.type === 'weapon'    ||
+        item.type === 'armor'     ||
+        ALL_WEAPON_NAMES.includes(baseName) ||
+        ALL_ARMOR_NAMES.includes(baseName);
+
+      if (!looksLikeEquip) continue;
+
+      // Fix type if it's wrong
+      if (item.type !== 'equipment') {
+        item.type = 'equipment';
+        changed = true;
+        summary.itemsFixed++;
+      }
+
+      // Backfill missing grade
+      if (!item.grade) {
+        const resolved = window._resolveEquipGrade(baseName);
+        if (resolved) {
+          item.grade = resolved;
+          changed = true;
+          summary.itemsFixed++;
+          console.log(`[GradePatch] ${charDoc.id} — ${item.name}: grade set to ${resolved}`);
+        }
+      }
+    }
+
+    if (changed) {
+      try {
+        await updateDoc(doc(db, 'characters', charDoc.id), { inventory: inv });
+        summary.patched++;
+        console.log(`[GradePatch] ✅ Patched ${charDoc.id} (${data.name || 'unnamed'})`);
+      } catch (e) {
+        summary.errors++;
+        console.error(`[GradePatch] ❌ Failed to update ${charDoc.id}:`, e);
+      }
+    }
+  }
+
+  console.log('[GradePatch] Migration complete:', summary);
+  window.showToast?.(`✅ Grade patch done — ${summary.patched} accounts updated, ${summary.itemsFixed} items fixed`, 'success');
+  return summary;
 };

@@ -1,7 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script>window.location.replace("../index.html");</script>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Dashboard — Forge of Legends</title>
@@ -56,6 +55,30 @@ button,
   opacity: 1;
   background: rgba(180, 60, 60, 0.18);
 }
+/* ── Flat zone region label (replaces collapsible dropdowns) ─────────────── */
+.zone-region-label-flat {
+  font-family: var(--ff-mono, monospace);
+  font-size: 0.65rem;
+  letter-spacing: 0.12em;
+  color: var(--text-dim, #888);
+  text-transform: uppercase;
+  padding: 6px 2px 8px;
+  margin-top: 4px;
+  border-bottom: 1px solid var(--border, #222);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.zone-region-label-flat .zone-region-range {
+  color: var(--ash, #555);
+  font-size: 0.6rem;
+  margin-left: auto;
+}
+/* Hide the old collapsible infrastructure — safety net */
+.zone-region-toggle, .zone-region-arrow, .zone-region-body { all: unset; display: contents; }
+.zone-region { display: contents; }
+
 /* Override global pulse on loading title */
 .loading-title { animation: none !important; }
 /* Deity view switch button in sidebar */
@@ -129,7 +152,6 @@ button,
 </style>
 </head>
 <body>
-
 <div class="loading-overlay" id="loading">
   <div class="loading-title">FORGE OF LEGENDS</div>
   <div class="loading-dots">
@@ -229,29 +251,39 @@ button,
 <div class="sell-modal" id="sell-modal" style="display:none">
   <div class="sell-modal-box">
     <div class="sell-modal-title">LIST ITEM FOR SALE</div>
+
     <div class="field-group" style="margin-bottom:14px">
       <label class="field-label">Select Item</label>
-      <select class="field-input field-input-select" id="sell-item-select" style="cursor:pointer"><option value="">Choose from inventory...</option></select>
+      <select class="field-input field-input-select" id="sell-item-select" style="cursor:pointer" onchange="(function(sel){
+        const idx = parseInt(sel.value);
+        const hint = document.getElementById('sell-price-hint');
+        if (isNaN(idx) || !window._allInvItems) { hint.style.display='none'; return; }
+        const item = window._allInvItems[idx];
+        if (!item || !window._getListingBracket) { hint.style.display='none'; return; }
+        const b = window._getListingBracket(item);
+        if (!b) { hint.style.display='none'; return; }
+        if (b.blocked) {
+          hint.style.display='block';
+          hint.style.color='var(--danger,#e05252)';
+          hint.textContent='⚠ ' + (b.reason || 'This item cannot be listed on the market.');
+        } else {
+          const rangeText = b.maxP === Infinity
+            ? b.minP.toLocaleString() + ' 🪙 minimum (no upper limit)'
+            : b.minP.toLocaleString() + ' – ' + b.maxP.toLocaleString() + ' 🪙';
+          hint.style.display='block';
+          hint.style.color='var(--gold,#c9a84c)';
+          hint.textContent='Allowed range: ' + rangeText;
+        }
+      })(this)"><option value="">Choose from inventory...</option></select>
+      <div id="sell-price-hint" style="display:none;font-size:0.75rem;margin-top:6px;padding:5px 10px;background:rgba(201,168,76,0.08);border:1px solid rgba(201,168,76,0.2);border-radius:6px;letter-spacing:0.03em;"></div>
     </div>
     <div class="field-group" style="margin-bottom:14px">
       <label class="field-label">Quantity</label>
-      <div class="stepper-group">
-        <input class="field-input stepper-input" type="number" id="sell-qty" min="1" value="1"/>
-        <div class="stepper-btns">
-          <button type="button" class="stepper-btn stepper-up" tabindex="-1" onclick="stepInput('sell-qty',1)">▲</button>
-          <button type="button" class="stepper-btn stepper-down" tabindex="-1" onclick="stepInput('sell-qty',-1)">▼</button>
-        </div>
-      </div>
+      <input class="field-input" type="number" id="sell-qty" min="1" value="1"/>
     </div>
     <div class="field-group" style="margin-bottom:20px">
       <label class="field-label">Price Per Unit (Gold Coins)</label>
-      <div class="stepper-group">
-        <input class="field-input stepper-input" type="number" id="sell-price" min="1" placeholder="Enter price..." inputmode="numeric" pattern="[0-9]*" tabindex="0" />
-        <div class="stepper-btns">
-          <button type="button" class="stepper-btn stepper-up" tabindex="-1" onclick="stepInput('sell-price',1)">▲</button>
-          <button type="button" class="stepper-btn stepper-down" tabindex="-1" onclick="stepInput('sell-price',-1)">▼</button>
-        </div>
-      </div>
+      <input class="field-input" type="number" id="sell-price" min="1" placeholder="Enter price..." inputmode="numeric" pattern="[0-9]*" tabindex="0" />
     </div>
     <div class="form-error" id="sell-error" style="margin-bottom:8px"></div>
     <div style="display:flex;gap:10px">
@@ -457,8 +489,8 @@ button,
               <div class="avatar-overlay"><span class="avatar-overlay-text">CHANGE<br/>AVATAR</span></div>
             </div>
             <div class="profile-charname" id="prof-name">—</div>
-            <div class="profile-title" id="prof-title">Wanderer</div>
-            <span class="profile-badge" id="prof-rank-badge">Rank: Wanderer</span>
+            <div class="profile-title" id="prof-title"></div>
+            <span class="profile-badge" id="prof-rank-badge">Rank: —</span>
           </div>
           <div class="profile-detail-card"><div class="profile-detail-label">Race</div><div class="profile-detail-value" id="prof-race">—</div><div class="profile-detail-sub" id="prof-race-attr">—</div></div>
           <div class="profile-detail-card"><div class="profile-detail-label">Class</div><div class="profile-detail-value gold" id="prof-class">—</div><div class="profile-detail-sub" id="prof-class-role">—</div></div>
@@ -481,10 +513,10 @@ button,
             <div class="card-title">STATS <span id="points-badge" class="points-badge"><span id="s-points">20</span> points available</span></div>
             <p class="stat-alloc-hint" id="alloc-hint">You have unallocated stat points. Distribute them below.</p>
             <div class="stat-alloc-grid">
-              <div class="stat-alloc-row"><div class="stat-alloc-info"><span class="stat-alloc-name">Strength</span><span class="stat-alloc-desc">Melee / non-magic damage</span></div><div class="stat-alloc-controls"><button class="stat-btn" onclick="allocStat('str',-1)">−</button><span class="stat-alloc-val" id="a-str">10</span><button class="stat-btn" onclick="allocStat('str',1)">+</button></div></div>
-              <div class="stat-alloc-row"><div class="stat-alloc-info"><span class="stat-alloc-name">Intelligence</span><span class="stat-alloc-desc">Magic damage</span></div><div class="stat-alloc-controls"><button class="stat-btn" onclick="allocStat('int',-1)">−</button><span class="stat-alloc-val" id="a-int">10</span><button class="stat-btn" onclick="allocStat('int',1)">+</button></div></div>
-              <div class="stat-alloc-row"><div class="stat-alloc-info"><span class="stat-alloc-name">Defense</span><span class="stat-alloc-desc">Damage reduction</span></div><div class="stat-alloc-controls"><button class="stat-btn" onclick="allocStat('def',-1)">−</button><span class="stat-alloc-val" id="a-def">10</span><button class="stat-btn" onclick="allocStat('def',1)">+</button></div></div>
-              <div class="stat-alloc-row"><div class="stat-alloc-info"><span class="stat-alloc-name">Dexterity</span><span class="stat-alloc-desc">Melee damage &amp; turn order</span></div><div class="stat-alloc-controls"><button class="stat-btn" onclick="allocStat('dex',-1)">−</button><span class="stat-alloc-val" id="a-dex">10</span><button class="stat-btn" onclick="allocStat('dex',1)">+</button></div></div>
+              <div class="stat-alloc-row"><div class="stat-alloc-info"><span class="stat-alloc-name">Strength</span><span class="stat-alloc-desc">Melee / non-magic damage</span></div><div class="stat-alloc-controls"><button class="stat-btn" onclick="allocStat('str',-1)">−</button><span class="stat-alloc-val" id="a-str">10</span><button class="stat-btn" onclick="allocStat('str',1)">+</button><input class="stat-direct-input" type="number" min="0" placeholder="set" onchange="allocStatDirect('str',this)" onclick="this.select()"/></div></div>
+              <div class="stat-alloc-row"><div class="stat-alloc-info"><span class="stat-alloc-name">Intelligence</span><span class="stat-alloc-desc">Magic damage</span></div><div class="stat-alloc-controls"><button class="stat-btn" onclick="allocStat('int',-1)">−</button><span class="stat-alloc-val" id="a-int">10</span><button class="stat-btn" onclick="allocStat('int',1)">+</button><input class="stat-direct-input" type="number" min="0" placeholder="set" onchange="allocStatDirect('int',this)" onclick="this.select()"/></div></div>
+              <div class="stat-alloc-row"><div class="stat-alloc-info"><span class="stat-alloc-name">Defense</span><span class="stat-alloc-desc">Damage reduction</span></div><div class="stat-alloc-controls"><button class="stat-btn" onclick="allocStat('def',-1)">−</button><span class="stat-alloc-val" id="a-def">10</span><button class="stat-btn" onclick="allocStat('def',1)">+</button><input class="stat-direct-input" type="number" min="0" placeholder="set" onchange="allocStatDirect('def',this)" onclick="this.select()"/></div></div>
+              <div class="stat-alloc-row"><div class="stat-alloc-info"><span class="stat-alloc-name">Dexterity</span><span class="stat-alloc-desc">Melee damage &amp; turn order</span></div><div class="stat-alloc-controls"><button class="stat-btn" onclick="allocStat('dex',-1)">−</button><span class="stat-alloc-val" id="a-dex">10</span><button class="stat-btn" onclick="allocStat('dex',1)">+</button><input class="stat-direct-input" type="number" min="0" placeholder="set" onchange="allocStatDirect('dex',this)" onclick="this.select()"/></div></div>
             </div>
             <button class="btn-primary" id="btn-save-stats" style="margin-top:16px;display:none" onclick="saveStats()">SAVE STAT ALLOCATION</button>
           </div>
@@ -626,6 +658,11 @@ button,
         <button class="inv-tab" onclick="filterInv(this,'material')">Materials</button>
         <button class="inv-tab" onclick="filterInv(this,'equipment')">Equipment</button>
         <button class="inv-tab" onclick="filterInv(this,'ingredient')">Deity Ingredients</button>
+      </div>
+      <div class="inv-search-wrap">
+        <span class="inv-search-icon">🔍</span>
+        <input type="text" id="inv-search-input" class="inv-search-input" placeholder="Search items..." oninput="window._filterInvSearch(this.value)" autocomplete="off" />
+        <button class="inv-search-clear" id="inv-search-clear" onclick="window._clearInvSearch()" style="display:none">✕</button>
       </div>
       <div class="card" style="margin-bottom:16px"><div class="inventory-grid" id="inventory-grid"></div></div>
       <div class="card">
@@ -789,6 +826,11 @@ button,
         </div>
       </div>
       <div id="profession-active-section" style="display:none">
+        <!-- Profession XP Guide -->
+        <div style="margin-bottom:14px;padding:10px 14px;background:rgba(201,168,76,0.07);border:1px solid rgba(201,168,76,0.2);border-radius:8px;font-size:0.78rem;color:var(--text-dim);line-height:1.6">
+          <div style="font-family:var(--font-mono);font-size:0.6rem;letter-spacing:0.12em;color:var(--gold);text-transform:uppercase;margin-bottom:6px">&#x1F4D6; How Profession XP Works</div>
+          <div>Gather resources at your profession zone to earn XP. Higher rarity yields more XP: <span style="color:#aaa">Common 10 &nbsp;&#xB7;&nbsp; Uncommon 25 &nbsp;&#xB7;&nbsp; Rare 60 &nbsp;&#xB7;&nbsp; Legendary 150 &nbsp;&#xB7;&nbsp; Mythic 500</span>. Level up to unlock better find rates for rare resources and increase your weekly quota.</div>
+        </div>
         <div class="prof-exp-section">
           <div class="prof-exp-header">
             <div><div class="prof-exp-name" id="active-prof-name">—</div><div style="font-size:0.78rem;color:var(--text-dim);font-style:italic;margin-top:2px" id="active-prof-desc">—</div></div>
@@ -858,30 +900,30 @@ button,
           <div class="vendor-card">
             <div class="vendor-card-header"><span class="vendor-icon">🔨</span><div><div class="vendor-name">BLACKSMITH</div><div class="vendor-role">Converts ores into gear</div></div></div>
             <div class="vendor-items">
-              <div class="vendor-item"><span class="vendor-item-name">Rusted Greatsword</span><span class="vendor-item-price">220 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Rusted Greatsword')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Rusted Greatsword','⚔️',220,'weapon')">BUY</button></div></div>
-              <div class="vendor-item"><span class="vendor-item-name">Iron Dagger</span><span class="vendor-item-price">200 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Iron Dagger')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Iron Dagger','🗡️',200,'weapon')">BUY</button></div></div>
-              <div class="vendor-item"><span class="vendor-item-name">Crude Bow</span><span class="vendor-item-price">210 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Crude Bow')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Crude Bow','🏹',210,'weapon')">BUY</button></div></div>
-              <div class="vendor-item"><span class="vendor-item-name">Leather Vest</span><span class="vendor-item-price">200 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Leather Vest')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Leather Vest','🥋',200,'armor')">BUY</button></div></div>
-              <div class="vendor-item"><span class="vendor-item-name">Iron Plate</span><span class="vendor-item-price">230 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Iron Plate')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Iron Plate','🛡️',230,'armor')">BUY</button></div></div>
+              <div class="vendor-item"><span class="vendor-item-name">Rusted Greatsword</span><span class="vendor-item-price">6,500 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Rusted Greatsword')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Rusted Greatsword','⚔️',6500,'weapon')">BUY</button></div></div>
+              <div class="vendor-item"><span class="vendor-item-name">Iron Dagger</span><span class="vendor-item-price">6,000 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Iron Dagger')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Iron Dagger','🗡️',6000,'weapon')">BUY</button></div></div>
+              <div class="vendor-item"><span class="vendor-item-name">Crude Bow</span><span class="vendor-item-price">6,200 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Crude Bow')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Crude Bow','🏹',6200,'weapon')">BUY</button></div></div>
+              <div class="vendor-item"><span class="vendor-item-name">Leather Vest</span><span class="vendor-item-price">6,000 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Leather Vest')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Leather Vest','🥋',6000,'armor')">BUY</button></div></div>
+              <div class="vendor-item"><span class="vendor-item-name">Iron Plate</span><span class="vendor-item-price">6,800 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Iron Plate')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Iron Plate','🛡️',6800,'armor')">BUY</button></div></div>
             </div>
           </div>
           <div class="vendor-card">
             <div class="vendor-card-header"><span class="vendor-icon">⚗️</span><div><div class="vendor-name">ALCHEMIST</div><div class="vendor-role">Potions &amp; elixirs</div></div></div>
             <div class="vendor-items">
-              <div class="vendor-item"><span class="vendor-item-name">Minor HP Potion</span><span class="vendor-item-price">50 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Minor HP Potion')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Minor HP Potion','🧪',50,'consumable')">BUY</button></div></div>
-              <div class="vendor-item"><span class="vendor-item-name">Standard HP Potion</span><span class="vendor-item-price">125 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Standard HP Potion')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Standard HP Potion','🧪',125,'consumable')">BUY</button></div></div>
-              <div class="vendor-item"><span class="vendor-item-name">Minor Mana Potion</span><span class="vendor-item-price">50 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Minor Mana Potion')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Minor Mana Potion','💧',50,'consumable')">BUY</button></div></div>
-              <div class="vendor-item"><span class="vendor-item-name">Minor Luck Potion</span><span class="vendor-item-price">50 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Minor Luck Potion')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Minor Luck Potion','🍀',50,'consumable')">BUY</button></div></div>
-              <div class="vendor-item"><span class="vendor-item-name">Minor EXP Potion</span><span class="vendor-item-price">50 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Minor EXP Potion')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Minor EXP Potion','✨',50,'consumable')">BUY</button></div></div>
+              <div class="vendor-item"><span class="vendor-item-name">Minor HP Potion</span><span class="vendor-item-price">150 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Minor HP Potion')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Minor HP Potion','🧪',150,'consumable')">BUY</button></div></div>
+              <div class="vendor-item"><span class="vendor-item-name">Standard HP Potion</span><span class="vendor-item-price">300 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Standard HP Potion')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Standard HP Potion','🧪',300,'consumable')">BUY</button></div></div>
+              <div class="vendor-item"><span class="vendor-item-name">Minor Mana Potion</span><span class="vendor-item-price">150 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Minor Mana Potion')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Minor Mana Potion','💧',150,'consumable')">BUY</button></div></div>
+              <div class="vendor-item"><span class="vendor-item-name">Minor Luck Potion</span><span class="vendor-item-price">150 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Minor Luck Potion')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Minor Luck Potion','🍀',150,'consumable')">BUY</button></div></div>
+              <div class="vendor-item"><span class="vendor-item-name">Minor EXP Potion</span><span class="vendor-item-price">150 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Minor EXP Potion')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Minor EXP Potion','✨',150,'consumable')">BUY</button></div></div>
             </div>
           </div>
           <div class="vendor-card">
             <div class="vendor-card-header"><span class="vendor-icon">🍳</span><div><div class="vendor-name">COOK</div><div class="vendor-role">Stat-boosting foods</div></div></div>
             <div class="vendor-items">
-              <div class="vendor-item"><span class="vendor-item-name">Grilled Meat Skewer</span><span class="vendor-item-price">30 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Grilled Meat Skewer')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Grilled Meat Skewer','🍖',30,'consumable')">BUY</button></div></div>
-              <div class="vendor-item"><span class="vendor-item-name">Herb Fish Soup</span><span class="vendor-item-price">30 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Herb Fish Soup')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Herb Fish Soup','🍲',30,'consumable')">BUY</button></div></div>
-              <div class="vendor-item"><span class="vendor-item-name">Roasted Carp</span><span class="vendor-item-price">30 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Roasted Carp')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Roasted Carp','🐟',30,'consumable')">BUY</button></div></div>
-              <div class="vendor-item"><span class="vendor-item-name">Fried Sardine</span><span class="vendor-item-price">25 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Fried Sardine')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Fried Sardine','🐟',25,'consumable')">BUY</button></div></div>
+              <div class="vendor-item"><span class="vendor-item-name">Grilled Meat Skewer</span><span class="vendor-item-price">150 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Grilled Meat Skewer')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Grilled Meat Skewer','🍖',150,'consumable')">BUY</button></div></div>
+              <div class="vendor-item"><span class="vendor-item-name">Herb Fish Soup</span><span class="vendor-item-price">150 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Herb Fish Soup')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Herb Fish Soup','🍲',150,'consumable')">BUY</button></div></div>
+              <div class="vendor-item"><span class="vendor-item-name">Roasted Carp</span><span class="vendor-item-price">140 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Roasted Carp')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Roasted Carp','🐟',140,'consumable')">BUY</button></div></div>
+              <div class="vendor-item"><span class="vendor-item-name">Fried Sardine</span><span class="vendor-item-price">120 🪙</span><div style="display:flex;gap:4px"><button class="vendor-buy-btn" onclick="openItemStatModal('Fried Sardine')">VIEW</button><button class="vendor-buy-btn" onclick="openBuyModal('Fried Sardine','🐟',120,'consumable')">BUY</button></div></div>
             </div>
           </div>
           <div class="vendor-card">
@@ -901,11 +943,60 @@ button,
           <p style="font-size:0.85rem;color:var(--text-dim);font-style:italic">Buy and sell items with other players</p>
           <button class="btn-primary" style="width:auto;padding:10px 24px" onclick="openSellModal()">+ LIST ITEM</button>
         </div>
+        <!-- ═══ PRICING GUIDE (inline, above listings) ═══════════════════ -->
+        <div class="mkt-guide" style="margin-bottom:16px">
+          <button class="mkt-guide-toggle" onclick="
+            var b=document.getElementById('mkt-guide-body-market');
+            var c=this.querySelector('.mkt-guide-chevron');
+            var open=b.style.display!=='none';
+            b.style.display=open?'none':'block';
+            c.style.transform=open?'rotate(0deg)':'rotate(180deg)';
+          ">
+            <span>📖 PRICING GUIDE</span>
+            <span class="mkt-guide-chevron">▼</span>
+          </button>
+          <div id="mkt-guide-body-market" class="mkt-guide-body" style="display:none">
+            <p class="mkt-guide-note">Only <b>resources</b>, <b>unenchanted equipment</b>, and <b>cooked food</b> may be listed. Potions, quest items, and enchanted gear are blocked.</p>
+            <p class="mkt-guide-note mgt-sub">Prices use ranges so players can respond to market scarcity and volume.</p>
+
+            <div class="mkt-guide-heading">RESOURCES</div>
+            <table class="mkt-guide-tbl">
+              <tr><td>Common</td>    <td>50 – 100 🪙</td></tr>
+              <tr><td>Uncommon</td>  <td>250 – 300 🪙</td></tr>
+              <tr><td>Rare</td>      <td>1,400 – 1,500 🪙</td></tr>
+              <tr><td>Legendary</td> <td>4,000 – 5,000 🪙</td></tr>
+              <tr><td>Mythic</td>    <td>13,000 – 15,000 🪙</td></tr>
+            </table>
+
+            <div class="mkt-guide-heading">COOKED FOOD</div>
+            <table class="mkt-guide-tbl">
+              <tr><td>Common</td>    <td>1,560 – 1,600 🪙</td></tr>
+              <tr><td>Uncommon</td>  <td>3,380 – 3,500 🪙</td></tr>
+              <tr><td>Rare</td>      <td>11,960 – 13,000 🪙</td></tr>
+              <tr><td>Legendary</td> <td>37,180 – 40,000 🪙</td></tr>
+              <tr><td>Mythic</td>    <td>74,390 – 80,000 🪙</td></tr>
+            </table>
+
+            <div class="mkt-guide-heading">EQUIPMENT <span style="font-weight:400;opacity:0.6">(unenchanted only)</span></div>
+            <table class="mkt-guide-tbl">
+              <tr><td>Grade E</td> <td>4,550 – 5,000 🪙</td></tr>
+              <tr><td>Grade D</td> <td>20,410 – 23,000 🪙</td></tr>
+              <tr><td>Grade C</td> <td>110,760 – 120,000 🪙</td></tr>
+              <tr><td>Grade B</td> <td>1,347,450 – 1,500,000 🪙</td></tr>
+              <tr><td>Grade A</td> <td>4,173,000 – 5,000,000 🪙</td></tr>
+              <tr><td>Grade S</td> <td>8,645,000 – 10,000,000 🪙</td></tr>
+            </table>
+
+            <div class="mkt-guide-formula">
+              <div class="mkt-guide-heading" style="margin-top:0;border-top:none;padding-top:0">HOW EQUIPMENT PRICES ARE SET</div>
+              <p class="mkt-guide-note">Crafting Fee + Max Material Cost + 30% Profit = base price. A range is added by rounding up to the nearest clean number.</p>
+              <p class="mkt-guide-note mgt-example"><i>Example — Rusted Greatsword: 2,200 (fee) + 1,300 (mats) + 1,050 (30% profit) = 4,550 → range 4,550 – 5,000 🪙</i></p>
+            </div>
+          </div>
+        </div>
+        <!-- ═══ END GUIDE ════════════════════════════════════════════════ -->
         <div class="player-market-search" style="margin-bottom:12px;display:flex;gap:8px;align-items:center">
           <input id="market-search-input" type="text" placeholder="Search for material or item..." class="market-search-themed" oninput="window.filterPlayerMarketListings()"/>
-        </div>
-        <div style="font-size:0.85rem;color:var(--text-dim);margin-bottom:8px">
-          <b>Price Brackets:</b> Common: 8–12 🪙, Uncommon: 18–25 🪙, Rare: 45–65 🪙, Legendary: 120–180 🪙, Mythic: 350–500 🪙, Food: 25–1200 🪙, Potions: 40–400 🪙
         </div>
         <div class="player-market-listings" id="player-listings">
           <div class="listing-empty">No items listed yet. Be the first to sell something!</div>
@@ -940,9 +1031,7 @@ button,
       </div>
     </div>
 
-    <!-- ══════════════ BATTLE ══════════════ -->
-
-    <!-- ACTIVITY FEED -->
+    <!-- ══════════════ ACTIVITY FEED ══════════════ -->
     <div class="panel" id="panel-activity">
       <div class="panel-header"><h2>ACTIVITY FEED</h2><p>Events and happenings from your travels</p></div>
       <div class="card">
@@ -974,12 +1063,10 @@ button,
             <div id="encounter-monster-name" style="font-size:1.3rem;font-weight:700;color:var(--gold);margin-bottom:4px;">—</div>
             <div id="encounter-monster-grade" style="font-size:0.85rem;font-weight:600;margin-bottom:4px;">Grade —</div>
             <div id="encounter-monster-hp" style="font-size:0.8rem;color:var(--text-dim);margin-bottom:24px;">HP: —</div>
-            <!-- Step 1: FIGHT / RUN -->
             <div id="encounter-action-btns" style="display:flex;flex-direction:column;gap:10px;">
               <button class="btn-primary" onclick="window._confirmFight()">⚔️ FIGHT</button>
               <button class="btn-secondary" style="opacity:0.7" onclick="window._closeEncounterPopup()">🐔 RUN AWAY (COWARD)</button>
             </div>
-            <!-- Step 2: Inline stance picker removed; now uses global stance modal -->
           </div>
           <div id="encounter-loading" style="display:none;flex-direction:column;align-items:center;gap:18px;padding:10px 0;">
             <div style="font-size:2.8rem" id="encounter-loading-emoji">⚔️</div>
@@ -998,13 +1085,11 @@ button,
           <div class="stance-select-mode-tag" id="stance-select-mode-tag">FARMING</div>
           <div class="stance-select-title">CHOOSE YOUR STANCE</div>
           <div class="stance-select-subtitle" id="stance-select-subtitle">Select a skill set before entering battle.</div>
-          <!-- No stances state -->
           <div id="stance-select-empty" style="display:none;text-align:center;padding:20px 0 8px">
             <div style="font-size:2rem;margin-bottom:10px">⚔️</div>
             <div style="font-size:0.88rem;color:var(--text-dim);margin-bottom:18px;line-height:1.6">You haven't created any Stances yet.<br/>Go to <b style="color:var(--gold)">Skills</b> to build your first one.</div>
             <button class="btn-primary" style="max-width:200px;margin:0 auto" onclick="window._stanceModalGoToSkills()">GO TO SKILLS</button>
           </div>
-          <!-- Stances list -->
           <div id="stance-select-list" class="stance-select-list"></div>
           <div style="margin-top:16px;text-align:center">
             <button class="btn-ghost" style="font-size:0.68rem;letter-spacing:0.08em;color:var(--text-dim)" onclick="window._closeStanceModal()">✕ CANCEL</button>
@@ -1025,115 +1110,362 @@ button,
         </div>
       </div>
 
-      <!-- Zone select (Farming) -->
+      <!-- ═══════════════════════════════════════════════════
+           ZONE SELECT  (shown when not in a battle)
+           ═══════════════════════════════════════════════════ -->
       <div id="battle-zone-select">
         <p style="font-size:0.88rem;color:var(--text-dim);font-style:italic;margin-bottom:4px">
           Travel to a monster zone on the map, then come here to fight.
         </p>
         <div id="farming-location-hint" style="font-family:var(--font-mono);font-size:0.65rem;color:var(--gold-dim);margin-bottom:18px;letter-spacing:0.05em">📍 LOCATION: —</div>
 
-        <div class="zone-continent-header"><span class="zone-cont-badge">❄️ NORTHERN — FROSTVEIL</span></div>
-        <div class="zone-grid" style="margin-bottom:20px">
-          <div class="zone-card" data-grade="E" data-zone="Frostfang Valley" data-continent="Frostveil" onclick="selectZone(this,'E','Frostfang Valley')">
-            <div class="zone-grade grade-e">E</div>
-            <div class="zone-name">Frostfang Valley</div>
-            <div class="zone-desc">Blue-mane Wolves · Five-Fanged Bears</div>
-            <div class="zone-reward">10 EXP · 5-15 Gold</div>
-          </div>
-          <div class="zone-card" data-grade="E" data-zone="Sheen Lake" data-continent="Frostveil" onclick="selectZone(this,'E','Sheen Lake')">
-            <div class="zone-grade grade-e">E</div>
-            <div class="zone-name">Sheen Lake</div>
-            <div class="zone-desc">Groundhog Turtles · Twin-faced Serpents</div>
-            <div class="zone-reward">10 EXP · 5-15 Gold</div>
-          </div>
-          <div class="zone-card" data-grade="D" data-zone="Misty Hollow" data-continent="Frostveil" onclick="selectZone(this,'D','Misty Hollow')">
-            <div class="zone-grade grade-d">D</div>
-            <div class="zone-name">Misty Hollow</div>
-            <div class="zone-desc">Mist Phantom · Ice Ifrit · Water Wraith</div>
-            <div class="zone-reward">25 EXP · 15-40 Gold</div>
-          </div>
-          <div class="zone-card" data-grade="C" data-zone="Dark Cathedral" data-continent="Frostveil" onclick="selectZone(this,'C','Dark Cathedral')">
-            <div class="zone-grade grade-c">C</div>
-            <div class="zone-name">Dark Cathedral</div>
-            <div class="zone-desc">Condemned Knight · Revenant Bishop · Penitent Priest</div>
-            <div class="zone-reward">60 EXP · 40-100 Gold</div>
-          </div>
-        </div>
-
-        <div class="zone-continent-header"><span class="zone-cont-badge">🌿 WESTERN — VERDANTIS</span></div>
-        <div class="zone-grid" style="margin-bottom:20px">
-          <div class="zone-card" data-grade="E" data-zone="Whispering Forest" data-continent="Verdantis" onclick="selectZone(this,'E','Whispering Forest')">
-            <div class="zone-grade grade-e">E</div>
-            <div class="zone-name">Whispering Forest</div>
-            <div class="zone-desc">Red-mane Wolves · Vicious Gremlins</div>
-            <div class="zone-reward">10 EXP · 5-15 Gold</div>
-          </div>
-          <div class="zone-card" data-grade="E" data-zone="Golden Plains" data-continent="Verdantis" onclick="selectZone(this,'E','Golden Plains')">
-            <div class="zone-grade grade-e">E</div>
-            <div class="zone-name">Golden Plains</div>
-            <div class="zone-desc">Scavengers · Rampage Bulls</div>
-            <div class="zone-reward">10 EXP · 5-15 Gold</div>
-          </div>
-          <div class="zone-card" data-grade="D" data-zone="Element Valley" data-continent="Verdantis" onclick="selectZone(this,'D','Element Valley')">
-            <div class="zone-grade grade-d">D</div>
-            <div class="zone-name">Element Valley</div>
-            <div class="zone-desc">Lightning Shrouds · Rock Golems · Flame Spirits</div>
-            <div class="zone-reward">25 EXP · 15-40 Gold</div>
-          </div>
-          <div class="zone-card" data-grade="C" data-zone="Defiled Sanctum" data-continent="Verdantis" onclick="selectZone(this,'C','Defiled Sanctum')">
-            <div class="zone-grade grade-c">C</div>
-            <div class="zone-name">Defiled Sanctum</div>
-            <div class="zone-desc">Skeletal Beast · Ghoul Blatherer · Cursed Fiend</div>
-            <div class="zone-reward">60 EXP · 40-100 Gold</div>
-          </div>
-        </div>
-
+        <!-- ══ EASTERN CONTINENT — VORTHAK (DANGER) ══ -->
         <div class="zone-continent-header"><span class="zone-cont-badge zone-cont-danger">🔥 EASTERN — VORTHAK (DANGER)</span></div>
+
+        <div class="zone-region-label-flat">— DARK WOODLANDS — <span class="zone-region-range">Lv. 1–100</span></div>
         <div class="zone-grid" style="margin-bottom:20px">
-          <div class="zone-card" data-grade="B" data-zone="Ashen Wastes" data-continent="Vorthak" onclick="selectZone(this,'B','Ashen Wastes')">
-            <div class="zone-grade grade-b">B</div>
-            <div class="zone-name">Ashen Wastes</div>
-            <div class="zone-desc">Dark Sphinx · Blue Phoenix · Fallen Cyclops</div>
+          <div class="zone-card" data-grade="D" data-zone="Gremlin Hollows" data-continent="Vorthak" onclick="selectZone(this,'D','Gremlin Hollows')">
+            <div class="zone-grade grade-d">Lv. 1–20</div>
+            <div class="zone-name">Gremlin Hollows</div>
+            <div class="zone-desc">Vicious Gremlin · Scavenger · Vile Goblin</div>
+            <div class="zone-reward">20 EXP · 20 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="D" data-zone="Serpent Mire" data-continent="Vorthak" onclick="selectZone(this,'D','Serpent Mire')">
+            <div class="zone-grade grade-d">Lv. 21–40</div>
+            <div class="zone-name">Serpent Mire</div>
+            <div class="zone-desc">Twin-faced Serpent · Razor-back Komodo · Giant-poison Toad</div>
+            <div class="zone-reward">40 EXP · 30 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="D" data-zone="Burrowdeep Basin" data-continent="Vorthak" onclick="selectZone(this,'D','Burrowdeep Basin')">
+            <div class="zone-grade grade-d">Lv. 41–60</div>
+            <div class="zone-name">Burrowdeep Basin</div>
+            <div class="zone-desc">Groundhog Turtle · Possessed Hedgehog · Bloodlusted Warthog</div>
+            <div class="zone-reward">60 EXP · 40 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="E" data-zone="Root Grove" data-continent="Vorthak" onclick="selectZone(this,'E','Root Grove')">
+            <div class="zone-grade grade-e">Lv. 61–80</div>
+            <div class="zone-name">Root Grove</div>
+            <div class="zone-desc">Five-Fanged Bear · Rampage Bull · Blood-faced Yak</div>
+            <div class="zone-reward">80 EXP · 50 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="E" data-zone="Crimson Fang" data-continent="Vorthak" onclick="selectZone(this,'E','Crimson Fang')">
+            <div class="zone-grade grade-e">Lv. 81–100</div>
+            <div class="zone-name">Crimson Fang</div>
+            <div class="zone-desc">Red-mane Wolf · Blue-mane Wolf · Alpha Beast Wolf</div>
+            <div class="zone-reward">100 EXP · 50 Gold</div>
+          </div>
+        </div>
+
+        <div class="zone-region-label-flat">— SHATTERED HEAVENS — <span class="zone-region-range">Lv. 101–200</span></div>
+        <div class="zone-grid" style="margin-bottom:20px">
+          <div class="zone-card" data-grade="C" data-zone="Titan Divide" data-continent="Vorthak" onclick="selectZone(this,'C','Titan Divide')">
+            <div class="zone-grade grade-c">Lv. 101–120</div>
+            <div class="zone-name">Titan Divide</div>
+            <div class="zone-desc">Stone Golem · Moldy Giant · Clayface</div>
+            <div class="zone-reward">60 EXP · 40-100 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="C" data-zone="Veilwater Basin" data-continent="Vorthak" onclick="selectZone(this,'C','Veilwater Basin')">
+            <div class="zone-grade grade-c">Lv. 121–140</div>
+            <div class="zone-name">Veilwater Basin</div>
+            <div class="zone-desc">Water Wraith · Water Serpent · Liquid Phantom</div>
+            <div class="zone-reward">60 EXP · 40-100 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="C" data-zone="Frostfall Expanse" data-continent="Vorthak" onclick="selectZone(this,'C','Frostfall Expanse')">
+            <div class="zone-grade grade-c">Lv. 141–160</div>
+            <div class="zone-name">Frostfall Expanse</div>
+            <div class="zone-desc">Ice Ifrit · Vicious Snowman · Crow Frostling</div>
+            <div class="zone-reward">60 EXP · 40-100 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="C" data-zone="Ember Horizon" data-continent="Vorthak" onclick="selectZone(this,'C','Ember Horizon')">
+            <div class="zone-grade grade-c">Lv. 161–180</div>
+            <div class="zone-name">Ember Horizon</div>
+            <div class="zone-desc">Flame Spirit · Burning Bush · Lava Golem</div>
+            <div class="zone-reward">60 EXP · 40-100 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="C" data-zone="Tempest Crown" data-continent="Vorthak" onclick="selectZone(this,'C','Tempest Crown')">
+            <div class="zone-grade grade-c">Lv. 181–200</div>
+            <div class="zone-name">Tempest Crown</div>
+            <div class="zone-desc">Lightning Shroud · Mist Phantom · Hurricane Wraith</div>
+            <div class="zone-reward">60 EXP · 40-100 Gold</div>
+          </div>
+        </div>
+
+        <div class="zone-region-label-flat">— GLASS HELL — <span class="zone-region-range">Lv. 201–300</span></div>
+        <div class="zone-grid" style="margin-bottom:20px">
+          <div class="zone-card" data-grade="E" data-zone="Lake of Reflections" data-continent="Vorthak" onclick="selectZone(this,'E','Lake of Reflections')">
+            <div class="zone-grade grade-e">Lv. 201–220</div>
+            <div class="zone-name">Lake of Reflections</div>
+            <div class="zone-desc">Prism Spider · Glass Critter · Glass Centipede</div>
+            <div class="zone-reward">10 EXP · 5-15 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="D" data-zone="Crystal Cave" data-continent="Vorthak" onclick="selectZone(this,'D','Crystal Cave')">
+            <div class="zone-grade grade-d">Lv. 221–240</div>
+            <div class="zone-name">Crystal Cave</div>
+            <div class="zone-desc">Diamond Golem · Luster Bat · Shiny Crustacean</div>
+            <div class="zone-reward">25 EXP · 15-40 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="D" data-zone="Mirror Sky" data-continent="Vorthak" onclick="selectZone(this,'D','Mirror Sky')">
+            <div class="zone-grade grade-d">Lv. 241–260</div>
+            <div class="zone-name">Mirror Sky</div>
+            <div class="zone-desc">White Raven · Mirror-eyed Owl · Cloud Lurker</div>
+            <div class="zone-reward">25 EXP · 15-40 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="D" data-zone="Rainbow Valley" data-continent="Vorthak" onclick="selectZone(this,'D','Rainbow Valley')">
+            <div class="zone-grade grade-d">Lv. 261–280</div>
+            <div class="zone-name">Rainbow Valley</div>
+            <div class="zone-desc">Radiant Ifrit · Dazzling Fairy · Sparkling Elf</div>
+            <div class="zone-reward">25 EXP · 15-40 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="D" data-zone="Shimmering Peak" data-continent="Vorthak" onclick="selectZone(this,'D','Shimmering Peak')">
+            <div class="zone-grade grade-d">Lv. 281–300</div>
+            <div class="zone-name">Shimmering Peak</div>
+            <div class="zone-desc">Red Spirit · Blue Spirit · Purple Spirit</div>
+            <div class="zone-reward">25 EXP · 15-40 Gold</div>
+          </div>
+        </div>
+
+        </div>
+
+        <div class="zone-region-label-flat">— CORRUPTED HALLOWS — <span class="zone-region-range">Lv. 301–400</span></div>
+        <div class="zone-grid" style="margin-bottom:20px">
+          <div class="zone-card" data-grade="B" data-zone="Gravemarch Fields" data-continent="Vorthak" onclick="selectZone(this,'B','Gravemarch Fields')">
+            <div class="zone-grade grade-b">Lv. 301–320</div>
+            <div class="zone-name">Gravemarch Fields</div>
+            <div class="zone-desc">Skeletal Beast · Vile Thieving Vulture · Pallbearer</div>
             <div class="zone-reward">150 EXP · 100-250 Gold</div>
           </div>
-          <div class="zone-card" data-grade="B" data-zone="Infernal Reach" data-continent="Vorthak" onclick="selectZone(this,'B','Infernal Reach')">
-            <div class="zone-grade grade-b">B</div>
-            <div class="zone-name">Infernal Reach</div>
-            <div class="zone-desc">Cerberus · Blood Kraken</div>
+          <div class="zone-card" data-grade="B" data-zone="Whispering Necropolis" data-continent="Vorthak" onclick="selectZone(this,'B','Whispering Necropolis')">
+            <div class="zone-grade grade-b">Lv. 321–340</div>
+            <div class="zone-name">Whispering Necropolis</div>
+            <div class="zone-desc">Ghoul Blatherer · Condemned Siren · Weeping Apparition</div>
             <div class="zone-reward">150 EXP · 100-250 Gold</div>
           </div>
-          <div class="zone-card" data-grade="A" data-zone="Ruined Sanctum" data-continent="Vorthak" onclick="selectZone(this,'A','Ruined Sanctum')">
-            <div class="zone-grade grade-a">A</div>
-            <div class="zone-name">Ruined Sanctum</div>
-            <div class="zone-desc">Profane Priest · Corrupted Sage · Demonic Herald</div>
+          <div class="zone-card" data-grade="B" data-zone="Defiled Sanctum" data-continent="Vorthak" onclick="selectZone(this,'B','Defiled Sanctum')">
+            <div class="zone-grade grade-b">Lv. 341–360</div>
+            <div class="zone-name">Defiled Sanctum</div>
+            <div class="zone-desc">Penitent Priest · Cursed Fiend · Forsaken Follower</div>
+            <div class="zone-reward">150 EXP · 100-250 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="B" data-zone="Dark Cathedral" data-continent="Vorthak" onclick="selectZone(this,'B','Dark Cathedral')">
+            <div class="zone-grade grade-b">Lv. 361–380</div>
+            <div class="zone-name">Dark Cathedral</div>
+            <div class="zone-desc">Revenant Bishop · Profane Priest · Profane Presbyter</div>
+            <div class="zone-reward">150 EXP · 100-250 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="B" data-zone="Fallen Bastion" data-continent="Vorthak" onclick="selectZone(this,'B','Fallen Bastion')">
+            <div class="zone-grade grade-b">Lv. 381–400</div>
+            <div class="zone-name">Fallen Bastion</div>
+            <div class="zone-desc">Condemned Knight · Nightmare Horse · Profane Jester</div>
+            <div class="zone-reward">150 EXP · 100-250 Gold</div>
+          </div>
+        </div>
+
+
+        <div class="zone-region-label-flat">— OTHERWORLD — <span class="zone-region-range">Lv. 401–500</span></div>
+        <div class="zone-grid" style="margin-bottom:28px">
+          <div class="zone-card" data-grade="A" data-zone="Blighted World" data-continent="Vorthak" onclick="selectZone(this,'A','Blighted World')">
+            <div class="zone-grade grade-a">Lv. 401–420</div>
+            <div class="zone-name">Blighted World</div>
+            <div class="zone-desc">Abomination · Corrupted Sage · Fallen Cyclops</div>
             <div class="zone-reward">400 EXP · 250-600 Gold</div>
           </div>
-          <div class="zone-card" data-grade="A" data-zone="Blighted World" data-continent="Vorthak" onclick="selectZone(this,'A','Blighted World')">
-            <div class="zone-grade grade-a">A</div>
-            <div class="zone-name">Blighted World</div>
-            <div class="zone-desc">Abomination · Devil Centurion</div>
+          <div class="zone-card" data-grade="A" data-zone="Leviathan Depths" data-continent="Vorthak" onclick="selectZone(this,'A','Leviathan Depths')">
+            <div class="zone-grade grade-a">Lv. 421–440</div>
+            <div class="zone-name">Leviathan Depths</div>
+            <div class="zone-desc">Blood Kraken · Lightning Eel · Colossal Black Serpent</div>
+            <div class="zone-reward">400 EXP · 250-600 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="A" data-zone="Ashwing Aerie" data-continent="Vorthak" onclick="selectZone(this,'A','Ashwing Aerie')">
+            <div class="zone-grade grade-a">Lv. 441–460</div>
+            <div class="zone-name">Ashwing Aerie</div>
+            <div class="zone-desc">Blue Phoenix · Glowing Griffin · Nebulous Phoenix</div>
+            <div class="zone-reward">400 EXP · 250-600 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="A" data-zone="Sphinx Dominion" data-continent="Vorthak" onclick="selectZone(this,'A','Sphinx Dominion')">
+            <div class="zone-grade grade-a">Lv. 461–480</div>
+            <div class="zone-name">Sphinx Dominion</div>
+            <div class="zone-desc">Dark Sphinx · Desolate Matriarch · Bestial Sandworm</div>
+            <div class="zone-reward">400 EXP · 250-600 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="A" data-zone="Infernal Reach" data-continent="Vorthak" onclick="selectZone(this,'A','Infernal Reach')">
+            <div class="zone-grade grade-a">Lv. 481–500</div>
+            <div class="zone-name">Infernal Reach</div>
+            <div class="zone-desc">Devil Centurion · Demonic Herald · Cerberus</div>
             <div class="zone-reward">400 EXP · 250-600 Gold</div>
           </div>
         </div>
 
+        <!-- ══ SOUTHERN CONTINENT — NYX ABYSS (ENDGAME) ══ -->
         <div class="zone-continent-header"><span class="zone-cont-badge zone-cont-endgame">☠️ SOUTHERN — NYX ABYSS (ENDGAME)</span></div>
+
+        <div class="zone-region-label-flat">— FALLEN HEAVEN — <span class="zone-region-range">S-Grade</span></div>
         <div class="zone-grid" style="margin-bottom:20px">
-          <div class="zone-card" data-grade="S" data-zone="Void Chasm" data-continent="NyxAbyss" onclick="selectZone(this,'S','Void Chasm')">
+          <div class="zone-card" data-grade="S" data-zone="Fractured Firmament" data-continent="NyxAbyss" onclick="selectZone(this,'S','Fractured Firmament')">
             <div class="zone-grade grade-s">S</div>
-            <div class="zone-name">Void Chasm</div>
-            <div class="zone-desc">Void Lurker · Oblivion Eye</div>
+            <div class="zone-name">Fractured Firmament</div>
+            <div class="zone-desc">Godless Thing · Dark Angel · Origin of Catastrophe</div>
             <div class="zone-reward">1200 EXP · 600-1500 Gold</div>
           </div>
-          <div class="zone-card" data-grade="S" data-zone="Abyssal Depths" data-continent="NyxAbyss" onclick="selectZone(this,'S','Abyssal Depths')">
+          <div class="zone-card" data-grade="S" data-zone="Maw of Eternity" data-continent="NyxAbyss" onclick="selectZone(this,'S','Maw of Eternity')">
             <div class="zone-grade grade-s">S</div>
-            <div class="zone-name">Abyssal Depths</div>
-            <div class="zone-desc">Abyssal Eater · Chaoswalker</div>
+            <div class="zone-name">Maw of Eternity</div>
+            <div class="zone-desc">Great Devourer · Gastric Juices · Gourmet Devil</div>
             <div class="zone-reward">1200 EXP · 600-1500 Gold</div>
           </div>
-          <div class="zone-card" data-grade="S" data-zone="Fallen Heaven" data-continent="NyxAbyss" onclick="selectZone(this,'S','Fallen Heaven')">
+          <div class="zone-card" data-grade="S" data-zone="Veil of Madness" data-continent="NyxAbyss" onclick="selectZone(this,'S','Veil of Madness')">
             <div class="zone-grade grade-s">S</div>
-            <div class="zone-name">Fallen Heaven</div>
-            <div class="zone-desc">Godless Thing</div>
+            <div class="zone-name">Veil of Madness</div>
+            <div class="zone-desc">Chaoswalker · Chaoshunter · Earl of Abolition</div>
+            <div class="zone-reward">1200 EXP · 600-1500 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="S" data-zone="The Watching Expanse" data-continent="NyxAbyss" onclick="selectZone(this,'S','The Watching Expanse')">
+            <div class="zone-grade grade-s">S</div>
+            <div class="zone-name">The Watching Expanse</div>
+            <div class="zone-desc">Oblivion Eye · Pyramid Eye · Eye of Jujularim</div>
+            <div class="zone-reward">1200 EXP · 600-1500 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="S" data-zone="Descent of the Nameless" data-continent="NyxAbyss" onclick="selectZone(this,'S','Descent of the Nameless')">
+            <div class="zone-grade grade-s">S</div>
+            <div class="zone-name">Descent of the Nameless</div>
+            <div class="zone-desc">VoidSpawn · Faithless · Disciple of Silence</div>
+            <div class="zone-reward">1200 EXP · 600-1500 Gold</div>
+          </div>
+        </div>
+
+
+        <div class="zone-region-label-flat">— UNDERWORLD — <span class="zone-region-range">S-Grade</span></div>
+        <div class="zone-grid" style="margin-bottom:20px">
+          <div class="zone-card" data-grade="S" data-zone="Gravefall Descent" data-continent="NyxAbyss" onclick="selectZone(this,'S','Gravefall Descent')">
+            <div class="zone-grade grade-s">S</div>
+            <div class="zone-name">Gravefall Descent</div>
+            <div class="zone-desc">Abyss Crawler · Filthy Monarch · Ferryman</div>
+            <div class="zone-reward">1200 EXP · 600-1500 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="S" data-zone="Weeping Caverns" data-continent="NyxAbyss" onclick="selectZone(this,'S','Weeping Caverns')">
+            <div class="zone-grade grade-s">S</div>
+            <div class="zone-name">Weeping Caverns</div>
+            <div class="zone-desc">Doom Leech · Scourge Wraith · Ancient Bane</div>
+            <div class="zone-reward">1200 EXP · 600-1500 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="S" data-zone="Kingdom of Chains" data-continent="NyxAbyss" onclick="selectZone(this,'S','Kingdom of Chains')">
+            <div class="zone-grade grade-s">S</div>
+            <div class="zone-name">Kingdom of Chains</div>
+            <div class="zone-desc">Shackled Sage · Chainbound Hound · Prisoner of Time</div>
+            <div class="zone-reward">1200 EXP · 600-1500 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="S" data-zone="The Hollow Deep" data-continent="NyxAbyss" onclick="selectZone(this,'S','The Hollow Deep')">
+            <div class="zone-grade grade-s">S</div>
+            <div class="zone-name">The Hollow Deep</div>
+            <div class="zone-desc">Eyeless: The Abomination · Pale Emperor · Keeper of Secrets</div>
+            <div class="zone-reward">1200 EXP · 600-1500 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="S" data-zone="Throne of the Depths" data-continent="NyxAbyss" onclick="selectZone(this,'S','Throne of the Depths')">
+            <div class="zone-grade grade-s">S</div>
+            <div class="zone-name">Throne of the Depths</div>
+            <div class="zone-desc">King Yama · Anubis · Mictlantecuhtli</div>
+            <div class="zone-reward">1200 EXP · 600-1500 Gold</div>
+          </div>
+        </div>
+
+
+        <div class="zone-region-label-flat">— LAND OF SIN — <span class="zone-region-range">S-Grade</span></div>
+        <div class="zone-grid" style="margin-bottom:20px">
+          <div class="zone-card" data-grade="S" data-zone="Throne of Pride" data-continent="NyxAbyss" onclick="selectZone(this,'S','Throne of Pride')">
+            <div class="zone-grade grade-s">S</div>
+            <div class="zone-name">Throne of Pride</div>
+            <div class="zone-desc">Pride · Prejudice · Wrath</div>
+            <div class="zone-reward">1200 EXP · 600-1500 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="S" data-zone="Hallow of Greed" data-continent="NyxAbyss" onclick="selectZone(this,'S','Hallow of Greed')">
+            <div class="zone-grade grade-s">S</div>
+            <div class="zone-name">Hallow of Greed</div>
+            <div class="zone-desc">Greed · Avarice · Envy</div>
+            <div class="zone-reward">1200 EXP · 600-1500 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="S" data-zone="Crimson Feast" data-continent="NyxAbyss" onclick="selectZone(this,'S','Crimson Feast')">
+            <div class="zone-grade grade-s">S</div>
+            <div class="zone-name">Crimson Feast</div>
+            <div class="zone-desc">Gluttony · Insatiable Maw · Tail-Devourer</div>
+            <div class="zone-reward">1200 EXP · 600-1500 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="S" data-zone="Veil of Desire" data-continent="NyxAbyss" onclick="selectZone(this,'S','Veil of Desire')">
+            <div class="zone-grade grade-s">S</div>
+            <div class="zone-name">Veil of Desire</div>
+            <div class="zone-desc">Lust · Desire · Demoness</div>
+            <div class="zone-reward">1200 EXP · 600-1500 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="S" data-zone="The Forsaken Graves" data-continent="NyxAbyss" onclick="selectZone(this,'S','The Forsaken Graves')">
+            <div class="zone-grade grade-s">S</div>
+            <div class="zone-name">The Forsaken Graves</div>
+            <div class="zone-desc">Sloth · Despair · Sorrow</div>
+            <div class="zone-reward">1200 EXP · 600-1500 Gold</div>
+          </div>
+        </div>
+
+        <div class="zone-region-label-flat">— COSMOS — <span class="zone-region-range">S-Grade</span></div>
+        <div class="zone-grid" style="margin-bottom:20px">
+          <div class="zone-card" data-grade="S" data-zone="Bleeding Constellations" data-continent="NyxAbyss" onclick="selectZone(this,'S','Bleeding Constellations')">
+            <div class="zone-grade grade-s">S</div>
+            <div class="zone-name">Bleeding Constellations</div>
+            <div class="zone-desc">Star Phantom · The Unwinged Seraph · The Weeping Dust</div>
+            <div class="zone-reward">1200 EXP · 600-1500 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="S" data-zone="The Watching Worlds" data-continent="NyxAbyss" onclick="selectZone(this,'S','The Watching Worlds')">
+            <div class="zone-grade grade-s">S</div>
+            <div class="zone-name">The Watching Worlds</div>
+            <div class="zone-desc">The Watcher · Dark Planet · High-dimensional Seer</div>
+            <div class="zone-reward">1200 EXP · 600-1500 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="S" data-zone="Nebula of Whispers" data-continent="NyxAbyss" onclick="selectZone(this,'S','Nebula of Whispers')">
+            <div class="zone-grade grade-s">S</div>
+            <div class="zone-name">Nebula of Whispers</div>
+            <div class="zone-desc">The Whispering Gas · Cosmic Mist · The Hanging Lights</div>
+            <div class="zone-reward">1200 EXP · 600-1500 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="S" data-zone="Eclipse Throne" data-continent="NyxAbyss" onclick="selectZone(this,'S','Eclipse Throne')">
+            <div class="zone-grade grade-s">S</div>
+            <div class="zone-name">Eclipse Throne</div>
+            <div class="zone-desc">Fade to Black · Unfathomable Wall · Shadowed Sun</div>
+            <div class="zone-reward">1200 EXP · 600-1500 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="S" data-zone="The Endless Maw" data-continent="NyxAbyss" onclick="selectZone(this,'S','The Endless Maw')">
+            <div class="zone-grade grade-s">S</div>
+            <div class="zone-name">The Endless Maw</div>
+            <div class="zone-desc">Void Thing · The Twilight Horizon · The Singularity</div>
+            <div class="zone-reward">1200 EXP · 600-1500 Gold</div>
+          </div>
+        </div>
+
+        <div class="zone-region-label-flat">— THE WITHERING TREE — <span class="zone-region-range">S-Grade</span></div>
+        <div class="zone-grid" style="margin-bottom:28px">
+          <div class="zone-card" data-grade="S" data-zone="Root of Malevolence" data-continent="NyxAbyss" onclick="selectZone(this,'S','Root of Malevolence')">
+            <div class="zone-grade grade-s">S</div>
+            <div class="zone-name">Root of Malevolence</div>
+            <div class="zone-desc">Malevolence · Maleficence · Malediction</div>
+            <div class="zone-reward">1200 EXP · 600-1500 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="S" data-zone="Grove of Horror" data-continent="NyxAbyss" onclick="selectZone(this,'S','Grove of Horror')">
+            <div class="zone-grade grade-s">S</div>
+            <div class="zone-name">Grove of Horror</div>
+            <div class="zone-desc">Horror · Dread · Bane</div>
+            <div class="zone-reward">1200 EXP · 600-1500 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="S" data-zone="Canopy of Despair" data-continent="NyxAbyss" onclick="selectZone(this,'S','Canopy of Despair')">
+            <div class="zone-grade grade-s">S</div>
+            <div class="zone-name">Canopy of Despair</div>
+            <div class="zone-desc">Despair · Sorrow · Undoing</div>
+            <div class="zone-reward">1200 EXP · 600-1500 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="S" data-zone="Crown of Madness" data-continent="NyxAbyss" onclick="selectZone(this,'S','Crown of Madness')">
+            <div class="zone-grade grade-s">S</div>
+            <div class="zone-name">Crown of Madness</div>
+            <div class="zone-desc">Madness · Delusion · Paranoia</div>
+            <div class="zone-reward">1200 EXP · 600-1500 Gold</div>
+          </div>
+          <div class="zone-card" data-grade="S" data-zone="Heartwood Abyss" data-continent="NyxAbyss" onclick="selectZone(this,'S','Heartwood Abyss')">
+            <div class="zone-grade grade-s">S</div>
+            <div class="zone-name">Heartwood Abyss</div>
+            <div class="zone-desc">Oblivion · Nihility · Entropy</div>
             <div class="zone-reward">1200 EXP · 600-1500 Gold</div>
           </div>
         </div>
@@ -1143,7 +1475,7 @@ button,
           <button class="btn-secondary" style="max-width:180px" id="btn-start-auto-battle" onclick="startAutoBattle()" disabled>🔄 AUTO-BATTLE</button>
           <div id="zone-pool-status" style="display:none;font-family:var(--font-mono);font-size:0.65rem;color:var(--gold-dim)"></div>
         </div>
-      </div>
+      <!-- end battle-zone-select -->
 
       <!-- Pool Exhausted Banner -->
       <div id="zone-pool-exhausted" style="display:none;background:rgba(192,59,43,0.12);border:1px solid #c03b2b;border-radius:var(--radius);padding:20px 18px;margin-bottom:20px;text-align:center">
@@ -1306,7 +1638,9 @@ button,
         <div class="battle-result-log" id="battle-result-log"></div>
         <button class="btn-primary" style="max-width:220px;margin-top:16px" onclick="resetBattle()">FIGHT AGAIN</button>
       </div>
+
     </div>
+    <!-- end panel-battle -->
 
     <!-- ══════════════ CRAFTING ══════════════ -->
     <div class="panel" id="panel-crafting">
@@ -1458,8 +1792,8 @@ button,
             <div id="shrine-faith-bar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--gold-dim),var(--gold));border-radius:6px;transition:width 0.5s ease"></div>
           </div>
           <div style="display:flex;justify-content:space-between;font-size:0.72rem;color:var(--text-dim)">
-            <span>Tier <span id="shrine-tier-num">0</span> — <b id="shrine-tier-label" style="color:var(--gold)">Faithless</b></span>
-            <span id="shrine-next-tier">Next: Initiate at Faith 5</span>
+            <span>Mantle <span id="shrine-tier-num">0</span> — <b id="shrine-tier-label" style="color:var(--gold)">Faithless</b> &nbsp;<span id="shrine-choir-num" style="color:var(--ash-light);font-style:italic">—</span></span>
+            <span id="shrine-next-tier">Next: Initiate — Choir 1 at Faith 30</span>
           </div>
         </div>
 
@@ -1468,7 +1802,7 @@ button,
           <div style="font-size:0.7rem;letter-spacing:0.1em;color:var(--gold);text-transform:uppercase;margin-bottom:8px">Active Blessing</div>
           <div id="shrine-blessing-name" style="font-size:0.95rem;font-weight:700;color:var(--text);margin-bottom:4px">—</div>
           <div id="shrine-blessing-desc" style="font-size:0.82rem;color:var(--text-dim);margin-bottom:8px">—</div>
-          <div style="font-size:0.72rem;color:#888">Blessing strength: <b id="shrine-blessing-mult" style="color:var(--gold)">1×</b> base (Faith Tier <span id="shrine-blessing-tier">0</span>)</div>
+          <div style="font-size:0.72rem;color:#888">Blessing strength: <b id="shrine-blessing-mult" style="color:var(--gold)">1×</b> base (<span id="shrine-blessing-tier">Faithless — Choir 0</span>)</div>
         </div>
 
         <!-- Deity Lore Card -->
@@ -1556,6 +1890,23 @@ button,
       grid.innerHTML = `<div class="inv-empty">No items here.<div class="inv-empty-sub">Defeat monsters and gather resources to fill your inventory.</div></div>`;
       return;
     }
+    // If filtering by equipment, show a count header per unique item name
+    const isEquipTab = (window._currentInvFilter === 'equipment');
+    if (isEquipTab) {
+      // Group equipment by name and count
+      const grouped = {};
+      items.forEach(item => {
+        const key = item.name;
+        if (!grouped[key]) grouped[key] = { item, count: 0 };
+        grouped[key].count += (item.qty ?? 1);
+      });
+      const countEl = document.createElement('div');
+      countEl.className = 'inv-equip-count-row';
+      countEl.innerHTML = Object.values(grouped)
+        .map(g => `<span class="inv-equip-count-badge">${g.item.name} <span class="inv-equip-count-num">(${g.count})</span></span>`)
+        .join('');
+      grid.appendChild(countEl);
+    }
     items.forEach(item => {
       const el = document.createElement('div');
       el.className = 'inv-item';
@@ -1597,6 +1948,7 @@ button,
   history.replaceState({ panel: 'home' }, '', '#home');
 
   function switchPanel(name) {
+    console.log('[PANEL] switchPanel called with name:', name);
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav-item[data-panel]').forEach(n => n.classList.remove('active'));
     document.getElementById('panel-' + name)?.classList.add('active');
@@ -2043,12 +2395,38 @@ button,
   window.positionPlayerPin = positionPlayerPin;
 
   window._allInvItems = [];
+  window._currentInvFilter = 'all';
   function filterInv(btn, type) {
     document.querySelectorAll('.inv-tab').forEach(t => t.classList.remove('active'));
     btn.classList.add('active');
+    window._currentInvFilter = type;
+    // Clear search on tab switch
+    const inp = document.getElementById('inv-search-input');
+    const clr = document.getElementById('inv-search-clear');
+    if (inp) inp.value = '';
+    if (clr) clr.style.display = 'none';
     const items = type === 'all' ? window._allInvItems : window._allInvItems.filter(i => i.type === type);
     window.renderInventory(items);
   }
+  window._filterInvSearch = function(val) {
+    const clr = document.getElementById('inv-search-clear');
+    if (clr) clr.style.display = val ? 'block' : 'none';
+    const base = window._currentInvFilter === 'all'
+      ? window._allInvItems
+      : window._allInvItems.filter(i => i.type === window._currentInvFilter);
+    const q = val.trim().toLowerCase();
+    const filtered = q ? base.filter(i => (i.name || '').toLowerCase().includes(q)) : base;
+    window.renderInventory(filtered);
+  };
+  window._clearInvSearch = function() {
+    const inp = document.getElementById('inv-search-input');
+    if (inp) { inp.value = ''; inp.focus(); }
+    document.getElementById('inv-search-clear').style.display = 'none';
+    const base = window._currentInvFilter === 'all'
+      ? window._allInvItems
+      : window._allInvItems.filter(i => i.type === window._currentInvFilter);
+    window.renderInventory(base);
+  };
   window._statPoints   = 20;
   window._pendingStats = { str:10, int:10, def:10, dex:10 };
   window._baseStats    = { str:10, int:10, def:10, dex:10 };
@@ -2071,6 +2449,29 @@ button,
     const changed = Object.keys(window._pendingStats).some(k => window._pendingStats[k] !== window._baseStats[k]);
     document.getElementById('btn-save-stats').style.display = changed ? 'block' : 'none';
     document.getElementById('alloc-hint').style.display = window._statPoints > 0 ? 'block' : 'none';
+  }
+
+  // Direct input: player types the exact value they want for a stat.
+  // Works out the delta from the current pending value, validates against
+  // available points and base-stat floor, then applies.
+  function allocStatDirect(stat, inputEl) {
+    const raw = parseInt(inputEl.value, 10);
+    inputEl.value = ''; // always clear after processing
+    if (isNaN(raw) || raw < 0) return;
+    const current = window._pendingStats[stat];
+    const base    = window._baseStats[stat];
+    const target  = Math.max(base, raw); // can't go below base
+    const delta   = target - current;
+    if (delta === 0) return;
+    if (delta > 0 && delta > window._statPoints) {
+      // Clamp to what's actually available
+      const clamped = current + window._statPoints;
+      if (clamped === current) { window.showToast('No stat points remaining.', 'error'); return; }
+      allocStat(stat, window._statPoints); // spend everything available
+      window.showToast('Only ' + window._statPoints + ' point(s) remaining — allocated all to ' + stat.toUpperCase() + '.', '');
+      return;
+    }
+    allocStat(stat, delta);
   }
 
   let _selectedProf = null;
@@ -2098,7 +2499,7 @@ button,
     _travelTarget = { dest, continent, cost, seconds };
     const mins = seconds >= 60 ? Math.floor(seconds/60) + 'm ' + (seconds%60>0?seconds%60+'s':'') : seconds + 's';
     document.getElementById('travel-modal-dest').textContent  = `Traveling to ${dest}`;
-    document.getElementById('travel-modal-cost').textContent  = `${cost} coins`;
+    document.getElementById('travel-modal-cost').textContent  = cost > 0 ? `${cost} coins` : 'Free';
     document.getElementById('travel-modal-time').textContent  = mins;
     document.getElementById('travel-error').textContent = '';
     document.getElementById('travel-modal').style.display = 'flex';
@@ -2206,16 +2607,31 @@ button,
   function openSellModal() {
     const sel = document.getElementById('sell-item-select');
     sel.innerHTML = '<option value="">Choose from inventory...</option>';
-    window._allInvItems.forEach((item, i) => {
+    // Only show items that are listable (resources, unenchanted equipment, cooked food)
+    const items = window._allInvItems || [];
+    let anyListable = false;
+    items.forEach((item, i) => {
+      const b = window._getListingBracket ? window._getListingBracket(item) : null;
+      if (b && b.blocked) return; // skip blocked types silently
       const opt = document.createElement('option');
-      opt.value = i; opt.textContent = `${item.name} (×${item.qty})`;
+      opt.value = i;
+      opt.textContent = item.name + ' (×' + (item.qty ?? 1) + ')';
       sel.appendChild(opt);
+      anyListable = true;
     });
-    if (!window._allInvItems.length) sel.innerHTML = '<option>No items in inventory</option>';
+    if (!anyListable) sel.innerHTML = '<option value="">No listable items in inventory</option>';
     document.getElementById('sell-error').textContent = '';
+    document.getElementById('sell-qty').value = 1;
+    document.getElementById('sell-price').value = '';
+    const hint = document.getElementById('sell-price-hint');
+    if (hint) hint.style.display = 'none';
     document.getElementById('sell-modal').style.display = 'flex';
   }
-  function closeSellModal() { document.getElementById('sell-modal').style.display = 'none'; }
+  function closeSellModal() {
+    const hint = document.getElementById('sell-price-hint');
+    if (hint) hint.style.display = 'none';
+    document.getElementById('sell-modal').style.display = 'none';
+  }
   function confirmSell()    { window._sellItem?.(); }
 
   function sendChatMessage() { window._sendChat?.(); }

@@ -26,21 +26,36 @@
 <div id="toolbar">
   <label>MAP</label>
   <select id="img-sel">
-    <option value="world">World Map</option>
-    <option value="frostspire">Frostspire (Capital)</option>
-    <option value="frost_wildlands">Frost Wildlands</option>
-    <option value="whitecrest">Whitecrest Village</option>
-    <option value="icerun">Icerun Hamlet</option>
-    <option value="paleglow">Paleglow Town</option>
-    <option value="mistveil">Mistveil Town</option>
-    <option value="solmere">Solmere (Capital)</option>
-    <option value="verdantis_wildlands">Verdantis Wildlands</option>
-    <option value="sunpetal">Sunpetal Village</option>
-    <option value="basil">Basil Village</option>
-    <option value="riverend">Riverend Town</option>
-    <option value="verdance">Verdance Town</option>
-    <option value="vorthak">Vorthak</option>
-    <option value="nyx_abyss">Nyx Abyss</option>
+    <optgroup label="── World ──">
+      <option value="world">World Map</option>
+    </optgroup>
+    <optgroup label="── Frostveil (North) ──">
+      <option value="frostspire">Frostspire Capital</option>
+      <option value="frost_wildlands">Frost Wildlands</option>
+      <option value="whitecrest">Whitecrest Village</option>
+      <option value="icerun">Icerun Hamlet</option>
+      <option value="paleglow">Paleglow Town</option>
+      <option value="mistveil">Mistveil Town</option>
+    </optgroup>
+    <optgroup label="── Verdantis (West) ──">
+      <option value="solmere">Solmere Capital</option>
+      <option value="verdantis_wildlands">Verdantis Wildlands</option>
+      <option value="sunpetal">Sunpetal Village</option>
+      <option value="basil">Basil Village</option>
+      <option value="riverend">Riverend Town</option>
+      <option value="verdance">Verdance Town</option>
+    </optgroup>
+    <optgroup label="── Vorthak (East) ──">
+      <option value="vorthak">Vorthak Overview</option>
+      <option value="vorthak_glass_hell">Glass Hell</option>
+      <option value="vorthak_shattered_heavens">Shattered Heavens</option>
+      <option value="vorthak_dark_woodlands">Dark Woodlands</option>
+      <option value="vorthak_corrupted_hallows">Corrupted Hallows</option>
+      <option value="vorthak_otherworld">Otherworld</option>
+    </optgroup>
+    <optgroup label="── Nyx Abyss (South) ──">
+      <option value="nyx_abyss">Nyx Abyss</option>
+    </optgroup>
   </select>
   <label>LABEL</label>
   <input type="text" id="pin-lbl" placeholder="Pin name" style="width:170px"/>
@@ -68,21 +83,29 @@
 
 <script>
 const IMGS = {
-  world:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fworld-map%2Fworld-map.jpeg?alt=media&token=0cb306f5-391f-42d3-b987-a2cbb88d9fc0",
-  frostspire:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrostspire.jpeg?alt=media&token=02a9f440-6dc2-4d30-b6dd-3393c156e6ca",
-  whitecrest:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Fwhitecrest_village.jpeg?alt=media&token=8dd42296-a946-481d-b26f-f4cac2b7d66c",
-  icerun:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ficerun_hamlet.jpeg?alt=media&token=dfd74d98-9363-4514-a2cf-d4e10d1aaeb7",
-  paleglow:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Fpaleglow_town.jpeg?alt=media&token=083ffc0b-2bfa-4708-92f4-ea1cac3f2390",
-  mistveil:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Fmistveil_town.jpeg?alt=media&token=3fd261ca-b5d2-4096-8b0c-9c0f53e2c228",
-  frost_wildlands:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost_wildlands.jpeg?alt=media&token=6a811429-0b80-4be9-a10f-3a7b2f929420",
-  solmere:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fsolmere.jpeg?alt=media&token=d651b87b-c394-4aa7-8177-c533daa67da2",
-  sunpetal:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fsunpetal_village.jpeg?alt=media&token=da53581d-271c-4879-a40f-460c19a8879e",
-  basil:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fbasil_village.jpeg?alt=media&token=aaa9091c-6f79-4ddf-8136-2300dd7db9e8",
-  riverend:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Friverend_town.jpeg?alt=media&token=27721626-45d4-4b92-b089-24ae514b57f3",
-  verdance:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdance_town.jpeg?alt=media&token=06f44360-80c6-422f-8877-74aec213608f",
-  verdantis_wildlands:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis_wildlands.jpeg?alt=media&token=1897eed1-4719-4aeb-aed7-14be9434c38e",
-  vorthak:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fvorthak.jpeg?alt=media&token=4e8578db-8b12-49f3-8ff6-efd4fb75be6c",
-  nyx_abyss:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fnyx-abyss%2Fnyx-abyss.jpeg?alt=media&token=f53427ea-4393-48e1-93d7-c83f7823dd8a",
+  // ── Updated maps (new URLs) ──
+  world:                "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fworld-map%2Fworld-map.jpg?alt=media&token=07a9110a-8dee-43ba-a83f-509602552dcc",
+  frost_wildlands:      "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrost-wildlands.png?alt=media&token=fcbb7a22-7269-4e3d-a94c-ee4467a9bb6d",
+  verdantis_wildlands:  "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis-wildlands.jpg?alt=media&token=0cf70f7b-9b0d-4daf-b514-8d9d530888fa",
+  vorthak:              "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fvorthak.jpg?alt=media&token=18fe4e4f-9c29-49ba-a5ba-fb40a3d7450d",
+  // ── Vorthak sub-regions (new) ──
+  vorthak_glass_hell:       "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fglass-hell.jpg?alt=media&token=0e81de0c-af56-49c7-9e2b-dcb9d9c8fa78",
+  vorthak_shattered_heavens:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fshattered-heavens.jpg?alt=media&token=22ef88f0-9ccf-4e11-ad8d-f573f15ea85e",
+  vorthak_dark_woodlands:   "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fdark-woodlands.jpg?alt=media&token=d408a676-ec9f-40a7-8dd0-08899c88a04a",
+  vorthak_corrupted_hallows:"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fcorrupted-hallows.jpg?alt=media&token=90859bb8-c4d6-44f1-ad54-f085f85b9fc5",
+  vorthak_otherworld:       "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fotherworld.jpg?alt=media&token=9c5bfee7-ab52-44be-acca-806572eac528",
+  // ── Unchanged maps (original URLs) ──
+  frostspire:           "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrostspire.jpeg?alt=media&token=02a9f440-6dc2-4d30-b6dd-3393c156e6ca",
+  whitecrest:           "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Fwhitecrest_village.jpeg?alt=media&token=8dd42296-a946-481d-b26f-f4cac2b7d66c",
+  icerun:               "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ficerun_hamlet.jpeg?alt=media&token=dfd74d98-9363-4514-a2cf-d4e10d1aaeb7",
+  paleglow:             "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Fpaleglow_town.jpeg?alt=media&token=083ffc0b-2bfa-4708-92f4-ea1cac3f2390",
+  mistveil:             "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Fmistveil_town.jpeg?alt=media&token=3fd261ca-b5d2-4096-8b0c-9c0f53e2c228",
+  solmere:              "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fsolmere.jpeg?alt=media&token=d651b87b-c394-4aa7-8177-c533daa67da2",
+  sunpetal:             "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fsunpetal_village.jpeg?alt=media&token=da53581d-271c-4879-a40f-460c19a8879e",
+  basil:                "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fbasil_village.jpeg?alt=media&token=aaa9091c-6f79-4ddf-8136-2300dd7db9e8",
+  riverend:             "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Friverend_town.jpeg?alt=media&token=27721626-45d4-4b92-b089-24ae514b57f3",
+  verdance:             "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdance_town.jpeg?alt=media&token=06f44360-80c6-422f-8877-74aec213608f",
+  nyx_abyss:            "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fnyx-abyss%2Fnyx-abyss.jpeg?alt=media&token=f53427ea-4393-48e1-93d7-c83f7823dd8a",
 };
 
 let pins=[], curMap="world";
