@@ -547,28 +547,29 @@ exports.battleTurn = onCall(CALL_OPTS, async (request) => {
 
   const { action, skillName } = request.data;
 
-  const [battleSnap, charSnap] = await Promise.all([
-    db.collection("battles").doc(uid).get(),
-    db.collection("characters").doc(uid).get(),
-  ]);
-
+  // Read battle doc (no transaction needed — only this client writes it)
+  const battleSnap = await db.collection("battles").doc(uid).get();
   if (!battleSnap.exists) throw new HttpsError("not-found", "No active battle.");
   const battle = battleSnap.data();
-  const char   = charSnap.data();
-
   if (battle.status !== "active") throw new HttpsError("failed-precondition", "Battle is not active.");
+
+  // Read char for stats/class — used for damage calc only, NOT for gold/inventory.
+  // Gold and inventory are always re-read inside the transaction below so concurrent
+  // bestow/market/gather writes are never overwritten by a stale snapshot.
+  const charSnap = await db.collection("characters").doc(uid).get();
+  const char     = charSnap.data();
 
   let { monster, playerHp, playerMana, turn, log } = battle;
   const stats = char.stats || { str:10, int:10, def:10, dex:10 };
 
   if (action === "run") {
+    // Use increment so a concurrent bestow gold write isn't overwritten
     const runCost = 10;
-    const newGold = Math.max(0, (char.gold || 0) - runCost);
     await Promise.all([
       db.collection("battles").doc(uid).update({ status: "fled" }),
-      db.collection("characters").doc(uid).update({ gold: newGold }),
+      db.collection("characters").doc(uid).update({ gold: FieldValue.increment(-runCost) }),
     ]);
-    return { status: "fled", message: `You fled! Lost ${runCost} coins.`, gold: newGold };
+    return { status: "fled", message: `You fled! Lost ${runCost} coins.`, gold: Math.max(0, (char.gold||0) - runCost) };
   }
 
   let playerDmg = 0;
@@ -593,29 +594,36 @@ exports.battleTurn = onCall(CALL_OPTS, async (request) => {
   if (monster.hp <= 0) {
     const drops   = rollDrops(monster.grade, char.profession);
     const expGain = MONSTER_EXP[monster.grade] || 20;
-    const inv     = mergeInventory(char.inventory || [], drops.items);
-    const newGold = (char.gold || 0) + drops.gold;
-    const { newXp, newLevel, newRank, leveledUp, xpMax } = processExp(
-      char.xp||0, char.xpMax||100, char.level||1, char.rank||"Wanderer", expGain
-    );
-    const updates = { hp:playerHp, mana:playerMana, gold:newGold, inventory:inv, xp:newXp, xpMax, level:newLevel, rank:newRank };
-    if (leveledUp) {
-      updates.statPoints = (char.statPoints||0) + 3;
-      updates.hpMax      = (char.hpMax||100) + 10;
-      updates.manaMax    = (char.manaMax||50) + 5;
-      updates.hp         = updates.hpMax;
-      updates.mana       = updates.manaMax;
-    }
-    await Promise.all([
-      db.collection("battles").doc(uid).update({ status:"victory", monster }),
-      db.collection("characters").doc(uid).update(updates),
-    ]);
+
+    // ── Transactional character update ──────────────────────────────────────
+    // Re-read gold and inventory fresh inside the transaction so concurrent writes
+    // (bestow, market purchase, gather loot) are merged rather than overwritten.
+    let updates;
+    await withCharTransaction(uid, async (freshChar) => {
+      const inv     = mergeInventory(freshChar.inventory || [], drops.items);
+      const newGold = (freshChar.gold || 0) + drops.gold;
+      const { newXp, newLevel, newRank, leveledUp, xpMax } = processExp(
+        freshChar.xp||0, freshChar.xpMax||100, freshChar.level||1, freshChar.rank||"Wanderer", expGain
+      );
+      updates = { hp:playerHp, mana:playerMana, gold:newGold, inventory:inv, xp:newXp, xpMax, level:newLevel, rank:newRank };
+      if (leveledUp) {
+        updates.statPoints = (freshChar.statPoints||0) + 3;
+        updates.hpMax      = (freshChar.hpMax||100) + 10;
+        updates.manaMax    = (freshChar.manaMax||50) + 5;
+        updates.hp         = updates.hpMax;
+        updates.mana       = updates.manaMax;
+      }
+      return updates;
+    });
+
+    await db.collection("battles").doc(uid).update({ status:"victory", monster });
+    const leveledUp = updates.hpMax !== undefined; // was set only on level-up
     log.push(`💀 ${monster.name} defeated!`);
     log.push(`💰 Gained ${drops.gold} gold!`);
     log.push(`⭐ Gained ${expGain} EXP!`);
     if (drops.items.length) log.push(`🎁 Dropped: ${drops.items.map(i=>i.name).join(", ")}`);
-    if (leveledUp) log.push(`🎉 LEVEL UP! Now Level ${newLevel} ${newRank}!`);
-    return { status:"victory", log, drops, expGain, leveledUp, newLevel, newRank, updates };
+    if (leveledUp) log.push(`🎉 LEVEL UP! Now Level ${updates.level} ${updates.rank}!`);
+    return { status:"victory", log, drops, expGain, leveledUp, newLevel:updates.level, newRank:updates.rank, updates };
   }
 
   const monsterDmg = Math.max(1, monster.atk - Math.floor((stats.def||10) * 0.5));
@@ -623,12 +631,17 @@ exports.battleTurn = onCall(CALL_OPTS, async (request) => {
   log.push(`👹 ${monster.name} attacks for ${monsterDmg} damage!`);
 
   if (playerHp <= 0) {
-    const halfInv     = (char.inventory||[]).slice(0, Math.floor((char.inventory||[]).length / 2));
     const resurrectAt = new Date(Date.now() + 5 * 60 * 60 * 1000);
-    await Promise.all([
-      db.collection("battles").doc(uid).update({ status:"defeat" }),
-      db.collection("characters").doc(uid).update({ hp:0, mana:playerMana, inventory:halfInv, resurrectAt, isDead:true }),
-    ]);
+    // ── Transactional death write ────────────────────────────────────────────
+    // Re-read inventory inside a transaction so a concurrent bestow doesn't get
+    // overwritten — the half-inventory penalty is applied to the CURRENT server
+    // state, not the stale snapshot read at the top of this request.
+    await withCharTransaction(uid, async (freshChar) => {
+      const freshInv = freshChar.inventory || [];
+      const halfInv  = freshInv.slice(0, Math.floor(freshInv.length / 2));
+      return { hp:0, mana:playerMana, inventory:halfInv, resurrectAt, isDead:true };
+    });
+    await db.collection("battles").doc(uid).update({ status:"defeat" });
     log.push(`💀 You have been defeated! Resurrect in 5 hours.`);
     log.push(`⚠️ Half your inventory was lost.`);
     return { status:"defeat", log, resurrectAt: resurrectAt.toISOString() };

@@ -3164,6 +3164,26 @@ export function initDashboard() {
           _charData.mana         = d.mana;
           _charData.hpMax        = d.hpMax;
           _charData.manaMax      = d.manaMax;
+          // ── Sync inventory from confirmed server snapshot ────────────────
+          // The bestow Cloud Function writes inventory server-side. Without this,
+          // _charData.inventory and window._allInvItems can go stale between
+          // the bestow event and the player next viewing their inventory — any
+          // subsequent confirmed write (regen tick, lastActive stamp, etc.) fires
+          // this listener with a snapshot that has the correct inventory, but the
+          // old code never applied it, leaving the display stuck on pre-bestow data.
+          // Guard: skip during auto-battle to avoid clobbering unsaved kill-loot
+          // deltas that the battle loop has accumulated but not yet flushed.
+          if (!_autoBattleRunning && Array.isArray(d.inventory)) {
+            const prevJson = JSON.stringify(_charData.inventory || []);
+            const nextJson = JSON.stringify(d.inventory);
+            if (prevJson !== nextJson) {
+              _charData.inventory  = d.inventory;
+              window._allInvItems  = d.inventory;
+              // Re-render so the inventory panel immediately reflects the change
+              // (e.g. player opens inventory after a bestow without switching panels)
+              window._refreshInvDisplay?.();
+            }
+          }
           window._charData = _charData;
           // Refresh all stat displays and XP bars
           _syncAllDisplays(_charData);
@@ -8145,6 +8165,7 @@ window.startBestowWatcher = function() {
         // has unsaved deltas. The next kill write uses increment() for gold,
         // so the bestow gold (written server-side by the Cloud Function) is safe.
       }
+      window._allInvItems = _charData.inventory || [];
       _syncAllDisplays(_charData);
       window.renderInventory(_charData.inventory || []);
     }
@@ -14063,11 +14084,43 @@ async function _stampMissingIids(inventory) {
     }
   });
   if (dirty) {
+    // FIXED: Was a raw updateDoc with a pre-built 'expanded' snapshot.
+    // If a bestow or other write landed between when we read _charData and now,
+    // the direct write would clobber the newer server state.
+    // Instead, re-read from server inside _invWrite and apply the same
+    // iid/type corrections atomically against the live inventory.
     try {
-      await updateDoc(doc(db, 'characters', _uid), { inventory: expanded });
-      // Sync local cache so the inventory grid also reflects the cleaned items
-      if (window._charData) window._charData.inventory = expanded;
-      if (window._allInvItems) window._allInvItems = expanded;
+      await _invWrite(_uid, inv => {
+        // Re-run the same stamp logic against the fresh server inventory
+        const toFix = inv.filter(item => {
+          const correctType = getItemType(item.name);
+          const isEquip = correctType === 'equipment';
+          if (isEquip) {
+            const base = (item.name || '').replace(/\s*\+\d+$/, '').trim();
+            const correctStorage = ALL_ARMOR_NAMES.includes(base) ? 'armor'
+                                 : ALL_WEAPON_NAMES.includes(base) ? 'weapon'
+                                 : 'equipment';
+            return !item.iid || (item.type !== correctStorage && item.type !== 'weapon' && item.type !== 'armor');
+          } else {
+            return !item.type || (item.type !== correctType && item.type === 'material' && correctType !== 'material');
+          }
+        });
+        toFix.forEach(item => {
+          const correctType = getItemType(item.name);
+          const isEquip = correctType === 'equipment';
+          if (isEquip) {
+            const base = (item.name || '').replace(/\s*\+\d+$/, '').trim();
+            item.type = ALL_ARMOR_NAMES.includes(base) ? 'armor'
+                      : ALL_WEAPON_NAMES.includes(base) ? 'weapon'
+                      : 'equipment';
+            if (!item.iid) item.iid = Math.random().toString(36).slice(2,10) + Date.now().toString(36);
+          } else {
+            if (!item.type || (item.type === 'material' && correctType !== 'material')) {
+              item.type = correctType;
+            }
+          }
+        });
+      });
       console.log('[STAMP] Fixed inventory types/iids for', _uid);
     } catch(e) {
       console.warn('[STAMP] Could not fix inventory:', e);
