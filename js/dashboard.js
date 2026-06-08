@@ -7378,20 +7378,16 @@ function updateGatherBtn(profession) {
 }
 
 window._doGather = async function() {
-  // ── Dead player restriction ───────────────────────────────────────────────
-  if (_charData?.isDead) {
-    window.showToast("☠️ You are dead. You cannot gather resources.", "error"); return;
-  }
-  if (!_charData?.profession) {
-    window.showToast("Choose a profession first.", "error"); return;
-  }
-  const prof = _charData.profession;
+  // ── Dead / no profession guard ───────────────────────────────────────────
+  if (_charData?.isDead) { window.showToast("☠️ You are dead. You cannot gather resources.", "error"); return; }
+  if (!_charData?.profession) { window.showToast("Choose a profession first.", "error"); return; }
+
+  const prof      = _charData.profession;
   const resources = PROF_RESOURCES[prof];
   if (!resources) return;
 
-  // ── Location check: must be at a resource or deity zone ──────────────────
-  const loc = (_charData.kingdom||_charData.location||"").toLowerCase();
-
+  // ── Location check ────────────────────────────────────────────────────────
+  const loc = (_charData.kingdom || _charData.location || "").toLowerCase();
   const PROF_ZONES = {
     Miner:     ["hobbit_cave","suldan_mine","argent_grotto","shiny_cavern","hobbit cave","suldan mine","argent grotto","shiny cavern"],
     Angler:    ["silver_lake","dream_river","moss_stream","golden_river","silver lake","dream river","moss stream","golden river"],
@@ -7399,203 +7395,169 @@ window._doGather = async function() {
     Herbalist: ["wisteria","arctic_willow","arctic_willow_west","asahi","summer_willow","wisteria forest","arctic willow","asahi valley","summer willow"],
     Hunter:    ["wisteria","asahi","summer_willow","wisteria forest","asahi valley","summer willow"],
   };
-  const validZones = PROF_ZONES[prof] || [];
-  const isAtResourceZone = validZones.some(z => loc.includes(z));
-
-  if (!isAtResourceZone) {
+  if (!((PROF_ZONES[prof]||[]).some(z => loc.includes(z)))) {
     window.showToast(`Travel to a ${prof} resource zone on the World Map before gathering.`, "error");
     return;
   }
 
-  const btn    = document.getElementById("btn-gather");
-  const logEl  = document.getElementById("gather-log");
-  if (!btn||!logEl) return;
+  const btn   = document.getElementById("btn-gather");
+  const logEl = document.getElementById("gather-log");
+  if (!btn || !logEl) return;
 
-  btn.disabled = true;
+  btn.disabled    = true;
   btn.textContent = "Working...";
   logEl.style.display = "block";
   logEl.innerHTML = `<div class="gather-log-entry working">🔄 You are ${PROF_VERBS[prof]}...</div>`;
 
-  // Simulate 2 second gather
   await new Promise(r => setTimeout(r, 2000));
 
   try {
+    // ── Determine rarity via luck-adjusted roll ───────────────────────────
     const lvl   = _charData.professionLvl || 0;
-    // Use the canonical FIND_RATES table defined in the spec constants above
     const rates = FIND_RATES[Math.min(lvl, 10)];
 
-    let found = null;
-    const logLines = [];
+    const _luckM    = _getLuckMult(_charData);
+    const _raceR    = (_charData?.race || '').toLowerCase();
+    const _raceLk   = (_raceR.includes('fairy') || _raceR.includes('spirit')) ? 1.10 : 1;
+    const _trackit  = (_charData?.companion?.name || '').toLowerCase() === 'trackit' ? 1.10 : 1;
+    const _totalLuck = _luckM * _raceLk * _trackit;
+    const roll = Math.max(0, (Math.random() * 100) / _totalLuck);
 
-    // Normal gather — always returns a profession item
-    const _luckM = _getLuckMult(_charData);
-    const _raceR2 = (_charData?.race || '').toLowerCase();
-    const _raceLk2 = (_raceR2.includes('fairy') || _raceR2.includes('spirit')) ? 1.10 : 1;
-    const _trackit = (_charData?.companion?.name || '').toLowerCase() === 'trackit' ? 1.10 : 1;
-    const _totalLuck = _luckM * _raceLk2 * _trackit;
-    // Bias the roll: higher luck shifts roll toward 0 (rare end)
-    const _rawRoll = Math.random() * 100;
-    const roll = Math.max(0, _rawRoll / _totalLuck);
-    let cumulative = 0;
     let rarity = "common";
+    let cumulative = 0;
     for (const [r, pct] of Object.entries(rates)) {
       cumulative += pct;
       if (roll < cumulative) { rarity = r; break; }
     }
-    const pool = resources[rarity] || resources.common;
-    found = pool[Math.floor(Math.random()*pool.length)];
 
-    const rarityColors = { common:"#aaa", uncommon:"#70c090", rare:"#5b9fe0", legendary:"#c9a84c", mythic:"#d070e0" };
-    const col = rarityColors[rarity]||"#aaa";
+    const pool  = resources[rarity] || resources.common;
+    const found = pool[Math.floor(Math.random() * pool.length)];
 
-    // Chance of finding 2+ items based on level (matches Profession EXP Bar spec)
-    // Lv0-1: 0%, Lv2: 5%, Lv3: 10%, Lv4: 30%, Lv5: 50%, Lv6-10: 100%
-    let count = 1;
+    // ── Count (multi-find chance scales with level) ───────────────────────
     const doubleChance = [0,0,5,10,30,50,100,100,100,100,100][Math.min(lvl,10)];
-    // Triple only possible at Lv6+: 3%, 5%, 10%, 30%, 30%
     const tripleChance = [0,0,0,0,0,0,3,5,10,30,30][Math.min(lvl,10)];
-    if (Math.random()*100 < tripleChance) count = 3;
+    let count = 1;
+    if (Math.random()*100 < tripleChance)      count = 3;
     else if (Math.random()*100 < doubleChance) count = 2;
 
-    logLines.push(`<div class="gather-log-entry success">✅ You found <strong style="color:${col}">x${count} ${found}</strong>! <span style="font-size:10px;color:${col};text-transform:uppercase;">(${rarity})</span></div>`);
+    // ── Profession XP ─────────────────────────────────────────────────────
+    const baseXpGain = { common:10, uncommon:25, rare:60, legendary:150, mythic:500 }[rarity] || 10;
+    const _veilBonus = _charData?.deity === 'Veil' ? (1 + _getFaithBlessingPct(_charData)) : 1;
+    const xpGainFinal = Math.round(baseXpGain * count * _veilBonus);
 
-    // Add to inventory — mutator works on live server data
-    const foundItem = found;
-    const foundCount = count;
-    const isEquip = getItemType(found) === 'equipment';
-    // Pre-generate iid for equipment outside the mutator (random, idempotent)
-    const newIid = isEquip ? (Math.random().toString(36).slice(2,10)+Date.now().toString(36)) : null;
-    // Optimistic local update so HUD refreshes immediately
-    const invLocal = [...(_charData.inventory||[])];
-    const exLocal = invLocal.find(i=>i.name===foundItem);
-    if (exLocal && !isEquip) { exLocal.qty += foundCount; }
-    else { const _ni={name:foundItem,qty:foundCount,type:isEquip?'equipment':getItemType(foundItem)}; if(isEquip) _ni.iid=newIid; invLocal.push(_ni); }
-    _charData.inventory = invLocal;
-    window._allInvItems = invLocal;
-    window._refreshInvDisplay();
-
-    // Profession XP per resource rarity (spec: Common 10, Uncommon 25, Rare 60, Legendary 150, Mythic 500)
-    // Multiply by count — finding 3x items gives 3x XP
-    const xpGain = { common:10, uncommon:25, rare:60, legendary:150, mythic:500 }[rarity]||10;
-    // Veil blessing: +X% EXP from all activities including gathering
-    const _veilGatherBonus = _charData?.deity === 'Veil' ? (1 + _getFaithBlessingPct(_charData)) : 1;
-    const xpGainFinal = Math.round(xpGain * count * _veilGatherBonus);
-    let newProfXp  = (_charData.professionXp||0) + xpGainFinal;
+    let newProfXp  = (_charData.professionXp  || 0) + xpGainFinal;
     let newProfLvl = lvl;
     let leveledProf = false;
-    // Use a while loop so overflow XP carries forward and multi-level gains are handled
     while (newProfLvl < 10) {
-      const xpNeeded = PROF_EXP_TABLE[newProfLvl]; // index = current level, 0-9
-      if (xpNeeded == null) break; // safety: beyond table
-      if (newProfXp >= xpNeeded) {
-        newProfXp -= xpNeeded; // subtract threshold so XP resets cleanly
-        newProfLvl++;
-        leveledProf = true;
-      } else {
-        break;
-      }
+      const needed = PROF_EXP_TABLE[newProfLvl];
+      if (needed == null || newProfXp < needed) break;
+      newProfXp -= needed;
+      newProfLvl++;
+      leveledProf = true;
     }
-    // Cap XP at 0 if somehow at max level
     if (newProfLvl >= 10) newProfXp = 0;
 
-    // ── OPTIMISTIC UI UPDATE ──
-    // Patch _charData and render the XP bar immediately so the player sees
-    // feedback right away. A guard flag tells _syncAllDisplays to skip the
-    // profession bar while the Firestore write is in-flight, preventing the
-    // "jump → revert → jump" flicker. Once _invWrite resolves, the flag clears
-    // and the next refreshCharData re-renders from confirmed server data.
+    // ── Companion XP ──────────────────────────────────────────────────────
+    const COMP_TABLE = [0,1000,1800,3000,4200,5700,7000,9600,12000,15000];
+    let companionLeveledUp = false;
+    let companionLevel = _charData.companionLevel || 1;
+    let companionExp   = _charData.companionExp   || 0;
+    if (_charData.companion) {
+      const compGain = ({ common:10, uncommon:25, rare:60, legendary:150, mythic:500 }[rarity] || 10) * count;
+      companionExp += compGain;
+      while (companionLevel < 10 && companionExp >= (COMP_TABLE[companionLevel-1] || 1000)) {
+        companionExp -= (COMP_TABLE[companionLevel-1] || 1000);
+        companionLevel++;
+        companionLeveledUp = true;
+      }
+    }
+
+    // ── OPTIMISTIC UI — XP bar only (NO inventory change here) ───────────
+    // We only update XP/level in _charData optimistically so the bar moves
+    // immediately. Inventory is written ONLY via the _invWrite transaction
+    // below to prevent double-adds.
     _charData.professionXp  = newProfXp;
     _charData.professionLvl = newProfLvl;
     window._gatherWritePending = true;
     showActiveProfession(_charData);
 
-      // ── PET GROWTH SYSTEM ──
-      // Updated Companion EXP/level curve
-      // Applies to ALL professions
-      const COMPANION_EXP_TABLE = [0, 1000, 1800, 3000, 4200, 5700, 7000, 9600, 12000, 15000];
-      let companionExpGain = { common:10, uncommon:25, rare:60, legendary:150, mythic:500 }[rarity]||10;
-      let companionLevel = _charData.companionLevel || 1;
-      let companionExp   = _charData.companionExp   || 0;
-      let companionXpMax = COMPANION_EXP_TABLE[companionLevel-1] || 1000;
-      let companionLeveledUp = false;
-      // Award companion EXP for any profession gather
-      if (_charData.companion) {
-        console.log('[PET GROWTH DEBUG] Before:', {companion: _charData.companion, companionLevel, companionExp, companionExpGain, count, rarity});
-        companionExp += companionExpGain * count;
-        // Level up companion if enough EXP
-        while (companionLevel < 10 && companionExp >= companionXpMax) {
-          companionExp -= companionXpMax;
-          companionLevel++;
-          companionXpMax = COMPANION_EXP_TABLE[companionLevel-1] || companionXpMax;
-          companionLeveledUp = true;
-        }
-        console.log('[PET GROWTH DEBUG] After:', {companion: _charData.companion, companionLevel, companionExp, companionExpGain, count, rarity});
+    // ── Single atomic Firestore write (inventory + XP + companion) ────────
+    const isEquip = getItemType(found) === 'equipment';
+    const newIid  = isEquip ? (Math.random().toString(36).slice(2,10) + Date.now().toString(36)) : null;
+    const firestoreUpdates = {
+      professionXp:  newProfXp,
+      professionLvl: newProfLvl,
+    };
+    if (_charData.companion) {
+      firestoreUpdates.companionExp   = companionExp;
+      firestoreUpdates.companionLevel = companionLevel;
+    }
+    await _invWrite(_uid, inv => {
+      const ex = inv.find(i => i.name === found);
+      if (ex && !isEquip) {
+        ex.qty += count;
       } else {
-        console.warn('[PET GROWTH DEBUG] No companion assigned to character.');
+        const ni = { name: found, qty: count, type: isEquip ? 'equipment' : getItemType(found) };
+        if (isEquip) ni.iid = newIid;
+        inv.push(ni);
       }
+    }, firestoreUpdates);
 
-      // Save all updates — mutator adds gathered item to live server inventory
-      const updates = {
-        professionXp: newProfXp,
-        professionLvl: newProfLvl
-      };
-      if (_charData.companion) {
-        updates.companionExp = companionExp;
-        updates.companionLevel = companionLevel;
-      }
-      await _invWrite(_uid, inv => {
-        const ex = inv.find(i => i.name === foundItem);
-        if (ex && !isEquip) { ex.qty += foundCount; }
-        else { const _ni={name:foundItem,qty:foundCount,type:isEquip?'equipment':getItemType(foundItem)}; if(isEquip) _ni.iid=newIid; inv.push(_ni); }
-      }, updates);
-      // Write confirmed — clear the guard so future refreshCharData calls
-      // can freely re-render the profession bar from server data
-      window._gatherWritePending = false;
-      // _invWrite calls refreshCharData() — inventory display syncs from server
-      window._allInvItems = _charData.inventory;
-      window._refreshInvDisplay();
-      // Force companion UI refresh after EXP update
-      if (_charData.companion) {
-        const COMPANION_EXP_TABLE = [0, 1000, 1800, 3000, 4200, 5700, 7000, 9600, 12000, 15000];
-        const compLevel = _charData.companionLevel || 1;
-        const compExp = _charData.companionExp || 0;
-        const compXpMax = COMPANION_EXP_TABLE[compLevel-1] || 1000;
-        const el = document.getElementById("prof-companion");
-        if (el) el.textContent = `${_charData.companion} (Lv.${compLevel} — ${compExp}/${compXpMax} EXP)`;
-      }
-      if (leveledProf) {
-        logLines.push(`<div class="gather-log-entry success">🎉 Profession leveled up to Level ${newProfLvl}!</div>`);
-        window.showToast(`Profession level up! Now Level ${newProfLvl}!`, "success");
-        logActivity('💪', `<b>Profession Level Up!</b> ${_charData.profession} is now <b>Level ${newProfLvl}</b>.`, '#5b9fe0');
-      }
-      // Companion level up notification
-      if (companionLeveledUp) {
-        logLines.push(`<div class="gather-log-entry success">🐾 <b>Your companion leveled up!</b> Now Level ${companionLevel}!</div>`);
-        window.showToast(`🐾 Companion leveled up! Now Level ${companionLevel}!`, "success");
-        logActivity('🐾', `<b>Companion Level Up!</b> Now Level ${companionLevel}.`, '#70c090');
-      }
+    // ── Write confirmed — sync UI from authoritative server data ──────────
+    window._gatherWritePending = false;
+    window._allInvItems = _charData.inventory;
+    window._refreshInvDisplay();
 
-      // Quest tracking
-      await _incrementQuest("gather", count);
-      logActivity(
-        {Miner:'⛏️',Forager:'🌿',Herbalist:'🌱',Angler:'🎣',Hunter:'🏹'}[prof]||'🔍',
-        `<b>${prof} Gathering</b> at <b>${_charData?.kingdom || _charData?.location || 'unknown location'}</b> · Found <b>${count}x ${found}</b> <span style="color:#aaa;font-size:0.85em">(${rarity})</span>.`,
-        '#a09080'
-      );
-      if (Math.random() < 0.30) _rollGatherEvent(prof);
+    // ── Build log lines ───────────────────────────────────────────────────
+    const rarityColors = { common:"#aaa", uncommon:"#70c090", rare:"#5b9fe0", legendary:"#c9a84c", mythic:"#d070e0" };
+    const col = rarityColors[rarity] || "#aaa";
+    const logLines = [];
+    logLines.push(`<div class="gather-log-entry success">✅ You found <strong style="color:${col}">x${count} ${found}</strong>! <span style="font-size:10px;color:${col};text-transform:uppercase;">(${rarity})</span></div>`);
 
-      logEl.innerHTML = logLines.join("");
-    } catch(err) {
+    if (leveledProf) {
+      logLines.push(`<div class="gather-log-entry success">🎉 Profession leveled up to Level ${newProfLvl}!</div>`);
+      window.showToast(`Profession level up! Now Level ${newProfLvl}!`, "success");
+      logActivity('💪', `<b>Profession Level Up!</b> ${_charData.profession} is now <b>Level ${newProfLvl}</b>.`, '#5b9fe0');
+    }
+    if (companionLeveledUp) {
+      logLines.push(`<div class="gather-log-entry success">🐾 <b>Your companion leveled up!</b> Now Level ${companionLevel}!</div>`);
+      window.showToast(`🐾 Companion leveled up! Now Level ${companionLevel}!`, "success");
+      logActivity('🐾', `<b>Companion Level Up!</b> Now Level ${companionLevel}.`, '#70c090');
+    }
+    if (_charData.companion) {
+      const compLevel2 = _charData.companionLevel || 1;
+      const compExp2   = _charData.companionExp   || 0;
+      const compXpMax2 = COMP_TABLE[compLevel2-1] || 1000;
+      const el = document.getElementById("prof-companion");
+      if (el) el.textContent = `${_charData.companion.name || _charData.companion} (Lv.${compLevel2} — ${compExp2}/${compXpMax2} EXP)`;
+    }
+
+    // ── Notifications — only for Uncommon+ finds ─────────────────────────
+    if (rarity !== "common") {
+      window.showToast(`✨ ${rarity.charAt(0).toUpperCase()+rarity.slice(1)} find! x${count} ${found}`, 'success');
+    }
+
+    // ── Activity log ─────────────────────────────────────────────────────
+    await _incrementQuest("gather", count);
+    logActivity(
+      { Miner:'⛏️', Forager:'🌿', Herbalist:'🌱', Angler:'🎣', Hunter:'🏹' }[prof] || '🔍',
+      `<b>${prof} Gathering</b> at <b>${_charData?.kingdom || _charData?.location || 'unknown location'}</b> · Found <b>${count}x ${found}</b> <span style="color:${col};font-size:0.85em">(${rarity})</span>.`,
+      '#a09080'
+    );
+
+    // ── Random gather event (AFTER all writes complete) ───────────────────
+    if (Math.random() < 0.30) _rollGatherEvent(prof);
+
+    logEl.innerHTML = logLines.join("");
+
+  } catch (err) {
     console.error(err);
+    window._gatherWritePending = false;
     logEl.innerHTML = `<div class="gather-log-entry empty">❌ Gather failed. Try again.</div>`;
   }
 
-  // Restore label immediately so button doesn't stay on "Working..." while the
-  // cooldown ticks. Button remains disabled for 3s to prevent spam.
-  btn.textContent = PROF_ACTION[prof]||"⛏️ GATHER";
-  setTimeout(() => {
-    btn.disabled = false;
-  }, 3000);
+  btn.textContent = PROF_ACTION[prof] || "⛏️ GATHER";
+  setTimeout(() => { btn.disabled = false; }, 3000);
 };
 
 // ═══════════════════════════════════════════════════
