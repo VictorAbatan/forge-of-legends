@@ -515,8 +515,44 @@ const ITEMS = [
   { name:"Oil-stained Feathers",    icon:"✨", type:"material", rarity:"Deity" },
   { name:"Whispering Purple Sands", icon:"✨", type:"material", rarity:"Deity" },
   { name:"The Void-Eye",            icon:"💎", type:"material", rarity:"Deity" },
-  { name:"Orb of Silence",          icon:"💎", type:"material", rarity:"Deity" },
-  { name:"Magic Crystal",           icon:"💎", type:"material", rarity:"Deity" },
+  { name:"Orb of Silence",          icon:"🔮", type:"material", rarity:"Deity" },
+  // Sah'run worship materials
+  { name:"Volcanic Roots",          icon:"🌋", type:"material", rarity:"Deity" },
+  { name:"Devil-Spring Water",      icon:"💧", type:"material", rarity:"Deity" },
+  { name:"Ash of Elder Trees",      icon:"🌫️", type:"material", rarity:"Deity" },
+  // Elionidas worship materials
+  { name:"Golden Wheat Sheaves",    icon:"🌾", type:"material", rarity:"Deity" },
+  { name:"Miracle Coins",           icon:"🪙", type:"material", rarity:"Deity" },
+  { name:"Ancient Mint Seeds",      icon:"🌿", type:"material", rarity:"Deity" },
+  // Mah'run worship materials
+  { name:"Starlight Dust",          icon:"✨", type:"material", rarity:"Deity" },
+  { name:"Moon Petals",             icon:"🌕", type:"material", rarity:"Deity" },
+  { name:"Crystallized Night Dews", icon:"🔵", type:"material", rarity:"Deity" },
+  // Freyja worship materials
+  { name:"Crimson Toad Moss",       icon:"🔴", type:"material", rarity:"Deity" },
+  { name:"Branch of Soul Tree",     icon:"🌲", type:"material", rarity:"Deity" },
+  { name:"Bloom Petals",            icon:"🌸", type:"material", rarity:"Deity" },
+  // Arion worship materials
+  { name:"Broken Shackles",         icon:"🔗", type:"material", rarity:"Deity" },
+  { name:"Iron Oaths",              icon:"⛓️", type:"material", rarity:"Deity" },
+  { name:"Verdict Quill",           icon:"🖊️", type:"material", rarity:"Deity" },
+  // Veil worship materials
+  { name:"Ancient Scroll Fragments",icon:"📜", type:"material", rarity:"Deity" },
+  { name:"White Mystic Woods",      icon:"🌳", type:"material", rarity:"Deity" },
+  { name:"Truths",                  icon:"📖", type:"material", rarity:"Deity" },
+  // Advancement ingredients — all 7 deities
+  { name:"Heart of the Red Phoenix",icon:"🔥", type:"material", rarity:"Deity" },
+  { name:"Gem of Luminance",        icon:"💎", type:"material", rarity:"Deity" },
+  { name:"Crown of Fortune",        icon:"👑", type:"material", rarity:"Deity" },
+  { name:"Tears of The Endless Goldfish", icon:"💧", type:"material", rarity:"Deity" },
+  { name:"Core of a Fallen Star",   icon:"⭐", type:"material", rarity:"Deity" },
+  { name:"Fruit of World Tree",     icon:"🍎", type:"material", rarity:"Deity" },
+  { name:"Divine Heart Essence",    icon:"💗", type:"material", rarity:"Deity" },
+  { name:"Forgotten Desire Seed",   icon:"🌑", type:"material", rarity:"Deity" },
+  { name:"Scales of Equilibrium",   icon:"⚖️", type:"material", rarity:"Deity" },
+  { name:"Adonai Sword",            icon:"⚔️", type:"material", rarity:"Deity" },
+  { name:"Ink of Time",             icon:"🖋️", type:"material", rarity:"Deity" },
+  { name:"Eye of All-knowing",      icon:"👁️", type:"material", rarity:"Deity" },
 
   // ── INGREDIENTS (crafting components) ───────────────────
   { name:"Iron",              icon:"⛏️",  type:"ingredient", rarity:"Common" },
@@ -1026,7 +1062,7 @@ import { auth, db, storage } from "../firebase/firebase.js";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   doc, getDoc, getDocs, setDoc, collection, query, where,
-  orderBy, limit, addDoc, updateDoc, deleteDoc, onSnapshot, serverTimestamp
+  orderBy, limit, addDoc, updateDoc, deleteDoc, onSnapshot, serverTimestamp, arrayUnion
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
   ref as storageRef, uploadBytes, getDownloadURL
@@ -1891,7 +1927,7 @@ window._toggleFactionSubmissions = function(questId) {
   if (chev) chev.textContent = isOpen ? '▾' : '▴';
 };
 
-// Approve a faction quest submission
+// Approve a faction quest submission and grant its reward to the player
 window._approveFactionSubmission = async function(subId, questId) {
   try {
     const quest = window._deityFactionQuests.find(q => q.id === questId);
@@ -1899,12 +1935,51 @@ window._approveFactionSubmission = async function(subId, questId) {
     const sub = quest._submissions?.find(s => s.id === subId);
     if (!sub) return;
 
+    const reward = quest.reward || {};
+    const rewardGold  = parseInt(reward.gold) || 0;
+    const rewardExp   = parseInt(reward.exp)  || 0;
+    const rewardItems = Array.isArray(reward.items) ? reward.items : [];
+
+    // --- Grant reward to player ---
+    const charRef  = doc(db, 'characters', sub.uid);
+    const charSnap = await getDoc(charRef);
+    if (charSnap.exists()) {
+      const charData = charSnap.data();
+
+      // Merge reward items into inventory
+      let inv = Array.isArray(charData.inventory) ? [...charData.inventory] : [];
+      for (const ri of rewardItems) {
+        if (!ri.name || !(ri.qty > 0)) continue;
+        const existing = inv.find(i => i.name === ri.name);
+        if (existing) {
+          existing.qty = (existing.qty || 1) + ri.qty;
+        } else {
+          const template = (typeof ITEMS !== 'undefined' ? ITEMS : []).find(i => i.name === ri.name);
+          inv.push({ name: ri.name, qty: ri.qty, icon: template?.icon || '📦', type: template?.type || 'material', rarity: template?.rarity || 'Common' });
+        }
+      }
+
+      const updates = { inventory: inv };
+      if (rewardGold > 0) updates.gold = (charData.gold || 0) + rewardGold;
+      if (rewardExp  > 0) updates.xp   = (charData.xp   || 0) + rewardExp;
+
+      await updateDoc(charRef, updates);
+    }
+
+    // Mark submission approved
     await updateDoc(doc(db, 'factionQuestSubmissions', subId), { status: 'approved' });
+
+    // Build reward summary for notification
+    const rewardParts = [];
+    if (rewardGold > 0) rewardParts.push(`${rewardGold} gold`);
+    if (rewardExp  > 0) rewardParts.push(`${rewardExp} XP`);
+    if (rewardItems.length) rewardParts.push(rewardItems.map(i => `${i.qty}× ${i.name}`).join(', '));
+    const rewardSummary = rewardParts.length ? ` Rewards: ${rewardParts.join(', ')}.` : '';
 
     // Notify the player
     await addDoc(collection(db, 'notifications'), {
       uid: sub.uid,
-      message: `✅ <b>Faction Quest Approved:</b> Your submission for <b>${quest.title}</b> has been approved by a deity! Your reward has been granted.`,
+      message: `✅ <b>Faction Quest Approved:</b> Your submission for <b>${quest.title}</b> has been approved by a deity!${rewardSummary}`,
       read: false,
       timestamp: serverTimestamp(),
     });

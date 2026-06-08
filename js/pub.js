@@ -1090,6 +1090,17 @@ function _tdRenderGameState(game, gameId) {
       _awardedGameIds.add(gameId);
       _spawnCoinRain();
       window.logActivity?.('🎲', `<b>Pub Win!</b> Tavern Dice — Won <b>${game.prize}</b> 💰.`, '#4ec878');
+      // Sync gold display after the server trigger writes the prize.
+      // The settlePubGame Cloud Function needs ~1-2s to fire and write;
+      // we wait 2.5s then pull the authoritative value from Firestore.
+      setTimeout(async () => {
+        try {
+          await window.refreshCharData?.();
+          const g = window._charData?.gold ?? 0;
+          document.getElementById('stat-gold') && (document.getElementById('stat-gold').textContent = g);
+          document.getElementById('s-gold')    && (document.getElementById('s-gold').textContent    = g);
+        } catch(e) { console.warn('[Pub] post-win gold sync failed:', e); }
+      }, 2500);
     }
 
     if (amPlaying) _pubDebugSettlement(gameId, game.winnerUid, game.prize, _uid);
@@ -1129,6 +1140,15 @@ window._tdLeaveGame = async function() {
     const snap = await getDoc(doc(db,'pubGames',_activeGameId));
     if (!snap.exists()) return;
     const game    = snap.data();
+    // Guard: never refund if game already completed — bet was already settled by the trigger
+    if (game.status === 'complete' || game.status === 'rolling') {
+      window.showToast?.('Game already ended — no refund.', '');
+      if (_tdCancelTimer) { clearInterval(_tdCancelTimer); _tdCancelTimer = null; }
+      if (_activeGameUnsub) { _activeGameUnsub(); _activeGameUnsub = null; }
+      _activeGameId = null;
+      _backToLobby();
+      return;
+    }
     const myEntry = game.players.find(p => p.uid === _uid);
     if (!myEntry) return;
     const newPlayers = game.players.filter(p => p.uid !== _uid);
@@ -1257,12 +1277,12 @@ window._hmRoll = async function() {
 
   const btn = document.getElementById('hm-roll-btn');
   btn.disabled = true;
-  await _deductGold(bet);
 
   const yourDice  = document.getElementById('hm-your-dice');
   const houseDice = document.getElementById('hm-house-dice');
   const statusEl  = document.getElementById('hm-status');
 
+  // Start animation immediately — no gold deducted yet
   [yourDice, houseDice].forEach(d => { d.textContent = '🎲'; d.classList.remove('rolling','result-flash'); void d.offsetWidth; d.classList.add('rolling'); });
   if (statusEl) { statusEl.textContent = '🎲 Rolling...'; statusEl.className = 'pub-status-bar roll'; }
 
@@ -1274,9 +1294,26 @@ window._hmRoll = async function() {
     yourDice.classList.remove('rolling');  yourDice.textContent  = playerRoll; yourDice.classList.add('result-flash');
     houseDice.classList.remove('rolling'); houseDice.textContent = houseRoll;  houseDice.classList.add('result-flash');
 
+    // FIXED: one atomic write — deduct bet, and if won add prize on top.
+    // Previously: two separate calls (_deductGold then _awardGold) meant a
+    // disconnect between them left the player with lost gold but no prize.
+    const prize    = bet * HOUSE_MULTIPLIER;
+    const netChange = won ? (prize - bet) : -bet;  // win: net +400 on 100 bet; lose: net -100
+    try {
+      await updateDoc(doc(db, 'characters', _uid), { gold: increment(netChange) });
+      const newGold = (_charData?.gold || 0) + netChange;
+      if (_charData)        _charData.gold = newGold;
+      if (window._charData) window._charData.gold = newGold;
+      document.getElementById('stat-gold') && (document.getElementById('stat-gold').textContent = newGold);
+      document.getElementById('s-gold')    && (document.getElementById('s-gold').textContent    = newGold);
+    } catch(writeErr) {
+      console.error('[HouseMode] Gold transaction failed:', writeErr);
+      window.showToast?.('Transaction failed — gold not changed. Try again.', 'error');
+      btn.disabled = false;
+      return;
+    }
+
     if (won) {
-      const prize = bet * HOUSE_MULTIPLIER;
-      await _awardGold(_uid, prize);
       if (statusEl) { statusEl.textContent = `🎉 You matched! Rowan pays out ${prize} 💰!`; statusEl.className = 'pub-status-bar win'; }
       _spawnCoinRain();
       _showResultOverlay(true, playerRoll, 'You', prize, prize);
@@ -1290,14 +1327,19 @@ window._hmRoll = async function() {
     try {
       await addDoc(collection(db,'pubGames'), {
         gameType: 'house-mode', status: 'complete', hostUid: _uid,
+        pubLocation: _getCurrentPub()?.location || 'unknown',
         players:  [{ uid: _uid, name: _charData.name || 'Unknown', pick: _hmPicked, bet }],
         pot: bet, rollResult: playerRoll,
         winnerUid:  won ? _uid : 'house',
         winnerName: won ? (_charData.name || 'Unknown') : 'Barkeep Rowan',
-        prize:      won ? bet * HOUSE_MULTIPLIER : 0,
+        prize:      won ? prize : 0,
+        goldSettled: true,  // no trigger needed — already settled atomically above
         completedAt: serverTimestamp(), createdAt: serverTimestamp(),
       });
-    } catch(_) {}
+    } catch(logErr) {
+      // Non-fatal — result already applied, just couldn't write to results feed
+      console.warn('[HouseMode] Failed to log game result:', logErr);
+    }
     btn.disabled = false;
   }, 1800);
 };
@@ -1590,6 +1632,15 @@ function _hrRenderGameState(game, gameId) {
       _awardedGameIds.add(gameId);
       _spawnCoinRain();
       window.logActivity?.('⚔️', `<b>Pub Win!</b> Highest Roll — Won <b>${game.prize}</b> 💰.`, '#4ec878');
+      // Sync gold display after the server trigger writes the prize.
+      setTimeout(async () => {
+        try {
+          await window.refreshCharData?.();
+          const g = window._charData?.gold ?? 0;
+          document.getElementById('stat-gold') && (document.getElementById('stat-gold').textContent = g);
+          document.getElementById('s-gold')    && (document.getElementById('s-gold').textContent    = g);
+        } catch(e) { console.warn('[Pub] post-win gold sync failed:', e); }
+      }, 2500);
     }
     if (amPlaying) _pubDebugSettlement(gameId, game.winnerUid, game.prize, _uid);
     if (amPlaying) {
@@ -1619,6 +1670,15 @@ window._hrLeaveGame = async function() {
     const snap = await getDoc(doc(db,'pubGames',_activeGameId));
     if (!snap.exists()) return;
     const game    = snap.data();
+    // Guard: never refund if game already completed — bet was already settled by the trigger
+    if (game.status === 'complete' || game.status === 'rolling') {
+      window.showToast?.('Game already ended — no refund.', '');
+      if (_hrCancelTimer) { clearInterval(_hrCancelTimer); _hrCancelTimer = null; }
+      if (_activeGameUnsub) { _activeGameUnsub(); _activeGameUnsub = null; }
+      _activeGameId = null;
+      _backToLobby();
+      return;
+    }
     const myEntry = game.players.find(p => p.uid === _uid);
     if (!myEntry) return;
     const newPlayers = game.players.filter(p => p.uid !== _uid);
@@ -2397,6 +2457,15 @@ async function _dhRenderGameState(game, gameId) {
       await _awardGold(myUid, game.prize); // winner awards themselves
       _spawnCoinRain();
       window.logActivity?.('🃏', `<b>Pub Win!</b> Devil's Hand — Won <b>${game.prize}</b> 💰.`, '#4ec878');
+      // Sync gold display from Firestore so the displayed balance is authoritative
+      setTimeout(async () => {
+        try {
+          await window.refreshCharData?.();
+          const g = window._charData?.gold ?? 0;
+          document.getElementById('stat-gold') && (document.getElementById('stat-gold').textContent = g);
+          document.getElementById('s-gold')    && (document.getElementById('s-gold').textContent    = g);
+        } catch(e) { console.warn('[Pub] DH post-win gold sync failed:', e); }
+      }, 2500);
       // Clear any debt the winner had from loans during this game
       const charDebt = (_charData?.debtGold || window._charData?.debtGold || 0);
       if (charDebt > 0) {

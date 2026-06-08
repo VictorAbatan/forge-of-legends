@@ -55,6 +55,48 @@ const RESOURCE_POOLS = {
   mythic:    ["Aetherium","Eden's Tear","Cosmic Leviathan","Void Orchid","Titan Heart"],
 };
 
+// ── Profession-specific resource pools ──────────────────────────────────────
+// Monster drop loot is filtered to the character's profession so a Hunter
+// never receives mining ores and a Miner never receives hunting materials.
+// Falls back to the global RESOURCE_POOLS if profession is unknown.
+const PROFESSION_RESOURCE_POOLS = {
+  Miner:    {
+    common:    ["Iron","Copper","Tin","Limestone","Coal"],
+    uncommon:  ["Silver","Bronze","Obsidian","Marble","Quartz"],
+    rare:      ["Gold","Mythril","Palladium"],
+    legendary: ["Titanium","Adamantium"],
+    mythic:    ["Aetherium"],
+  },
+  Forager:  {
+    common:    ["Blueberries","Apples","Garlic","Mushroom","Melons"],
+    uncommon:  ["Golden Pears","Moon Grapes","Sunfruit","Crystal Berries","Bitter Root"],
+    rare:      ["Spirit Plum","Frost Apples","Ember Fruit"],
+    legendary: ["Celestial Fig","Dragonfruit"],
+    mythic:    ["Eden's Tear"],
+  },
+  Angler:   {
+    common:    ["Trout","Carp","Catfish","Sardine","Pufferfish"],
+    uncommon:  ["Silverfin","Glowfish","Spotted Eel","Coral Snapper","Red Minnow"],
+    rare:      ["Shadow Fish","Flame Fish","Ying Koi"],
+    legendary: ["Celestial-Whale","Black-Unagi"],
+    mythic:    ["Cosmic Leviathan"],
+  },
+  Herbalist:{
+    common:    ["Mint Leaves","Basil Sprigs","Wild Herbs","Soft Bark","Wood"],
+    uncommon:  ["Silverleaf","Goldroot","Nightshade","Glowleaf","Lotus"],
+    rare:      ["Spirit-Herb","Jade-Vine","Ghost Root"],
+    legendary: ["Phoenix-Bloom","Middlemist-Red"],
+    mythic:    ["Void Orchid"],
+  },
+  Hunter:   {
+    common:    ["Raw Meat","Tough Hide","Bone Fragments","Feathers","Animal Fat"],
+    uncommon:  ["Leather","Fangs","Fur","Horns","Claws"],
+    rare:      ["Spirit-Venison","Shadow-Hide","Drake Meat"],
+    legendary: ["Dragon Scales","Cyclops-Eye"],
+    mythic:    ["Titan Heart"],
+  },
+};
+
 const ENCHANT_REQS = {
   E: [{stones:2,coins:100},{stones:4,coins:200},{stones:6,coins:300},{stones:8,coins:400},{stones:10,coins:500}],
   D: [{stones:2,coins:200},{stones:4,coins:300},{stones:6,coins:400},{stones:8,coins:500},{stones:10,coins:600}],
@@ -146,14 +188,22 @@ function generateMonster(grade, rankIdx) {
   };
 }
 
-function rollDrops(grade) {
+// profession is optional — if provided (e.g. char.profession) drops are filtered
+// to only include resources that belong to that profession. Falls back to the
+// global pool so callers that don't pass profession still work correctly.
+function rollDrops(grade, profession) {
   const table   = MONSTER_DROPS[grade];
   const gold    = rand(table.coins[0], table.coins[1]);
   const rewards = { gold, items: [] };
 
+  // Choose the right pool: profession-specific if available, global otherwise
+  const profPools = (profession && PROFESSION_RESOURCE_POOLS[profession]) || null;
+
   table.resources.forEach(r => {
     if (Math.random() < r.chance) {
-      const pool = RESOURCE_POOLS[r.rarity] || RESOURCE_POOLS.common;
+      const pool = (profPools && profPools[r.rarity] && profPools[r.rarity].length > 0)
+        ? profPools[r.rarity]
+        : (RESOURCE_POOLS[r.rarity] || RESOURCE_POOLS.common);
       rewards.items.push({ name: pick(pool), icon:"📦", type:"material", rarity: r.rarity, qty:1 });
     }
   });
@@ -392,18 +442,23 @@ function getCraftingRecipes() {
   const blacksmith = Object.values(EQUIP).flat();
 
   const alchemist = [
-    { name:"Minor HP Potion",       type:"consumable", cost:50,  requires:[{name:"Mint Leaves",qty:2},{name:"Soft Bark",qty:1}] },
-    { name:"Standard HP Potion",    type:"consumable", cost:125, requires:[{name:"Silverleaf",qty:2},{name:"Goldroot",qty:1}] },
-    { name:"Greater HP Potion",     type:"consumable", cost:250, requires:[{name:"Spirit Herb",qty:2},{name:"Jade Vine",qty:1}] },
-    { name:"Minor Mana Potion",     type:"consumable", cost:50,  requires:[{name:"Wild Herbs",qty:2},{name:"Lotus",qty:1}] },
-    { name:"Standard Mana Potion",  type:"consumable", cost:125, requires:[{name:"Goldroot",qty:2},{name:"Lotus",qty:2}] },
-    { name:"Greater Mana Potion",   type:"consumable", cost:250, requires:[{name:"Spirit Herb",qty:2},{name:"Ghost Root",qty:1}] },
-    { name:"Minor Luck Potion",     type:"consumable", cost:50,  requires:[{name:"Basil Sprigs",qty:2},{name:"Mushroom",qty:1}] },
-    { name:"Standard Luck Potion",  type:"consumable", cost:125, requires:[{name:"Nightshade",qty:2},{name:"Glowleaf",qty:1}] },
-    { name:"Greater Luck Potion",   type:"consumable", cost:250, requires:[{name:"Spirit Herb",qty:2},{name:"Jade Vine",qty:1}] },
-    { name:"Minor EXP Potion",      type:"consumable", cost:50,  requires:[{name:"Wild Herbs",qty:2},{name:"Lotus",qty:1}] },
-    { name:"Standard EXP Potion",   type:"consumable", cost:125, requires:[{name:"Goldroot",qty:2},{name:"Lotus",qty:2}] },
-    { name:"Greater EXP Potion",    type:"consumable", cost:250, requires:[{name:"Spirit Herb",qty:2},{name:"Ghost Root",qty:1}] },
+    // ── HP Potions ───────────────────────────────────────────────────────────
+    // Source: Forge_of_Legends.docx — Potion Crafting Costs table
+    { name:"Minor HP Potion",       type:"consumable", cost:100,  requires:[{name:"Mint Leaves",qty:2},{name:"Wood",qty:2},{name:"Silverleaf",qty:2}] },
+    { name:"Standard HP Potion",    type:"consumable", cost:500,  requires:[{name:"Goldroot",qty:2},{name:"Spirit Herb",qty:2}] },
+    { name:"Greater HP Potion",     type:"consumable", cost:1000, requires:[{name:"Phoenix Bloom",qty:2},{name:"Void Orchid",qty:2}] },
+    // ── Mana Potions ─────────────────────────────────────────────────────────
+    { name:"Minor Mana Potion",     type:"consumable", cost:100,  requires:[{name:"Wild Herbs",qty:2},{name:"Wood",qty:2},{name:"Lotus",qty:2}] },
+    { name:"Standard Mana Potion",  type:"consumable", cost:500,  requires:[{name:"Glowleaf",qty:2},{name:"Ghost Root",qty:2}] },
+    { name:"Greater Mana Potion",   type:"consumable", cost:1000, requires:[{name:"Middlemist",qty:2},{name:"Void Orchid",qty:2}] },
+    // ── Luck Potions ─────────────────────────────────────────────────────────
+    { name:"Minor Luck Potion",     type:"consumable", cost:100,  requires:[{name:"Basil Sprigs",qty:2},{name:"Wood",qty:2},{name:"Nightshade",qty:2}] },
+    { name:"Standard Luck Potion",  type:"consumable", cost:500,  requires:[{name:"Goldroot",qty:2},{name:"Jade Vine",qty:2}] },
+    { name:"Greater Luck Potion",   type:"consumable", cost:1000, requires:[{name:"Middlemist",qty:1},{name:"Phoenix Bloom",qty:1},{name:"Void Orchid",qty:1}] },
+    // ── EXP (Insight) Potions ────────────────────────────────────────────────
+    { name:"Minor EXP Potion",      type:"consumable", cost:100,  requires:[{name:"Soft Bark",qty:2},{name:"Wood",qty:2},{name:"Glowleaf",qty:2}] },
+    { name:"Standard EXP Potion",   type:"consumable", cost:500,  requires:[{name:"Nightshade",qty:2},{name:"Lotus",qty:2}] },
+    { name:"Greater EXP Potion",    type:"consumable", cost:1000, requires:[{name:"Silverleaf",qty:1},{name:"Middlemist",qty:1},{name:"Phoenix Bloom",qty:1},{name:"Void Orchid",qty:1}] },
   ];
 
   const cook = [
@@ -536,7 +591,7 @@ exports.battleTurn = onCall(CALL_OPTS, async (request) => {
   monster.hp = Math.max(0, monster.hp - playerDmg);
 
   if (monster.hp <= 0) {
-    const drops   = rollDrops(monster.grade);
+    const drops   = rollDrops(monster.grade, char.profession);
     const expGain = MONSTER_EXP[monster.grade] || 20;
     const inv     = mergeInventory(char.inventory || [], drops.items);
     const newGold = (char.gold || 0) + drops.gold;
@@ -617,26 +672,39 @@ exports.autoBattle = onCall(CALL_OPTS, async (request) => {
   const updates = { hp: playerHp, mana: playerMana };
 
   if (status === "victory") {
-    const drops   = rollDrops(grade);
+    const drops   = rollDrops(grade, char.profession);
     const expGain = MONSTER_EXP[grade] || 20;
-    const inv     = mergeInventory(char.inventory||[], drops.items);
-    const { newXp, newLevel, newRank, leveledUp, xpMax } = processExp(char.xp||0, char.xpMax||100, char.level||1, char.rank||"Wanderer", expGain);
-    updates.gold      = (char.gold||0) + drops.gold;
-    updates.inventory = inv;
-    updates.xp        = newXp;
-    updates.xpMax     = xpMax;
-    updates.level     = newLevel;
-    updates.rank      = newRank;
-    if (leveledUp) {
-      updates.statPoints = (char.statPoints||0) + 3;
-      updates.hpMax      = (char.hpMax||100) + 10;
-      updates.manaMax    = (char.manaMax||50) + 5;
-    }
     log.push(`💀 ${monster.name} defeated!`);
     log.push(`💰 +${drops.gold} gold · ⭐ +${expGain} EXP`);
-    if (leveledUp) log.push(`🎉 LEVEL UP! Level ${newLevel}!`);
-    await db.collection("characters").doc(uid).update(updates);
-    return { status:"victory", log, updates, drops, expGain, leveledUp };
+
+    // Use withCharTransaction so we read the LATEST xp/gold/inventory from
+    // Firestore before writing. This prevents the race condition where a
+    // concurrent gather or manual battle clobbers the XP that was earned here.
+    let finalUpdates;
+    await withCharTransaction(uid, async (freshChar) => {
+      const inv = mergeInventory(freshChar.inventory||[], drops.items);
+      const { newXp, newLevel, newRank, leveledUp, xpMax } = processExp(
+        freshChar.xp||0, freshChar.xpMax||100, freshChar.level||1, freshChar.rank||"Wanderer", expGain
+      );
+      finalUpdates = {
+        hp:        playerHp,
+        mana:      playerMana,
+        gold:      (freshChar.gold||0) + drops.gold,
+        inventory: inv,
+        xp:        newXp,
+        xpMax,
+        level:     newLevel,
+        rank:      newRank,
+      };
+      if (leveledUp) {
+        finalUpdates.statPoints = (freshChar.statPoints||0) + 3;
+        finalUpdates.hpMax      = (freshChar.hpMax||100) + 10;
+        finalUpdates.manaMax    = (freshChar.manaMax||50) + 5;
+        log.push(`🎉 LEVEL UP! Level ${newLevel}!`);
+      }
+      return finalUpdates;
+    });
+    return { status:"victory", log, updates: finalUpdates, drops, expGain, leveledUp: finalUpdates?.statPoints !== undefined };
   } else if (status === "defeat") {
     const halfInv     = (char.inventory||[]).slice(0, Math.floor((char.inventory||[]).length/2));
     const resurrectAt = new Date(Date.now() + 5*60*60*1000);

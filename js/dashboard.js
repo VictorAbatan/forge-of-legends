@@ -2163,13 +2163,29 @@ function updateQuotaProgress(submit=false) {
     const level = _charData?.professionLvl || 0;
     const quota = PROF_QUOTA_TABLE[level] || PROF_QUOTA_TABLE[0];
     const inv = [...(_charData?.inventory||[])];
-    const rarityMap = {
+
+    // FULL cross-profession map (used as the source of truth for item rarity lookups)
+    const ALL_RARITY_MAP = {
       common:    ["Iron","Copper","Tin","Limestone","Coal","Blueberries","Apples","Garlic","Mushroom","Melons","Trout","Carp","Catfish","Sardine","Pufferfish","Mint Leaves","Basil Sprigs","Wild Herbs","Soft Bark","Wood","Raw Meat","Tough Hide","Bone Fragments","Feathers","Animal Fat"],
       uncommon:  ["Silver","Bronze","Obsidian","Marble","Quartz","Golden Pears","Moon Grapes","Sunfruit","Crystal Berries","Bitter Root","Silverfin","Glowfish","Spotted Eel","Coral Snapper","Red Minnow","Silverleaf","Goldroot","Nightshade","Glowleaf","Lotus","Leather","Fangs","Fur","Horns","Claws"],
       rare:      ["Gold","Mythril","Palladium","Spirit Plum","Frost Apples","Ember Fruit","Shadowfish","Flamefish","Ying Koi","Spirit Herb","Jade Vine","Ghost Root","Spirit Venison","Shadow Hide","Drake Meat"],
       legendary: ["Titanium","Adamantium","Celestial Fig","Dragonfruit","Celestial Whale","Black Unagi","Phoenix Bloom","Middlemist","Cyclops Eye","Dragon Scales"],
       mythic:    ["Aetherium","Eden\u2019s Tear","Cosmic Leviathan","Void Orchid","Titan Heart"]
     };
+
+    // FIXED: Filter rarityMap to only items belonging to the player's profession.
+    // Without this, a non-Hunter could submit Tough Hides, a non-Miner could submit
+    // Iron, etc. Each profession's valid resources come from PROF_RESOURCES.
+    const prof = _charData?.profession;
+    const profItems = new Set(
+      prof && PROF_RESOURCES[prof]
+        ? Object.values(PROF_RESOURCES[prof]).flat()
+        : [] // no profession = nothing valid
+    );
+    const rarityMap = {};
+    for (const [rarity, items] of Object.entries(ALL_RARITY_MAP)) {
+      rarityMap[rarity] = items.filter(item => profItems.has(item));
+    }
     // Quota auto-listing prices — midpoints of the resource market bracket ranges
     // Common 50-100 → 75 | Uncommon 250-300 → 275 | Rare 1400-1500 → 1450
     // Legendary 4000-5000 → 4500 | Mythic 13000-15000 → 14000
@@ -2894,6 +2910,7 @@ let _uid      = null;
 let _charData = null;
 let _chatUnsub = null;
 let _travelInterval = null;
+let _charLiveUnsub = null;  // real-time character doc listener (XP, level, gold)
 
 // ═══════════════════════════════════════════════════
 //  INIT
@@ -3117,6 +3134,46 @@ export function initDashboard() {
       loadWorldDevelopmentEventsForPlayers();
       checkTravelStatus();
       renderActivityFeed();
+
+      // ── Real-time character listener ────────────────────────────────────
+      // Keeps XP bars, level display, and gold in sync automatically.
+      // This fires whenever the Cloud Function (autoBattle, battleTurn, gather,
+      // pub settlement, etc.) writes to the character doc — no reload needed.
+      // We only update the display-critical fields so we never clobber an
+      // in-progress _invWrite transaction or optimistic UI state.
+      if (_charLiveUnsub) { _charLiveUnsub(); _charLiveUnsub = null; }
+      _charLiveUnsub = onSnapshot(
+        doc(db, 'characters', user.uid),
+        { includeMetadataChanges: false },
+        (snap) => {
+          // Skip if the snapshot is from the local cache (pending write) —
+          // we only want confirmed server writes to drive the display.
+          if (snap.metadata.hasPendingWrites) return;
+          if (!snap.exists()) return;
+          const d = snap.data();
+          if (!_charData) return; // not yet initialised
+          // Update display-critical fields on _charData
+          _charData.xp           = d.xp;
+          _charData.xpMax        = d.xpMax;
+          _charData.level        = d.level;
+          _charData.rank         = d.rank;
+          _charData.professionXp = d.professionXp;
+          _charData.professionLvl= d.professionLvl;
+          _charData.gold         = d.gold;
+          _charData.hp           = d.hp;
+          _charData.mana         = d.mana;
+          _charData.hpMax        = d.hpMax;
+          _charData.manaMax      = d.manaMax;
+          window._charData = _charData;
+          // Refresh all stat displays and XP bars
+          _syncAllDisplays(_charData);
+          showActiveProfession(_charData);
+          // Keep pub system in sync (affects gold balance shown in pub)
+          window.updatePubCharData?.(_charData);
+        },
+        (err) => { console.warn('[CharLive] snapshot error:', err); }
+      );
+      // ── End real-time character listener ───────────────────────────────
       loadFirestoreBosses();
       window.initPubSystem?.(_uid, _charData);
       hideLoading();
@@ -3129,6 +3186,8 @@ export function initDashboard() {
 
   // Leave World — sign out first so index.html doesn't auto-redirect back
   window._leaveWorld = async function() {
+    // Clean up live listeners before signing out
+    if (_charLiveUnsub) { _charLiveUnsub(); _charLiveUnsub = null; }
     try {
       await signOut(auth);
     } catch(e) {
@@ -4769,7 +4828,7 @@ function startTravelCountdown(arrivalDate, dest) {
         window.showToast(`Arrived at ${_charData.travelDest}!`, "success");
         const _tShort = _charData.travelDest?.split('—')[0]?.trim() || _charData.travelDest;
         logActivity('🗺️', `<b>Arrived at ${_tShort}.</b> You completed your journey.`, '#5b9fe0');
-        if (Math.random() < 0.30) _rollExploringEvent();
+        if (Math.random() < 0.30) await _rollExploringEvent();
         // Quest tracking
         await _incrementQuest("location", _charData.travelDest);
         // Auto-switch map to new location
@@ -7546,7 +7605,7 @@ window._doGather = async function() {
     );
 
     // ── Random gather event (AFTER all writes complete) ───────────────────
-    if (Math.random() < 0.30) _rollGatherEvent(prof);
+    if (Math.random() < 0.30) await _rollGatherEvent(prof);
 
     logEl.innerHTML = logLines.join("");
 
@@ -8597,21 +8656,11 @@ function initiatePvpChallenge(targetUid, targetName) {
   if (!_uid || !_charData) throw new Error('Not logged in.');
   return (async () => {
     try {
-      const myData = {
-        uid:       _uid,
-        name:      _charData.name,
-        avatarUrl: _charData.avatarUrl || '',
-        charClass: _charData.charClass || 'Warrior',
-        rank:      _charData.rank      || 'Wanderer',
-        level:     _charData.level     || 1,
-        hp:        _charData.hp        ?? _charData.hpMax   ?? 100,
-        maxHp:     _charData.hpMax     ?? _charData.hp      ?? 100,
-        mana:      _charData.mana      ?? _charData.manaMax ?? 50,
-        maxMana:   _charData.manaMax   ?? _charData.mana    ?? 50,
-        atk:       _charData.atk       ?? 10,
-        def:       _charData.def       ?? 5,
-        spd:       _charData.spd       ?? 5,
-      };
+      // _buildFighter resolves full effective stats (str, int, def, dex) including
+      // equipment bonuses, food buffs, race, and companion — same as challengePlayer.
+      // The old manual object only stored atk/def/spd, causing DEX-based skills
+      // (Pierce, Backstab, Thunder Strike, etc.) to always calculate from 0.
+      const myData = _buildFighter(_charData);
       const matchRef = await addDoc(collection(db, 'pvpChallenges'), {
         challengerId:    _uid,
         challengerData:  myData,
@@ -14965,13 +15014,27 @@ const _RANDOM_EVENTS = {
       }
     },
     Hunter:   { weight:25, fn: async () => {
-        logActivity('🐾', `<b>Alpha Beast Appeared!</b> A powerful creature emerged — fight it in the Battle panel for enhanced rewards.`, '#e05555');
+        // Rare prey spotted — bonus hunting materials (mirrors other profession bonus events)
+        const items = ['Raw Meat','Tough Hide','Bone Fragments','Feathers','Animal Fat','Leather','Fangs','Fur','Horns','Claws'];
+        const item  = items[Math.floor(Math.random()*items.length)];
+        const itemRarity = _getItemRarity(item);
+        await _invWrite(_uid, inv => {
+          const ex = inv.find(i=>i.name===item);
+          if (ex) ex.qty+=2; else inv.push({name:item,qty:2,type:'material'});
+        });
+        window._allInvItems=_charData.inventory; window._refreshInvDisplay();
+        window.showToast(`Rare Prey! Bonus x2 ${item} (${itemRarity})`, 'success');
+        logActivity('🐾', `<b>Rare Prey!</b> You tracked down a fleeing animal — bonus <b>x2 ${item}</b> <span style="font-size:0.85em">(${itemRarity})</span> recovered.`, '#70c090');
       }
     },
   },
 };
 
-function _rollExploringEvent() {
+// FIXED: async so each event's fn() — which may call _invWrite or updateDoc —
+// is properly awaited. Without await, inventory writes fire-and-forget, meaning
+// the player's item/gold never reliably lands (or _refreshInvDisplay runs on
+// stale data before the write completes).
+async function _rollExploringEvent() {
   const events = _RANDOM_EVENTS.exploring.map((ev, i) => {
     // Alistor blessing: reduce robbery (index 0) weight by faith %
     if (i === 0 && _charData?.deity === 'Alistor') {
@@ -15003,14 +15066,18 @@ function _rollExploringEvent() {
   let roll    = Math.random() * total;
   for (const ev of events) {
     roll -= ev.weight;
-    if (roll <= 0) { ev.fn?.(); return; }
+    if (roll <= 0) {
+      try { await ev.fn?.(); } catch(e) { console.error('[RandomEvent:explore] Error in event fn:', e); }
+      return;
+    }
   }
 }
 
-function _rollGatherEvent(profession) {
+// FIXED: async for same reason — gather bonus events (_invWrite) must be awaited
+async function _rollGatherEvent(profession) {
   const ev = _RANDOM_EVENTS.gather[profession];
   if (ev && typeof ev.fn === 'function') {
-    ev.fn();
+    try { await ev.fn(); } catch(e) { console.error('[RandomEvent:gather] Error in event fn:', e); }
   }
 }
 
