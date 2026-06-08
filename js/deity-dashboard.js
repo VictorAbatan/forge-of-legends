@@ -503,60 +503,133 @@ const ITEMS = [
   { name:"Divine Speed Feast",     icon:"⚡", type:"food", stats:"+25% DEX (40m)", rarity:"Mythic" },
 
   // ── MATERIALS ───────────────────────────────────────────
-  // Common
-  { name:"Iron",             icon:"⛏️", type:"material", rarity:"Common" },
-  { name:"Tin",              icon:"⛏️", type:"material", rarity:"Common" },
-  { name:"Copper",           icon:"⛏️", type:"material", rarity:"Common" },
-  { name:"Limestone",        icon:"🪨",  type:"material", rarity:"Common" },
-  { name:"Quartz",           icon:"💎",  type:"material", rarity:"Common" },
-  { name:"Leather",          icon:"🟫",  type:"material", rarity:"Common" },
-  { name:"Fur",              icon:"🟫",  type:"material", rarity:"Common" },
-  { name:"Feathers",         icon:"🪶",  type:"material", rarity:"Common" },
-  { name:"Bone Fragments",   icon:"🦴",  type:"material", rarity:"Common" },
-  { name:"Animal Fat",       icon:"🫙",  type:"material", rarity:"Common" },
-  { name:"Meat",             icon:"🥩",  type:"material", rarity:"Common" },
-  { name:"Wood",             icon:"🪵",  type:"material", rarity:"Common" },
-  { name:"Stone",            icon:"🪨",  type:"material", rarity:"Common" },
-  // Uncommon
-  { name:"Bronze",           icon:"🔶",  type:"material", rarity:"Uncommon" },
-  { name:"Silver",           icon:"⚪",  type:"material", rarity:"Uncommon" },
-  { name:"Obsidian",         icon:"⬛",  type:"material", rarity:"Uncommon" },
-  { name:"Marble",           icon:"🪨",  type:"material", rarity:"Uncommon" },
-  { name:"Coal",             icon:"⬛",  type:"material", rarity:"Uncommon" },
-  { name:"Tough Hide",       icon:"🟫",  type:"material", rarity:"Uncommon" },
-  { name:"Fangs",            icon:"🦷",  type:"material", rarity:"Uncommon" },
-  { name:"Claws",            icon:"🦾",  type:"material", rarity:"Uncommon" },
-  { name:"Horns",            icon:"🦌",  type:"material", rarity:"Uncommon" },
-  { name:"Fire Essence",     icon:"🔥",  type:"material", rarity:"Uncommon" },
-  { name:"Water Essence",    icon:"💧",  type:"material", rarity:"Uncommon" },
-  { name:"Earth Essence",    icon:"🌱",  type:"material", rarity:"Uncommon" },
-  { name:"Wind Essence",     icon:"🌬️", type:"material", rarity:"Uncommon" },
-  // Rare
-  { name:"Gold",             icon:"🟡",  type:"material", rarity:"Rare" },
-  { name:"Palladium",        icon:"🔵",  type:"material", rarity:"Rare" },
-  { name:"Mythril",          icon:"🔷",  type:"material", rarity:"Rare" },
-  { name:"Shadow Hide",      icon:"🌑",  type:"material", rarity:"Rare" },
-  { name:"Spirit Venison",   icon:"👻",  type:"material", rarity:"Rare" },
-  { name:"Drake Meat",       icon:"🐉",  type:"material", rarity:"Rare" },
-  // Legendary
-  { name:"Adamantium",       icon:"💠",  type:"material", rarity:"Legendary" },
-  { name:"Titanium",         icon:"⬜",  type:"material", rarity:"Legendary" },
-  { name:"Dragon Scales",    icon:"🐲",  type:"material", rarity:"Legendary" },
-  { name:"Cyclops Eye",      icon:"👁️", type:"material", rarity:"Legendary" },
-  { name:"Phoenix Feather",  icon:"🔥",  type:"material", rarity:"Legendary" },
-  // Mythic
-  { name:"Aetherium",        icon:"🌟",  type:"material", rarity:"Mythic" },
-  { name:"Titan Heart",      icon:"❤️‍🔥", type:"material", rarity:"Mythic" },
-  { name:"Void Crystal",     icon:"🌌",  type:"material", rarity:"Mythic" },
-  { name:"Eden's Tear",      icon:"💎",  type:"material", rarity:"Mythic" },
-  // Deity-specific worship materials
+  // ⛏️ MINING — Common
+  { name:"Iron",                    icon:"⛏️", type:"material", rarity:"Common",    profession:"Mining" },
+  { name:"Copper",                  icon:"⛏️", type:"material", rarity:"Common",    profession:"Mining" },
+  { name:"Tin",                     icon:"⛏️", type:"material", rarity:"Common",    profession:"Mining" },
+  { name:"Limestone",               icon:"🪨",  type:"material", rarity:"Common",    profession:"Mining" },
+  { name:"Coal",                    icon:"🪨",  type:"material", rarity:"Common",    profession:"Mining" },
+  // ⛏️ MINING — Uncommon
+  { name:"Silver",                  icon:"⚪",  type:"material", rarity:"Uncommon",  profession:"Mining" },
+  { name:"Bronze",                  icon:"🔶",  type:"material", rarity:"Uncommon",  profession:"Mining" },
+  { name:"Obsidian",                icon:"⬛",  type:"material", rarity:"Uncommon",  profession:"Mining" },
+  { name:"Marble",                  icon:"🪨",  type:"material", rarity:"Uncommon",  profession:"Mining" },
+  { name:"Quartz",                  icon:"💎",  type:"material", rarity:"Uncommon",  profession:"Mining" },
+  // ⛏️ MINING — Rare
+  { name:"Gold",                    icon:"🟡",  type:"material", rarity:"Rare",      profession:"Mining" },
+  { name:"Mythril",                 icon:"🔷",  type:"material", rarity:"Rare",      profession:"Mining" },
+  { name:"Palladium",               icon:"🔵",  type:"material", rarity:"Rare",      profession:"Mining" },
+  // ⛏️ MINING — Legendary
+  { name:"Titanium",                icon:"⬜",  type:"material", rarity:"Legendary", profession:"Mining" },
+  { name:"Adamantium",              icon:"💠",  type:"material", rarity:"Legendary", profession:"Mining" },
+  // ⛏️ MINING — Mythic
+  { name:"Aetherium",               icon:"🌟",  type:"material", rarity:"Mythic",    profession:"Mining" },
+  // 🌿 FORAGING — Common
+  { name:"Blueberries",             icon:"🫐",  type:"material", rarity:"Common",    profession:"Foraging" },
+  { name:"Apples",                  icon:"🍎",  type:"material", rarity:"Common",    profession:"Foraging" },
+  { name:"Garlic",                  icon:"🧄",  type:"material", rarity:"Common",    profession:"Foraging" },
+  { name:"Mushroom",                icon:"🍄",  type:"material", rarity:"Common",    profession:"Foraging" },
+  { name:"Melons",                  icon:"🍈",  type:"material", rarity:"Common",    profession:"Foraging" },
+  // 🌿 FORAGING — Uncommon
+  { name:"Golden Pears",            icon:"🍐",  type:"material", rarity:"Uncommon",  profession:"Foraging" },
+  { name:"Moon Grapes",             icon:"🍇",  type:"material", rarity:"Uncommon",  profession:"Foraging" },
+  { name:"Sunfruit",                icon:"🌞",  type:"material", rarity:"Uncommon",  profession:"Foraging" },
+  { name:"Crystal Berries",         icon:"💎",  type:"material", rarity:"Uncommon",  profession:"Foraging" },
+  { name:"Bitter Root",             icon:"🌿",  type:"material", rarity:"Uncommon",  profession:"Foraging" },
+  // 🌿 FORAGING — Rare
+  { name:"Spirit Plum",             icon:"🟣",  type:"material", rarity:"Rare",      profession:"Foraging" },
+  { name:"Frost Apples",            icon:"❄️",  type:"material", rarity:"Rare",      profession:"Foraging" },
+  { name:"Ember Fruit",             icon:"🔥",  type:"material", rarity:"Rare",      profession:"Foraging" },
+  // 🌿 FORAGING — Legendary
+  { name:"Celestial Fig",           icon:"✨",  type:"material", rarity:"Legendary", profession:"Foraging" },
+  { name:"Dragonfruit",             icon:"🐉",  type:"material", rarity:"Legendary", profession:"Foraging" },
+  // 🌿 FORAGING — Mythic
+  { name:"Eden's Tear",             icon:"💎",  type:"material", rarity:"Mythic",    profession:"Foraging" },
+  // 🎣 ANGLER — Common
+  { name:"Trout",                   icon:"🐟",  type:"material", rarity:"Common",    profession:"Angler" },
+  { name:"Carp",                    icon:"🐟",  type:"material", rarity:"Common",    profession:"Angler" },
+  { name:"Catfish",                 icon:"🐟",  type:"material", rarity:"Common",    profession:"Angler" },
+  { name:"Sardine",                 icon:"🐟",  type:"material", rarity:"Common",    profession:"Angler" },
+  { name:"Pufferfish",              icon:"🐡",  type:"material", rarity:"Common",    profession:"Angler" },
+  // 🎣 ANGLER — Uncommon
+  { name:"Silverfin",               icon:"🐟",  type:"material", rarity:"Uncommon",  profession:"Angler" },
+  { name:"Glowfish",                icon:"✨",  type:"material", rarity:"Uncommon",  profession:"Angler" },
+  { name:"Spotted Eel",             icon:"🐍",  type:"material", rarity:"Uncommon",  profession:"Angler" },
+  { name:"Coral Snapper",           icon:"🐠",  type:"material", rarity:"Uncommon",  profession:"Angler" },
+  { name:"Red Minnow",              icon:"🐟",  type:"material", rarity:"Uncommon",  profession:"Angler" },
+  // 🎣 ANGLER — Rare
+  { name:"Shadowfish",              icon:"🌑",  type:"material", rarity:"Rare",      profession:"Angler" },
+  { name:"Flamefish",               icon:"🔥",  type:"material", rarity:"Rare",      profession:"Angler" },
+  { name:"Ying Koi",                icon:"☯️",  type:"material", rarity:"Rare",      profession:"Angler" },
+  // 🎣 ANGLER — Legendary
+  { name:"Celestial Whale",         icon:"🐋",  type:"material", rarity:"Legendary", profession:"Angler" },
+  { name:"Black Unagi",             icon:"⬛",  type:"material", rarity:"Legendary", profession:"Angler" },
+  // 🎣 ANGLER — Mythic
+  { name:"Cosmic Leviathan",        icon:"🌌",  type:"material", rarity:"Mythic",    profession:"Angler" },
+  // 🌱 HERBALIST — Common
+  { name:"Mint Leaves",             icon:"🌿",  type:"material", rarity:"Common",    profession:"Herbalist" },
+  { name:"Basil Sprigs",            icon:"🌿",  type:"material", rarity:"Common",    profession:"Herbalist" },
+  { name:"Wild Herbs",              icon:"🌿",  type:"material", rarity:"Common",    profession:"Herbalist" },
+  { name:"Soft Bark",               icon:"🪵",  type:"material", rarity:"Common",    profession:"Herbalist" },
+  { name:"Wood",                    icon:"🪵",  type:"material", rarity:"Common",    profession:"Herbalist" },
+  // 🌱 HERBALIST — Uncommon
+  { name:"Silverleaf",              icon:"🍃",  type:"material", rarity:"Uncommon",  profession:"Herbalist" },
+  { name:"Goldroot",                icon:"🌾",  type:"material", rarity:"Uncommon",  profession:"Herbalist" },
+  { name:"Nightshade",              icon:"🌑",  type:"material", rarity:"Uncommon",  profession:"Herbalist" },
+  { name:"Glowleaf",                icon:"✨",  type:"material", rarity:"Uncommon",  profession:"Herbalist" },
+  { name:"Lotus",                   icon:"🪷",  type:"material", rarity:"Uncommon",  profession:"Herbalist" },
+  // 🌱 HERBALIST — Rare
+  { name:"Spirit Herb",             icon:"👻",  type:"material", rarity:"Rare",      profession:"Herbalist" },
+  { name:"Jade Vine",               icon:"💚",  type:"material", rarity:"Rare",      profession:"Herbalist" },
+  { name:"Ghost Root",              icon:"🌫️", type:"material", rarity:"Rare",      profession:"Herbalist" },
+  // 🌱 HERBALIST — Legendary
+  { name:"Phoenix Bloom",           icon:"🔥",  type:"material", rarity:"Legendary", profession:"Herbalist" },
+  { name:"Middlemist",              icon:"🌸",  type:"material", rarity:"Legendary", profession:"Herbalist" },
+  // 🌱 HERBALIST — Mythic
+  { name:"Void Orchid",             icon:"🌌",  type:"material", rarity:"Mythic",    profession:"Herbalist" },
+  // 🏹 HUNTER — Common
+  { name:"Raw Meat",                icon:"🥩",  type:"material", rarity:"Common",    profession:"Hunter" },
+  { name:"Tough Hide",              icon:"🟫",  type:"material", rarity:"Common",    profession:"Hunter" },
+  { name:"Bone Fragments",          icon:"🦴",  type:"material", rarity:"Common",    profession:"Hunter" },
+  { name:"Feathers",                icon:"🪶",  type:"material", rarity:"Common",    profession:"Hunter" },
+  { name:"Animal Fat",              icon:"🫙",  type:"material", rarity:"Common",    profession:"Hunter" },
+  // 🏹 HUNTER — Uncommon
+  { name:"Leather",                 icon:"🟫",  type:"material", rarity:"Uncommon",  profession:"Hunter" },
+  { name:"Fangs",                   icon:"🦷",  type:"material", rarity:"Uncommon",  profession:"Hunter" },
+  { name:"Fur",                     icon:"🟫",  type:"material", rarity:"Uncommon",  profession:"Hunter" },
+  { name:"Horns",                   icon:"🦌",  type:"material", rarity:"Uncommon",  profession:"Hunter" },
+  { name:"Claws",                   icon:"🦾",  type:"material", rarity:"Uncommon",  profession:"Hunter" },
+  // 🏹 HUNTER — Rare
+  { name:"Spirit Venison",          icon:"👻",  type:"material", rarity:"Rare",      profession:"Hunter" },
+  { name:"Shadow Hide",             icon:"🌑",  type:"material", rarity:"Rare",      profession:"Hunter" },
+  { name:"Drake Meat",              icon:"🐉",  type:"material", rarity:"Rare",      profession:"Hunter" },
+  // 🏹 HUNTER — Legendary
+  { name:"Cyclops Eye",             icon:"👁️", type:"material", rarity:"Legendary", profession:"Hunter" },
+  { name:"Dragon Scales",           icon:"🐲",  type:"material", rarity:"Legendary", profession:"Hunter" },
+  // 🏹 HUNTER — Mythic
+  { name:"Titan Heart",             icon:"❤️\u200d🔥", type:"material", rarity:"Mythic",    profession:"Hunter" },
+  // ✦ DEITY WORSHIP MATERIALS
+  { name:"Volcanic Roots",          icon:"🌋", type:"material", rarity:"Deity" },
+  { name:"Devil-Spring Water",      icon:"💧", type:"material", rarity:"Deity" },
+  { name:"Ash of Elder Trees",      icon:"🌫️",type:"material", rarity:"Deity" },
   { name:"Ephemeral Footprints",    icon:"✨", type:"material", rarity:"Deity" },
-  { name:"Oil-stained Feathers",    icon:"✨", type:"material", rarity:"Deity" },
+  { name:"Oil-stained Feathers",    icon:"🪶", type:"material", rarity:"Deity" },
   { name:"Whispering Purple Sands", icon:"✨", type:"material", rarity:"Deity" },
-  { name:"The Void-Eye",            icon:"💎", type:"material", rarity:"Deity" },
-  { name:"Orb of Silence",          icon:"💎", type:"material", rarity:"Deity" },
-  { name:"Magic Crystal",           icon:"💎", type:"material", rarity:"Deity" },
-
+  { name:"Golden Wheat Sheaves",    icon:"🌾", type:"material", rarity:"Deity" },
+  { name:"Miracle Coins",           icon:"🪙", type:"material", rarity:"Deity" },
+  { name:"Ancient Mint Seeds",      icon:"🌱", type:"material", rarity:"Deity" },
+  { name:"Starlight Dust",          icon:"⭐", type:"material", rarity:"Deity" },
+  { name:"Moon Petals",             icon:"🌙", type:"material", rarity:"Deity" },
+  { name:"Crystallized Night Dews", icon:"💎", type:"material", rarity:"Deity" },
+  { name:"Crimson Toad Moss",       icon:"🐸", type:"material", rarity:"Deity" },
+  { name:"Branch of Soul Tree",     icon:"🌳", type:"material", rarity:"Deity" },
+  { name:"Bloom Petals",            icon:"🌸", type:"material", rarity:"Deity" },
+  { name:"Broken Shackles",         icon:"⛓️", type:"material", rarity:"Deity" },
+  { name:"Iron Oaths",              icon:"⚖️", type:"material", rarity:"Deity" },
+  { name:"Verdict Quill",           icon:"🖋️", type:"material", rarity:"Deity" },
+  { name:"Ancient Scroll Fragments",icon:"📜", type:"material", rarity:"Deity" },
+  { name:"White Mystic Woods",      icon:"🪵", type:"material", rarity:"Deity" },
+  { name:"Truths",                  icon:"💡", type:"material", rarity:"Deity" },
   // ── ADVANCEMENT INGREDIENTS ──────────────────────────────
   // Sah'run — God of Flames
   { name:"Heart of the Red Phoenix", icon:"🔥", type:"ingredient", rarity:"Sacred" },

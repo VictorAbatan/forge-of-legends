@@ -1085,10 +1085,21 @@ exports.bestowResources = onCall(CALL_OPTS, async (request) => {
 
   const { targetUid, items, gold } = request.data;
   let targetName;
+  const bestowId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
   await withCharTransaction(targetUid, async (targetChar) => {
     targetName = targetChar.name;
     const inv = mergeInventory(targetChar.inventory||[], items||[]);
-    return { inventory: inv, gold: (targetChar.gold||0) + (gold||0) };
+    const updates = {
+      inventory:      inv,
+      lastBestowId:   bestowId,
+      lastBestowItems: (items||[]).reduce((s, i) => s + (i.qty||1), 0),
+      lastBestowGold: gold || 0,
+    };
+    // Use increment so concurrent gold changes (battle loot, market) are never overwritten
+    if (gold > 0) {
+      updates.gold = FieldValue.increment(gold);
+    }
+    return updates;
   });
   return { success:true, message:`Resources bestowed upon ${targetName}.` };
 });
