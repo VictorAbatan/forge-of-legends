@@ -3048,8 +3048,12 @@ async function _migrateAccountStats(c) {
   const correctXpMax = _calcXpMax(rankIdx, level);
   if (Math.abs((c.xpMax || 100) - correctXpMax) > 5) { // tolerance for rounding
     updates.xpMax = correctXpMax;
-    // Make sure current xp doesn't exceed new xpMax
-    if ((c.xp || 0) >= correctXpMax) updates.xp = correctXpMax - 1;
+    needsPatch = true;
+  }
+  // Always clamp xp to xpMax — catches stale xp > xpMax regardless of xpMax drift
+  const effectiveXpMax = updates.xpMax || (c.xpMax || 100);
+  if ((c.xp || 0) >= effectiveXpMax) {
+    updates.xp = effectiveXpMax - 1;
     needsPatch = true;
   }
   // Fix statPoints: if account has fewer than minimum earned, top it up
@@ -6303,6 +6307,64 @@ window.closeItemStatModal = function() {
   document.getElementById('item-stat-modal').style.display = 'none';
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// _getItemRarity(itemName) → 'Common' | 'Uncommon' | 'Rare' | 'Legendary' | 'Mythic'
+// Single source of truth for resource/food/potion rarity used across activity
+// logs, gather logs, listing brackets, and any other display that needs rarity.
+// Equipment is grade-based (E-S), not rarity — this covers resources & consumables.
+// ─────────────────────────────────────────────────────────────────────────────
+function _getItemRarity(itemName) {
+  if (!itemName) return 'Common';
+  const n = itemName.toLowerCase();
+
+  // ── Cooked food: look up grade from CANONICAL_FOOD_RECIPES ───────────────
+  if (window.CANONICAL_FOOD_RECIPES) {
+    for (const recipes of Object.values(window.CANONICAL_FOOD_RECIPES)) {
+      const found = recipes.find(r => r.name === itemName);
+      if (found?.grade) return found.grade;
+    }
+  }
+
+  // ── Potions: map by tier ──────────────────────────────────────────────────
+  if (n.includes('potion') || n.includes('elixir')) {
+    if (n.startsWith('greater')) return 'Rare';
+    if (n.startsWith('standard')) return 'Uncommon';
+    return 'Common'; // minor
+  }
+
+  // ── Mythic resources ──────────────────────────────────────────────────────
+  if (["aetherium","titan heart","eden's tear","cosmic leviathan","void orchid"].some(x => n.includes(x))) return 'Mythic';
+
+  // ── Legendary resources ───────────────────────────────────────────────────
+  if (["adamantium","titanium","dragon scales","cyclops eye","phoenix bloom","middlemist","celestial whale","black unagi","celestial fig","dragonfruit"].some(x => n.includes(x))) return 'Legendary';
+
+  // ── Rare resources ────────────────────────────────────────────────────────
+  if (["gold ore","palladium","mythril","shadow hide","spirit venison","drake meat","shadowfish","flamefish","ying koi","spirit herb","jade vine","ghost root","frost apples","ember fruit","spirit plum"].some(x => n.includes(x))) return 'Rare';
+  // gold (resource) — careful: "gold" substring hits "goldroot" and "goldfish" so match precisely
+  if (n === 'gold' || n === 'gold ore') return 'Rare';
+
+  // ── Uncommon resources ────────────────────────────────────────────────────
+  if (["silver","bronze","obsidian","marble","quartz","tough hide","fangs","fur","horns","claws","leather","silverfin","glowfish","spotted eel","coral snapper","red minnow","silverleaf","goldroot","nightshade","glowleaf","lotus","golden pears","moon grapes","sunfruit","crystal berries","bitter root"].some(x => n.includes(x))) return 'Uncommon';
+
+  // ── Common resources (explicit list — avoids false positives) ────────────
+  const COMMON = new Set([
+    // Mining
+    "iron","copper","tin","limestone","coal",
+    // Foraging
+    "blueberries","apples","garlic","mushroom","melons",
+    // Angling
+    "trout","carp","catfish","sardine","pufferfish",
+    // Herbalist
+    "mint leaves","basil sprigs","wild herbs","soft bark","wood",
+    // Hunter
+    "raw meat","tough hide","bone fragments","feathers","animal fat",
+  ]);
+  if (COMMON.has(n)) return 'Common';
+
+  return 'Common'; // fallback
+}
+window._getItemRarity = _getItemRarity;
+
 // Returns { minP, maxP, blocked } for a given inventory item — used by the sell modal UI
 // to show the price range hint before the player enters an amount.
 window._getListingBracket = function(item) {
@@ -6395,12 +6457,7 @@ window._getListingBracket = function(item) {
   } else {
     // Raw material / resource — detect rarity from stored field or item name
     let rarity = item.rarity || 'Common';
-    if (!item.rarity) {
-      if      (["aetherium","titan heart","eden's tear","cosmic leviathan","void orchid"].some(x => n.includes(x))) rarity = 'Mythic';
-      else if (["adamantium","titanium","dragon scales","cyclops eye","phoenix feather","celestial","dragonfruit","black unagi"].some(x => n.includes(x))) rarity = 'Legendary';
-      else if (["gold ","palladium","mythril","shadow hide","spirit venison","drake meat","shadowfish","flamefish","ying koi","spirit herb","jade vine","ghost root","frost apples","ember fruit","spirit plum"].some(x => n.includes(x))) rarity = 'Rare';
-      else if (["silver","bronze","obsidian","marble","quartz","tough hide","fangs","fur","horns","claws","leather","silverfin","glowfish","spotted eel","coral snapper","red minnow","silverleaf","goldroot","nightshade","glowleaf","lotus","golden pears","moon grapes","sunfruit","crystal berries","bitter root"].some(x => n.includes(x))) rarity = 'Uncommon';
-    }
+    if (!item.rarity) rarity = _getItemRarity(item.name);
     [minP, maxP] = RESOURCE_BRACKETS[rarity] || RESOURCE_BRACKETS['Common'];
   }
 
@@ -9586,11 +9643,14 @@ async function _clientBattleTurn(action, skillName) {
       });
       const gold = (char.gold||0) + drops.gold;
       const { newXp, newLevel, newRank, newXpMax, leveledUp } = _processExp(char.xp||0, char.xpMax||100, char.level||1, char.rank||'Wanderer', expGain, char.charClass);
-      Object.assign(_charData, { gold, inventory: inv, xp: newXp, level: newLevel, rank: newRank, xpMax: newXpMax, hp: playerHp, mana: playerMana });
-      await updateDoc(doc(db, "characters", uid), { gold, inventory: inv, xp: newXp, level: newLevel, rank: newRank, xpMax: newXpMax, hp: playerHp, mana: playerMana });
+      const dotUpdates = { gold, inventory: inv, xp: newXp, level: newLevel, rank: newRank, xpMax: newXpMax, hp: playerHp, mana: playerMana };
+      if (leveledUp) { dotUpdates.hpMax = (char.hpMax||100)+10; dotUpdates.manaMax = (char.manaMax||50)+5; dotUpdates.statPoints = (char.statPoints||0)+3; }
+      Object.assign(_charData, dotUpdates);
+      await updateDoc(doc(db, "characters", uid), dotUpdates);
       await updateDoc(doc(db, "battles", uid), { status:"victory" });
       const updates = {};
       log.push(`💀 ${monster.name} defeated by ${b.dotLabel||"DoT"}! +${expGain} EXP, +${drops.gold} gold`);
+      if (leveledUp) log.push(`🎉 LEVEL UP! ${newRank} Level ${_displayLevel(newLevel)}!`);
       return { status:"victory", log, updates, drops, expGain, leveledUp, newLevel, newRank };
     }
   }
@@ -12720,9 +12780,12 @@ function _showRaidResult() {
       const { newXp, newLevel, newRank, newXpMax, leveledUp } = _processExp(
         _charData.xp||0, _charData.xpMax||100, _charData.level||1, _charData.rank||'Wanderer', expEach, _charData.charClass
       );
-      updateDoc(doc(db, 'characters', _uid), { gold: increment(goldEach), xp:newXp, level:newLevel, rank:newRank, xpMax:newXpMax }) // FIXED: use increment
+      const pvpUpdates = { gold: increment(goldEach), xp:newXp, level:newLevel, rank:newRank, xpMax:newXpMax };
+      if (leveledUp) { pvpUpdates.hpMax = (_charData.hpMax||100)+10; pvpUpdates.manaMax = (_charData.manaMax||50)+5; pvpUpdates.statPoints = (_charData.statPoints||0)+3; }
+      updateDoc(doc(db, 'characters', _uid), pvpUpdates)
         .then(() => {
           _charData.gold = (_charData.gold||0)+goldEach;
+          if (leveledUp) { _charData.hpMax = (_charData.hpMax||100)+10; _charData.manaMax = (_charData.manaMax||50)+5; _charData.statPoints = (_charData.statPoints||0)+3; }
           set('stat-gold', _charData.gold); set('s-gold', _charData.gold);
           if (leveledUp) window.showToast(`🎉 Level Up! ${newRank} Lv.${_displayLevel(newLevel)}`, 'success');
         }).catch(()=>{});
@@ -14887,51 +14950,56 @@ const _RANDOM_EVENTS = {
   gather: {
     Miner:    { weight:25, fn: async (resources, rarity) => {
         const bonus = Math.floor(Math.random()*2)+1;
-        const pool  = ['Iron','Copper','Silver','Obsidian','Coal'];
+        const pool  = ['Iron','Copper','Tin','Limestone','Coal','Silver','Bronze','Obsidian','Marble','Quartz'];
         const item  = pool[Math.floor(Math.random()*pool.length)];
+        const itemRarity = _getItemRarity(item);
         await _invWrite(_uid, inv => {
           const ex = inv.find(i=>i.name===item);
           if (ex) ex.qty+=bonus; else inv.push({name:item,qty:bonus,type:'material'});
         });
         window._allInvItems=_charData.inventory; window._refreshInvDisplay();
-        window.showToast(`Rich Vein Found! +${bonus} ${item}`, 'success');
-        logActivity('⛏️', `<b>Rich Vein Found!</b> Your pick struck an exposed vein — bonus <b>x${bonus} ${item}</b> extracted.`, '#c9a84c');
+        window.showToast(`Rich Vein Found! +${bonus} ${item} (${itemRarity})`, 'success');
+        logActivity('⛏️', `<b>Rich Vein Found!</b> Your pick struck an exposed vein — bonus <b>x${bonus} ${item}</b> <span style="font-size:0.85em">(${itemRarity})</span> extracted.`, '#c9a84c');
       }
     },
     Angler:   { weight:25, fn: async () => {
-        const fish  = ['Trout','Carp','Goldfish','Silverfin'];
+        // Pool spans all angler rarities — let luck decide the catch
+        const fish  = ['Trout','Carp','Catfish','Sardine','Pufferfish','Silverfin','Glowfish','Spotted Eel','Coral Snapper','Red Minnow','Shadowfish','Flamefish','Ying Koi'];
         const item  = fish[Math.floor(Math.random()*fish.length)];
+        const rarity = _getItemRarity(item);
         await _invWrite(_uid, inv => {
           const ex = inv.find(i=>i.name===item);
           if (ex) ex.qty+=2; else inv.push({name:item,qty:2,type:'material'});
         });
         window._allInvItems=_charData.inventory; window._refreshInvDisplay();
-        window.showToast(`Golden Catch! Reeled in a rare ${item}!`, 'success');
-        logActivity('🎣', `<b>Golden Catch!</b> Your line pulled taut — a rare <b>${item}</b> surfaced from the deep.`, '#e8d070');
+        window.showToast(`Golden Catch! Reeled in a ${rarity} ${item}!`, 'success');
+        logActivity('🎣', `<b>Golden Catch!</b> Your line pulled taut — a <b>${rarity}</b> <b>${item}</b> surfaced from the deep.`, '#e8d070');
       }
     },
     Forager:  { weight:25, fn: async () => {
-        const items = ['Apple','Blueberry','Moon Grape','Silverleaf'];
+        const items = ['Blueberries','Apples','Garlic','Mushroom','Melons','Golden Pears','Moon Grapes','Sunfruit','Crystal Berries','Bitter Root','Spirit Plum'];
         const item  = items[Math.floor(Math.random()*items.length)];
+        const itemRarity = _getItemRarity(item);
         await _invWrite(_uid, inv => {
           const ex = inv.find(i=>i.name===item);
           if (ex) ex.qty+=3; else inv.push({name:item,qty:3,type:'material'});
         });
         window._allInvItems=_charData.inventory; window._refreshInvDisplay();
-        window.showToast(`Bloom Surge! Triple ${item} found!`, 'success');
-        logActivity('🌸', `<b>Bloom Surge!</b> The area burst with growth — you collected triple <b>${item}</b>.`, '#70c090');
+        window.showToast(`Bloom Surge! Triple ${item} found! (${itemRarity})`, 'success');
+        logActivity('🌸', `<b>Bloom Surge!</b> The area burst with growth — you collected triple <b>${item}</b> <span style="font-size:0.85em">(${itemRarity})</span>.`, '#70c090');
       }
     },
     Herbalist:{ weight:25, fn: async () => {
-        const items = ['Mint Leaves','Wild Herbs','Silverleaf','Glow Moss'];
+        const items = ['Mint Leaves','Basil Sprigs','Wild Herbs','Soft Bark','Wood','Silverleaf','Goldroot','Nightshade','Glowleaf','Lotus','Spirit Herb','Jade Vine','Ghost Root'];
         const item  = items[Math.floor(Math.random()*items.length)];
+        const itemRarity = _getItemRarity(item);
         await _invWrite(_uid, inv => {
           const ex = inv.find(i=>i.name===item);
           if (ex) ex.qty+=2; else inv.push({name:item,qty:2,type:'material'});
         });
         window._allInvItems=_charData.inventory; window._refreshInvDisplay();
-        window.showToast(`Rare Herb Patch! Bonus ${item} gathered.`, 'success');
-        logActivity('🌿', `<b>Rare Patch!</b> You spotted a hidden cluster — bonus <b>x2 ${item}</b> gathered.`, '#70c090');
+        window.showToast(`Herb Patch! Bonus ${item} gathered. (${itemRarity})`, 'success');
+        logActivity('🌿', `<b>Herb Patch!</b> You spotted a hidden cluster — bonus <b>x2 ${item}</b> <span style="font-size:0.85em">(${itemRarity})</span> gathered.`, '#70c090');
       }
     },
     Hunter:   { weight:25, fn: async () => {
