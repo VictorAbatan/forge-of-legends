@@ -94,38 +94,52 @@ async function claimFactionLeaderProfile() {
   const name = document.getElementById('faction-leader-name')?.value.trim();
   const fileInput = document.getElementById('faction-leader-image-file');
   const errEl = document.getElementById('faction-leader-error');
+  const btn = document.getElementById('claim-faction-leader-btn');
   if (errEl) errEl.textContent = '';
   if (!faction) { if (errEl) errEl.textContent = 'Select a faction.'; return; }
   if (!name) { if (errEl) errEl.textContent = 'Enter a leader name.'; return; }
   if (!fileInput || !fileInput.files || !fileInput.files[0]) { if (errEl) errEl.textContent = 'Upload a profile image.'; return; }
-  // Check if faction is already claimed
-  const q = query(collection(db, 'factionLeaders'), where('faction', '==', faction));
-  const snap = await getDocs(q);
-  if (!snap.empty) { if (errEl) errEl.textContent = 'This faction already has a leader.'; return; }
-  // Upload image to Firebase Storage
-  let imageUrl = '';
+  // Set loading state
+  if (btn) { btn.disabled = true; btn.textContent = 'CLAIMING...'; }
   try {
-    const file = fileInput.files[0];
-    const ext  = file.name.split('.').pop() || 'jpg';
-    const path = `faction-leaders/${faction.replace(/\s+/g, '_')}_${_uid}.${ext}`;
-    const fileRef = storageRef(storage, path);
-    await uploadBytes(fileRef, file);
-    imageUrl = await getDownloadURL(fileRef);
-  } catch (e) {
-    console.error('Image upload error:', e);
-    if (errEl) errEl.textContent = 'Image upload failed: ' + (e.message || e.code || 'Unknown error');
-    return;
+    // Check if this deity already has a leader profile (one per deity, regardless of worshippers)
+    const myQ = query(collection(db, 'factionLeaders'), where('deityUid', '==', _uid));
+    const mySnap = await getDocs(myQ);
+    if (!mySnap.empty) {
+      if (errEl) errEl.textContent = 'You have already claimed a faction leader profile.';
+      return;
+    }
+    // Check if faction is already claimed by another deity
+    const q = query(collection(db, 'factionLeaders'), where('faction', '==', faction));
+    const snap = await getDocs(q);
+    if (!snap.empty) { if (errEl) errEl.textContent = 'This faction already has a leader.'; return; }
+    // Upload image to Firebase Storage
+    let imageUrl = '';
+    try {
+      const file = fileInput.files[0];
+      const ext  = file.name.split('.').pop() || 'jpg';
+      const path = `faction-leaders/${faction.replace(/\s+/g, '_')}_${_uid}.${ext}`;
+      const fileRef = storageRef(storage, path);
+      await uploadBytes(fileRef, file);
+      imageUrl = await getDownloadURL(fileRef);
+    } catch (e) {
+      console.error('Image upload error:', e);
+      if (errEl) errEl.textContent = 'Image upload failed: ' + (e.message || e.code || 'Unknown error');
+      return;
+    }
+    // Save leader profile
+    await addDoc(collection(db, 'factionLeaders'), {
+      faction,
+      deityUid: _uid,
+      leaderName: name,
+      leaderImage: imageUrl,
+      createdAt: serverTimestamp(),
+    });
+    window.showToast('Faction leader profile created!', 'success');
+    loadFactionLeaders();
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'CLAIM LEADER PROFILE'; }
   }
-  // Save leader profile
-  await addDoc(collection(db, 'factionLeaders'), {
-    faction,
-    deityUid: _uid,
-    leaderName: name,
-    leaderImage: imageUrl,
-    createdAt: serverTimestamp(),
-  });
-  window.showToast('Faction leader profile created!', 'success');
-  loadFactionLeaders();
 }
 
 // ── Image preview for faction leader upload ──────────
