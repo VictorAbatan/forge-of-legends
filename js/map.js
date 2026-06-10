@@ -57,10 +57,10 @@ const CONTINENTS = {
     pubPin: { x:26.0, y:52.0 },
     travelCost:100, travelTime:60,
     settlements:[
-      { id:"whitecrest", label:"Whitecrest Village", image:"whitecrest", desc:"A quiet snow-dusted village at the foot of the Frostveil mountains. NPCs trade in furs and common goods.", travelCost:20, travelTime:30, x:31.6, y:14.8, px:43.9, py:42.8 },
-      { id:"icerun",     label:"Icerun Hamlet",      image:"icerun",     desc:"A small hamlet carved into glacial cliffs, known for its hardy miners and close-knit community.",           travelCost:20, travelTime:30, x:80.7, y:20.6, px:54.4, py:58.6 },
-      { id:"paleglow",   label:"Paleglow Town",      image:"paleglow",   desc:"Named for the pale aurora lighting its skies. A mid-sized town with active herbalist trade.",               travelCost:30, travelTime:30, x:20.7, y:77.3, px:51.0, py:62.9 },
-      { id:"mistveil",   label:"Mistveil Town",      image:"mistveil",   desc:"Perpetually shrouded in mist from the wilderness beyond. A base for anglers and foragers.",                 travelCost:30, travelTime:30, x:80.8, y:76.6, px:42.9, py:54.0 },
+      { id:"whitecrest", label:"Whitecrest Village", image:"whitecrest", desc:"A quiet snow-dusted village at the foot of the Frostveil mountains. NPCs trade in furs and common goods.", travelCost:20, travelTime:10, x:31.6, y:14.8, px:43.9, py:42.8 },
+      { id:"icerun",     label:"Icerun Hamlet",      image:"icerun",     desc:"A small hamlet carved into glacial cliffs, known for its hardy miners and close-knit community.",           travelCost:20, travelTime:10, x:80.7, y:20.6, px:54.4, py:58.6 },
+      { id:"paleglow",   label:"Paleglow Town",      image:"paleglow",   desc:"Named for the pale aurora lighting its skies. A mid-sized town with active herbalist trade.",               travelCost:30, travelTime:10, x:20.7, y:77.3, px:51.0, py:62.9 },
+      { id:"mistveil",   label:"Mistveil Town",      image:"mistveil",   desc:"Perpetually shrouded in mist from the wilderness beyond. A base for anglers and foragers.",                 travelCost:30, travelTime:10, x:80.8, y:76.6, px:42.9, py:54.0 },
     ],
     wildlandsPin: { x:7.3, y:33.3 },
     capitalPlayerPin: { x:53.7, y:82.1 },
@@ -88,10 +88,10 @@ const CONTINENTS = {
     pubPin: { x:25.0, y:55.0 },
     travelCost:100, travelTime:60,
     settlements:[
-      { id:"sunpetal", label:"Sunpetal Village", image:"sunpetal", desc:"A sun-drenched village famous for sunpetals and its lively flower market.",                      travelCost:20, travelTime:30, x:15.5, y:24.4, px:46.4, py:43.6 },
-      { id:"basil",    label:"Basil Village",    image:"basil",    desc:"A small herbalist village nestled at the forest edge. Fresh herbs fill the air year round.",     travelCost:20, travelTime:30, x:17.0, y:74.7, px:47.7, py:49.8 },
-      { id:"riverend", label:"Riverend Town",    image:"riverend", desc:"Perched where the Golden River meets the valley plain. A busy fishing and trade town.",          travelCost:30, travelTime:30, x:70.1, y:19.1, px:49.6, py:33.1 },
-      { id:"verdance", label:"Verdance Town",    image:"verdance", desc:"Lush and overgrown. Exists in harmony with the forest. Hunters and foragers base here.",         travelCost:30, travelTime:30, x:78.9, y:70.5, px:47.7, py:49.8 },
+      { id:"sunpetal", label:"Sunpetal Village", image:"sunpetal", desc:"A sun-drenched village famous for sunpetals and its lively flower market.",                      travelCost:20, travelTime:10, x:15.5, y:24.4, px:46.4, py:43.6 },
+      { id:"basil",    label:"Basil Village",    image:"basil",    desc:"A small herbalist village nestled at the forest edge. Fresh herbs fill the air year round.",     travelCost:20, travelTime:10, x:17.0, y:74.7, px:47.7, py:49.8 },
+      { id:"riverend", label:"Riverend Town",    image:"riverend", desc:"Perched where the Golden River meets the valley plain. A busy fishing and trade town.",          travelCost:30, travelTime:10, x:70.1, y:19.1, px:49.6, py:33.1 },
+      { id:"verdance", label:"Verdance Town",    image:"verdance", desc:"Lush and overgrown. Exists in harmony with the forest. Hunters and foragers base here.",         travelCost:30, travelTime:10, x:78.9, y:70.5, px:47.7, py:49.8 },
     ],
     wildlandsPin: { x:93.9, y:55.5 },
     capitalPlayerPin: { x:52.5, y:22.1 },
@@ -698,7 +698,7 @@ function renderContinent(cid) {
             ? (() => {
                 const sameContinent = _isInContinent(cid);
                 const cost = sameContinent ? 20 : cont.travelCost;
-                const time = sameContinent ? 60 : cont.travelTime;
+                const time = sameContinent ? 30 : cont.travelTime;
                 return `<button class="lmap-travel-btn" id="lmap-main-travel">TRAVEL HERE — ${cost}🪙 · ${_ft(time)}</button>`;
               })()
             : `<div class="lmap-here-text">✓ YOU ARE HERE</div>`}
@@ -711,7 +711,7 @@ function renderContinent(cid) {
   c.querySelector("#lmap-main-travel")?.addEventListener("click",()=>{
     const sameContinent = _isInContinent(cid);
     const cost = sameContinent ? 20 : cont.travelCost;
-    const time = sameContinent ? 60 : cont.travelTime;
+    const time = sameContinent ? 30 : cont.travelTime;
     window.openTravelModal?.(cont.capital||cont.name,cont.label.split("·")[0].trim(),cost,time);
   });
   c.querySelector(".lmap-img-side")?.addEventListener("click",_closeTT);
@@ -741,11 +741,11 @@ function renderContinent(cid) {
           <div style="font-size:10px;color:#aaa;margin:4px 0;">Capital city · Safe Zone</div>
           ${atC?`<div class="lmap-wpin-tt-here">✓ You are here</div>
             <button class="lmap-wpin-travel-btn" data-action="view-capital" data-cid="${cid}">VIEW CAPITAL →</button>`
-            :`<button class="lmap-wpin-travel-btn" data-action="travel-capital" data-cid="${cid}" data-dest="${cont.capital||cont.name}" data-continent="${cont.label}">TRAVEL HERE — 20🪙 · 1 min</button>`}
+            :`<button class="lmap-wpin-travel-btn" data-action="travel-capital" data-cid="${cid}" data-dest="${cont.capital||cont.name}" data-continent="${cont.label}">TRAVEL HERE — 20🪙 · 30s</button>`}
         </div>`;
       el.querySelector(".lmap-loc-pin-dot").addEventListener("click",e=>{ e.stopPropagation(); _openTT(el, e); });
       el.querySelector('[data-action="view-capital"]')?.addEventListener("click",e=>{ e.stopPropagation(); _closeTT(); _mapBreadcrumbs.push({id:cid,label:cont.name}); renderCapital(cid); });
-      el.querySelector('[data-action="travel-capital"]')?.addEventListener("click",e=>{ e.stopPropagation(); _closeTT(); const d=e.currentTarget.dataset; window.openTravelModal?.(d.dest, d.continent.split("·")[0].trim(), 20, 60); });
+      el.querySelector('[data-action="travel-capital"]')?.addEventListener("click",e=>{ e.stopPropagation(); _closeTT(); const d=e.currentTarget.dataset; window.openTravelModal?.(d.dest, d.continent.split("·")[0].trim(), 20, 30); });
     } else if(p._type==="wildlands") {
       el.innerHTML=`<div class="lmap-explore-dot" style="background:#4fc870;border-color:#4fc87099;animation:lmap-pulse 2s infinite;"></div>
         <div class="lmap-loc-pin-label" style="color:#70c090">🌿 Explore</div>
@@ -1132,7 +1132,7 @@ function renderCapital(cid) {
             ? (() => {
                 const sameContinent = _isInContinent(cid);
                 const cost = sameContinent ? 20 : cont.travelCost;
-                const time = sameContinent ? 60 : cont.travelTime;
+                const time = sameContinent ? 30 : cont.travelTime;
                 return `<button class="lmap-travel-btn" id="lmap-capital-travel">TRAVEL HERE — ${cost}🪙 · ${_ft(time)}</button>`;
               })()
             : `<div class="lmap-here-text">✓ YOU ARE HERE</div>`}
@@ -1145,7 +1145,7 @@ function renderCapital(cid) {
   c.querySelector("#lmap-capital-travel")?.addEventListener("click",()=>{
     const sameContinent = _isInContinent(cid);
     const cost = sameContinent ? 20 : cont.travelCost;
-    const time = sameContinent ? 60 : cont.travelTime;
+    const time = sameContinent ? 30 : cont.travelTime;
     window.openTravelModal?.(cont.capital||cont.name,cont.label.split("·")[0].trim(),cost,time);
   });
 
@@ -1191,8 +1191,8 @@ function renderCapital(cid) {
         ? `<div class="lmap-wpin-tt-here">✓ You are inside the pub</div>
            <button class="lmap-wpin-travel-btn" data-action="enter-pub" style="background:rgba(79,200,112,0.15);border-color:rgba(79,200,112,0.5);color:#4fc870;margin-top:6px;">🍺 ENTER PUB →</button>`
         : atCapital
-          ? `<div style="font-size:10px;color:#aaa;margin-bottom:6px;">10 🪙 · 1 min to travel inside</div>
-             <button class="lmap-wpin-travel-btn" data-action="travel-pub" data-dest="${travelId}" data-continent="${pubContinent}" style="background:rgba(201,120,76,0.15);border-color:rgba(201,120,76,0.5);color:#c9784c;">TRAVEL — 10🪙 · 1m</button>`
+          ? `<div style="font-size:10px;color:#aaa;margin-bottom:6px;">10 🪙 · 10s to travel inside</div>
+             <button class="lmap-wpin-travel-btn" data-action="travel-pub" data-dest="${travelId}" data-continent="${pubContinent}" style="background:rgba(201,120,76,0.15);border-color:rgba(201,120,76,0.5);color:#c9784c;">TRAVEL — 10🪙 · 10s</button>`
           : `<div style="font-size:10px;color:#777;margin-top:4px;">Travel to ${cont.capital||cont.name} first.</div>`;
 
       const pubEl = document.createElement("div");
@@ -1211,7 +1211,7 @@ function renderCapital(cid) {
       pubEl.querySelector('[data-action="travel-pub"]')?.addEventListener("click", e=>{
         e.stopPropagation(); _closeTT();
         const d = e.currentTarget.dataset;
-        window.openTravelModal?.(d.dest, d.continent, 10, 60);
+        window.openTravelModal?.(d.dest, d.continent, 10, 10);
       });
       pinsEl.appendChild(pubEl);
     }
