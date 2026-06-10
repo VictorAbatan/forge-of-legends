@@ -238,6 +238,11 @@ async function loadFactionLeaders() {
   }
   // Also load quests for this faction (submissions are awaited inside loadFactionMissions)
   loadFactionMissions();
+
+  // Init faction leader chat for this deity's faction
+  if (myLeader) {
+    window._initFactionLeaderChat(myLeader.faction, myLeader.leaderName, myLeader.leaderImage);
+  }
 }
 
 window.showEditFactionLeaderModal = function() {
@@ -274,6 +279,88 @@ window.showEditFactionLeaderModal = function() {
   `;
   document.body.appendChild(modal);
   setupFactionLeaderEditImagePreview();
+};
+
+// ── Faction Leader Chat ─────────────────────────────────────────────────────
+// Lets the deity chat into their faction's chat channel AS the faction leader
+// (not as their deity identity). Mirrors how players send faction_chats.
+let _factionLeaderChatUnsub = null;
+
+window._initFactionLeaderChat = function(faction, leaderName, leaderImage) {
+  const container = document.getElementById('faction-leader-chat');
+  if (!container) return;
+
+  // Unsub previous listener if any
+  if (_factionLeaderChatUnsub) { _factionLeaderChatUnsub(); _factionLeaderChatUnsub = null; }
+
+  container.innerHTML = `
+    <div style="font-size:0.72rem;font-family:var(--font-mono);color:var(--gold);letter-spacing:0.12em;text-transform:uppercase;padding-bottom:10px;border-bottom:1px solid var(--border);margin-bottom:12px">✦ FACTION CHAT — Speaking as ${leaderName}</div>
+    <div id="flchat-messages" style="height:240px;overflow-y:auto;background:rgba(20,20,20,0.6);border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:0.9rem"></div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <input id="flchat-input" type="text" maxlength="200" placeholder="Message your faction as ${leaderName}..."
+        style="flex:1;padding:7px 12px;border-radius:6px;border:1px solid var(--border);background:var(--ink3);color:var(--text-light);font-size:0.9rem;outline:none"/>
+      <button onclick="window._sendFactionLeaderChat()" style="padding:7px 18px;border-radius:6px;background:var(--gold);color:#222;font-weight:700;border:none;cursor:pointer;font-family:var(--ff-display);font-size:0.82rem;letter-spacing:0.06em">SEND</button>
+    </div>`;
+
+  // Store context for send
+  container.dataset.faction     = faction;
+  container.dataset.leaderName  = leaderName;
+  container.dataset.leaderImage = leaderImage || '';
+
+  // Live listener
+  const chatRef = collection(db, "faction_chats");
+  const q = query(chatRef, where("faction", "==", faction), orderBy("timestamp", "asc"), limit(50));
+  _factionLeaderChatUnsub = onSnapshot(q, snap => {
+    const msgDiv = document.getElementById('flchat-messages');
+    if (!msgDiv) return;
+    msgDiv.innerHTML = '';
+    snap.forEach(docSnap => {
+      const d = docSnap.data();
+      const isLeader = d.uid === `leader_${_uid}`;
+      const avatar = d.avatarUrl
+        ? `<img src="${d.avatarUrl}" style="width:26px;height:26px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1px solid var(--gold-dim)"/>`
+        : `<span style="font-size:1rem;flex-shrink:0">👤</span>`;
+      msgDiv.innerHTML += `
+        <div style="margin-bottom:4px;display:flex;flex-direction:column;align-items:${isLeader ? 'flex-end' : 'flex-start'}">
+          <div style="display:flex;align-items:flex-end;gap:8px;flex-direction:${isLeader ? 'row-reverse' : 'row'}">
+            ${avatar}
+            <div style="max-width:70%;background:${isLeader ? 'rgba(201,168,76,0.12)' : 'rgba(30,30,30,0.75)'};padding:7px 12px;border-radius:10px;color:#fff;font-size:0.88rem">
+              <b style="color:var(--gold)">${d.sender}</b>: ${d.text}
+            </div>
+          </div>
+        </div>`;
+    });
+    msgDiv.scrollTop = msgDiv.scrollHeight;
+  });
+
+  // Allow Enter key to send
+  const input = document.getElementById('flchat-input');
+  if (input) input.onkeydown = (e) => { if (e.key === 'Enter') window._sendFactionLeaderChat(); };
+};
+
+window._sendFactionLeaderChat = async function() {
+  const container = document.getElementById('faction-leader-chat');
+  if (!container) return;
+  const input = document.getElementById('flchat-input');
+  const text = input?.value.trim();
+  if (!text) return;
+  const faction     = container.dataset.faction;
+  const leaderName  = container.dataset.leaderName;
+  const leaderImage = container.dataset.leaderImage;
+  try {
+    await addDoc(collection(db, "faction_chats"), {
+      faction,
+      sender:    leaderName,
+      uid:       `leader_${_uid}`,   // distinct from deity uid and player uid
+      avatarUrl: leaderImage || '',
+      text,
+      timestamp: serverTimestamp(),
+    });
+    if (input) input.value = '';
+  } catch(e) {
+    console.error('[FactionLeaderChat] Send failed:', e);
+    window.showToast('Failed to send message.', 'error');
+  }
 };
 
 window.claimFactionLeaderProfile = claimFactionLeaderProfile;
@@ -1482,29 +1569,72 @@ async function loadWorshippers() {
 
 
 // ═══════════════════════════════════════════════════
+//  FAITH TIER HELPER (mirrors dashboard.js _getFaithTier)
+// ═══════════════════════════════════════════════════
+const _DD_FAITH_MANTLES = [
+  { mantle: 0, label: "Faithless",   choirs: [5,   10,  15]  },
+  { mantle: 1, label: "Initiate",    choirs: [30,  35,  40]  },
+  { mantle: 2, label: "Devotee",     choirs: [80,  85,  90]  },
+  { mantle: 3, label: "Acolyte",     choirs: [180, 185, 190] },
+  { mantle: 4, label: "Zealot",      choirs: [380, 385, 390] },
+  { mantle: 5, label: "Chosen",      choirs: [780, 785, 790] },
+  { mantle: 6, label: "High Priest", choirs: [1580,1585,1590]},
+];
+function _ddGetFaithTier(faithLevel) {
+  let mantleIdx = 0;
+  for (let i = _DD_FAITH_MANTLES.length - 1; i >= 0; i--) {
+    if (faithLevel >= _DD_FAITH_MANTLES[i].choirs[0]) { mantleIdx = i; break; }
+  }
+  if (faithLevel < _DD_FAITH_MANTLES[0].choirs[0]) mantleIdx = 0;
+  const current = _DD_FAITH_MANTLES[mantleIdx];
+  let choir = 0;
+  for (let c = 2; c >= 0; c--) {
+    if (faithLevel >= current.choirs[c]) { choir = c + 1; break; }
+  }
+  const nextMantleData = mantleIdx < _DD_FAITH_MANTLES.length - 1 ? _DD_FAITH_MANTLES[mantleIdx + 1] : null;
+  let nextThreshold = choir < 3 ? current.choirs[choir] : (nextMantleData ? nextMantleData.choirs[0] : null);
+  const prevThreshold = choir > 0 ? current.choirs[choir - 1] : (mantleIdx > 0 ? _DD_FAITH_MANTLES[mantleIdx - 1].choirs[2] : 0);
+  const progress = nextThreshold
+    ? Math.round(((faithLevel - prevThreshold) / (nextThreshold - prevThreshold)) * 100)
+    : 100;
+  return { label: current.label, mantleIdx, choir, faithLevel, nextThreshold, progress };
+}
+
+// ═══════════════════════════════════════════════════
 //  FAITH INCREASE NOTIFICATIONS
 // ═══════════════════════════════════════════════════
 let _faithNotifUnsub = null;
 
-function _renderFaithNotifEntry(n, panel, prepend = true) {
+function _renderFaithNotifEntry(n, panel, prepend = true, isUnread = false) {
   const isMantleUp = n.subtype === 'mantle_ascension';
   const ts    = n.createdAt?.toDate?.()?.toLocaleString() || 'just now';
   const icon  = isMantleUp ? '🎉' : '✨';
+
+  // Unread entries glow — read entries are dimmed
+  const rowBg     = isUnread
+    ? (isMantleUp ? 'background:rgba(201,168,76,0.08);border-radius:8px;' : 'background:rgba(93,190,133,0.06);border-radius:8px;')
+    : '';
+  const nameColor = isUnread ? 'color:#fff;' : 'color:var(--text);';
+  const detailColor = isUnread ? 'color:var(--text-dim);' : 'color:var(--ash);';
+  const tsColor     = isUnread ? 'color:var(--ash);' : 'color:rgba(255,255,255,0.25);';
+  const unreadDot   = isUnread ? `<span style="width:7px;height:7px;border-radius:50%;background:${isMantleUp ? 'var(--gold)' : '#5dbe85'};flex-shrink:0;margin-top:5px"></span>` : '';
+
   const badge = isMantleUp
-    ? `<span style="background:rgba(201,168,76,0.15);color:var(--gold);font-family:var(--font-mono);font-size:0.6rem;padding:2px 7px;border-radius:8px;border:1px solid rgba(201,168,76,0.3);letter-spacing:0.06em">MANTLE ASCENSION</span>`
-    : `<span style="background:rgba(93,190,133,0.1);color:#5dbe85;font-family:var(--font-mono);font-size:0.6rem;padding:2px 7px;border-radius:8px;border:1px solid rgba(93,190,133,0.2);letter-spacing:0.06em">CHOIR ADVANCEMENT</span>`;
+    ? `<span style="background:rgba(201,168,76,${isUnread?'0.25':'0.10'});color:${isUnread?'var(--gold)':'#a08840'};font-family:var(--font-mono);font-size:0.6rem;padding:2px 7px;border-radius:8px;border:1px solid rgba(201,168,76,${isUnread?'0.4':'0.2'});letter-spacing:0.06em">MANTLE ASCENSION</span>`
+    : `<span style="background:rgba(93,190,133,${isUnread?'0.18':'0.07'});color:${isUnread?'#5dbe85':'#3d7a57'};font-family:var(--font-mono);font-size:0.6rem;padding:2px 7px;border-radius:8px;border:1px solid rgba(93,190,133,${isUnread?'0.3':'0.15'});letter-spacing:0.06em">CHOIR ADVANCEMENT</span>`;
   const detail = `${n.mantle} — Choir ${n.choir} &nbsp;·&nbsp; Faith <b>${n.faithLevel}</b>`;
   const el = document.createElement('div');
-  el.style.cssText = 'display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--border)';
+  el.style.cssText = `display:flex;gap:10px;align-items:flex-start;padding:10px 8px;border-bottom:1px solid var(--border);${rowBg}`;
   el.innerHTML = `
+    ${unreadDot}
     <span style="font-size:1.2rem;margin-top:2px">${icon}</span>
     <div style="flex:1;min-width:0">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
-        <span style="font-size:0.85rem;font-weight:600;color:var(--text)">${n.playerName}</span>
+        <span style="font-size:0.85rem;font-weight:${isUnread?'700':'500'};${nameColor}">${n.playerName}</span>
         ${badge}
       </div>
-      <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:3px">${detail}</div>
-      <div style="font-size:0.68rem;color:var(--ash)">${ts}</div>
+      <div style="font-size:0.78rem;${detailColor}margin-bottom:3px">${detail}</div>
+      <div style="font-size:0.68rem;${tsColor}">${ts}</div>
     </div>`;
   if (prepend) panel.prepend(el); else panel.appendChild(el);
 }
@@ -1531,7 +1661,7 @@ function startFaithNotifListener() {
       ? `<p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">No faith level-ups yet.</p>`
       : '';
     if (!snap.empty) {
-      Array.from(snap.docs).reverse().forEach(d => _renderFaithNotifEntry(d.data(), panel, true));
+      Array.from(snap.docs).reverse().forEach(d => _renderFaithNotifEntry(d.data(), panel, true, false));
     }
   }).catch(err => console.error("[FaithNotif] History load failed:", err));
 
@@ -1562,7 +1692,7 @@ function startFaithNotifListener() {
         if (livePanel) {
           const placeholder = livePanel.querySelector('p');
           if (placeholder) placeholder.remove();
-          _renderFaithNotifEntry(n, livePanel, true);
+          _renderFaithNotifEntry(n, livePanel, true, true);
         }
       });
     },
@@ -1588,7 +1718,10 @@ function renderWorshippers(list) {
         <div class="worshipper-location">📍 ${(w.kingdom||w.location||"Unknown").split("—")[0].trim()}</div>
       </div>
       <div class="worshipper-stats">
-        <div class="worshipper-stat"><span class="worshipper-stat-label">Faith</span><span class="worshipper-stat-value faith">${w.faithLevel||0}</span></div>
+        <div class="worshipper-stat" style="flex-direction:column;align-items:flex-start;gap:2px">
+          <span class="worshipper-stat-label">Faith</span>
+          ${(() => { const t = _ddGetFaithTier(w.faithLevel||0); return `<span class="worshipper-stat-value faith" style="font-size:0.72rem">${t.label} · C${t.choir} <span style="color:var(--ash);font-size:0.65rem">(${w.faithLevel||0})</span></span><div style="height:3px;border-radius:2px;background:rgba(255,255,255,0.08);margin-top:3px;width:100%;max-width:80px"><div style="height:100%;border-radius:2px;background:var(--gold);width:${t.progress}%"></div></div>`; })()}
+        </div>
         <div class="worshipper-stat"><span class="worshipper-stat-label">Gold</span><span class="worshipper-stat-value">${w.gold||0}</span></div>
         <div class="worshipper-stat"><span class="worshipper-stat-label">HP</span><span class="worshipper-stat-value">${w.hp||100}/${w.hpMax||100}</span></div>
       </div>
@@ -2170,6 +2303,9 @@ window._renderFactionSubmissionsFor = function(q) {
         <button class="deity-mini-btn success" onclick="window._approveFactionSubmission('${s.id}','${q.id}')">✓ Approve</button>
         <button class="deity-mini-btn danger"  onclick="window._rejectFactionSubmission('${s.id}')">✕ Reject</button>
         ${s.status === 'pending' ? `<button class="deity-mini-btn punish" onclick="window._openPunishModal('${s.uid||s.id}','${(s.playerName||'?').replace(/'/g,"\'")}','${s.id}','factionQuestSubmissions')">⚖️ Punish</button>` : ''}
+      </div>` : s.status === 'approved' ? `
+      <div class="dq-sub-actions">
+        <button class="deity-mini-btn" style="background:#4a4a2a;color:#e8d070;border:1px solid #c9a84c" onclick="window._regrantFactionReward('${s.id}')">&#x21BA; Re-grant Reward</button>
       </div>` : ''}
     </div>`;
   }).join('');
@@ -2193,7 +2329,12 @@ window._approveFactionSubmission = async function(subId, questId) {
     const sub = quest._submissions?.find(s => s.id === subId);
     if (!sub) return;
 
-    await updateDoc(doc(db, 'factionQuestSubmissions', subId), { status: 'approved' });
+    // Reset rewarded:false alongside status:approved.
+    // This is the critical fix: the player-side listener guards on !data.rewarded.
+    // If a previous approval wrote rewarded:true but _applyReward then failed silently,
+    // the player would be permanently locked out. Resetting it here on every approval
+    // ensures the patched listener always gets a clean shot at delivering the reward.
+    await updateDoc(doc(db, 'factionQuestSubmissions', subId), { status: 'approved', rewarded: false });
 
     // For one-time quests: stamp completedBy so other players get locked out
     if (quest.completionType === 'one_time') {
@@ -2225,6 +2366,20 @@ window._approveFactionSubmission = async function(subId, questId) {
   } catch(e) {
     console.error('Approve failed:', e);
     window.showToast('Failed to approve.', 'error');
+  }
+};
+
+// Re-grant a faction quest reward for a stuck/already-approved submission.
+// Use when a player was approved but their reward never landed (rewarded:true
+// was written before _applyReward could execute). Resetting rewarded:false
+// lets the patched player-side listener deliver the reward on next listener fire.
+window._regrantFactionReward = async function(subId) {
+  try {
+    await updateDoc(doc(db, 'factionQuestSubmissions', subId), { rewarded: false });
+    window.showToast('Reward reset — player will receive it on next page load.', 'success');
+  } catch(e) {
+    console.error('[Regrant] Failed:', e);
+    window.showToast('Failed to reset reward flag.', 'error');
   }
 };
 
@@ -2310,7 +2465,7 @@ function renderFactionMissions() {
     return parts.length ? parts.join(" · ") : "—";
   }
 
-  function buildCard(m) {
+  function buildCard(m, isDone) {
     const descHtml  = (m.description||"").split(/\n+/).map(p => p ? `<p style="margin:0 0 6px 0">${p}</p>` : "").join("");
     const rewardStr = buildRewardTag(m);
     const isActive  = m.status === "active";
@@ -2344,18 +2499,30 @@ function renderFactionMissions() {
       <div class="quest-card-footer">
         <span class="quest-reward-tag">${rewardStr}</span>
         ${isActive ? `<button class="deity-mini-btn danger" onclick="window._endFactionQuest('${m.id}')">End Quest</button>` : ""}
+        ${isDone ? `<button class="deity-mini-btn danger" style="margin-left:auto;padding:2px 8px" onclick="window._deleteQuest('${m.id}','faction')" title="Delete quest">🗑</button>` : ""}
       </div>
       ${submissionsPanel}
     </div>`;
   }
 
   if (activeEl) activeEl.innerHTML = active.length
-    ? active.map(buildCard).join("")
+    ? active.map(m => buildCard(m, false)).join("")
     : `<p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">No active quests.</p>`;
 
-  if (doneEl) doneEl.innerHTML = done.length
-    ? done.map(buildCard).join("")
-    : `<p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">None yet.</p>`;
+  if (doneEl) {
+    if (!done.length) {
+      doneEl.innerHTML = `<p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">None yet.</p>`;
+    } else {
+      const isOpen = doneEl.getAttribute('data-open') !== 'false';
+      doneEl.innerHTML = `
+        <button class="quest-section-toggle" onclick="window._toggleQuestSection('faction-quests-done')">
+          ${done.length} quest${done.length !== 1 ? 's' : ''} <span class="fq-post-arrow" style="margin-left:6px">${isOpen ? '▲' : '▼'}</span>
+        </button>
+        <div class="quest-section-body" style="display:${isOpen ? 'block' : 'none'}">
+          ${done.map(m => buildCard(m, true)).join("")}
+        </div>`;
+    }
+  }
 }
 
 // Load faction missions: fetch quests first, then await submissions, then render
@@ -2478,64 +2645,118 @@ function renderDeityQuests() {
   const active   = filtered.filter(q => q.status === "active");
   const done     = filtered.filter(q => q.status !== "active");
 
-  const renderList = (list, container) => {
-    const el = document.getElementById(container);
-    if (!el) return;
-    if (!list.length) { el.innerHTML = `<p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">None.</p>`; return; }
-    el.innerHTML = list.map(q => {
-      const typeIcon = "📖";
-      const completedCount = q.completedBy?.length || 0;
-      const assignLabel = q.assignedTo
-        ? (_worshippers.find(w => w.uid === q.assignedTo)?.name || "Specific Player")
-        : "All Players";
-      const descHtml = (q.description || "").split(/\n+/).map(p => p ? `<p style='margin:0 0 6px 0'>${p}</p>` : '').join('');
-      const rewardItems = Array.isArray(q.reward?.items) && q.reward.items.length
-        ? ` · 🎁 ${q.reward.items.map(i => `${i.qty}x ${i.name}`).join(", ")}`
-        : "";
-      const rewardIngredient = q.reward?.advancementIngredientQty
-        ? ` · <span style="color:#d4a8ff">✦ ${q.reward.advancementIngredientQty}× Advancement Ingredient</span>`
-        : "";
-      const pendingCount = (q._submissions || []).filter(s => s.status === 'pending').length;
-      const submissionsBadge = pendingCount > 0
-        ? `<span class="dq-submissions-badge">${pendingCount} pending</span>`
-        : '';
-      const completionBadge = q.completionType === "one_time"
-        ? `<span class="quest-onetime-badge">🔒 One-Time</span>`
-        : `<span class="quest-onetime-badge open">🌍 Open</span>`;
-      return `
-      <div class="quest-card" id="qcard-${q.id}">
-        <div class="quest-card-header">
-          <span class="quest-type-badge">${typeIcon} Story</span>
-          <span class="quest-assigned-to">→ ${assignLabel}</span>
-          ${completionBadge}
-          ${q.status !== "active" ? `<span class="quest-status-badge ${q.status}">${q.status}</span>` : ""}
-          ${submissionsBadge}
+  const buildQuestCard = (q, isDone) => {
+    const typeIcon = "📖";
+    const completedCount = q.completedBy?.length || 0;
+    const assignLabel = q.assignedTo
+      ? (_worshippers.find(w => w.uid === q.assignedTo)?.name || "Specific Player")
+      : "All Players";
+    const descHtml = (q.description || "").split(/\n+/).map(p => p ? `<p style='margin:0 0 6px 0'>${p}</p>` : '').join('');
+    const rewardItems = Array.isArray(q.reward?.items) && q.reward.items.length
+      ? ` · 🎁 ${q.reward.items.map(i => `${i.qty}x ${i.name}`).join(", ")}` 
+      : "";
+    const rewardIngredient = q.reward?.advancementIngredientQty
+      ? ` · <span style="color:#d4a8ff">✦ ${q.reward.advancementIngredientQty}× Advancement Ingredient</span>`
+      : "";
+    const pendingCount = (q._submissions || []).filter(s => s.status === 'pending').length;
+    const submissionsBadge = pendingCount > 0
+      ? `<span class="dq-submissions-badge">${pendingCount} pending</span>`
+      : '';
+    const completionBadge = q.completionType === "one_time"
+      ? `<span class="quest-onetime-badge">🔒 One-Time</span>`
+      : `<span class="quest-onetime-badge open">🌍 Open</span>`;
+    const trashBtn = isDone
+      ? `<button class="deity-mini-btn danger" style="margin-left:auto;padding:2px 8px" onclick="window._deleteQuest('${q.id}','story')" title="Delete quest">🗑</button>`
+      : '';
+    return `
+    <div class="quest-card" id="qcard-${q.id}">
+      <div class="quest-card-header">
+        <span class="quest-type-badge">${typeIcon} Story</span>
+        <span class="quest-assigned-to">→ ${assignLabel}</span>
+        ${completionBadge}
+        ${q.status !== "active" ? `<span class="quest-status-badge ${q.status}">${q.status}</span>` : ""}
+        ${submissionsBadge}
+        ${trashBtn}
+      </div>
+      <div class="quest-card-title">${q.title}</div>
+      <div class="quest-card-desc">${descHtml}</div>
+      ${q.objectives?.length ? `<div class="quest-objectives">${q.objectives.map(o=>`<div class="quest-obj">• ${o}</div>`).join("")}</div>` : ""}
+      <div class="quest-card-footer">
+        <span class="quest-reward-tag">🪙 ${q.reward?.gold||0} gold · ✨ ${q.reward?.exp||0} exp${rewardItems}${rewardIngredient}</span>
+        <span class="quest-completions">${completedCount} completion${completedCount!==1?"s": ""}</span>
+        ${q.status === "active" ? `<button class="deity-mini-btn danger" onclick="window._endQuest('${q.id}')">End Quest</button>` : ""}
+      </div>
+      <div class="dq-submissions-panel">
+        <div class="dq-submissions-title" onclick="window._toggleSubmissions('${q.id}')">
+          👥 Player Submissions <span class="dq-sub-chevron" id="dqchev-${q.id}">▾</span>
         </div>
-        <div class="quest-card-title">${q.title}</div>
-        <div class="quest-card-desc">${descHtml}</div>
-        ${q.objectives?.length ? `<div class="quest-objectives">${q.objectives.map(o=>`<div class="quest-obj">• ${o}</div>`).join("")}</div>` : ""}
-        <div class="quest-card-footer">
-          <span class="quest-reward-tag">🪙 ${q.reward?.gold||0} gold · ✨ ${q.reward?.exp||0} exp${rewardItems}${rewardIngredient}</span>
-          <span class="quest-completions">${completedCount} completion${completedCount!==1?"s": ""}</span>
-          ${q.status === "active" ? `<button class="deity-mini-btn danger" onclick="window._endQuest('${q.id}')">End Quest</button>` : ""}
+        <div class="dq-submissions-list" id="dqsub-${q.id}" style="display:none">
+          ${window._renderSubmissionsFor(q)}
         </div>
-
-        <!-- Submissions panel -->
-        <div class="dq-submissions-panel">
-          <div class="dq-submissions-title" onclick="window._toggleSubmissions('${q.id}')">
-            👥 Player Submissions <span class="dq-sub-chevron" id="dqchev-${q.id}">▾</span>
-          </div>
-          <div class="dq-submissions-list" id="dqsub-${q.id}" style="display:none">
-            ${window._renderSubmissionsFor(q)}
-          </div>
-        </div>
-      </div>`;
-    }).join("");
+      </div>
+    </div>`;
   };
 
-  renderList(active, "deity-quests-active");
-  renderList(done,   "deity-quests-done");
+  const activeEl = document.getElementById("deity-quests-active");
+  if (activeEl) {
+    activeEl.innerHTML = active.length
+      ? active.map(q => buildQuestCard(q, false)).join("")
+      : `<p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">No active quests.</p>`;
+  }
+
+  const doneEl = document.getElementById("deity-quests-done");
+  if (doneEl) {
+    if (!done.length) {
+      doneEl.innerHTML = `<p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">None.</p>`;
+    } else {
+      const isOpen = doneEl.getAttribute('data-open') !== 'false';
+      doneEl.innerHTML = `
+        <button class="quest-section-toggle" onclick="window._toggleQuestSection('deity-quests-done')">
+          ${done.length} quest${done.length !== 1 ? 's' : ''} <span class="fq-post-arrow" style="margin-left:6px">${isOpen ? '▲' : '▼'}</span>
+        </button>
+        <div class="quest-section-body" style="display:${isOpen ? 'block' : 'none'}">
+          ${done.map(q => buildQuestCard(q, true)).join("")}
+        </div>`;
+    }
+  }
 }
+
+window._toggleQuestSection = function(containerId) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const body = el.querySelector('.quest-section-body');
+  const arrow = el.querySelector('.fq-post-arrow');
+  if (!body) return;
+  const isOpen = body.style.display !== 'none';
+  body.style.display = isOpen ? 'none' : 'block';
+  if (arrow) arrow.textContent = isOpen ? '▼' : '▲';
+  el.setAttribute('data-open', String(!isOpen));
+};
+
+window._toggleFactionLeadersSection = function() {
+  const body  = document.getElementById('faction-leaders-body');
+  const arrow = document.getElementById('faction-leaders-arrow');
+  if (!body) return;
+  const isOpen = body.style.display !== 'none';
+  body.style.display = isOpen ? 'none' : 'block';
+  if (arrow) arrow.textContent = isOpen ? '▼' : '▲';
+};
+
+
+window._deleteQuest = async function(id, type) {
+  if (!confirm('Delete this quest? This cannot be undone.')) return;
+  try {
+    const col = type === 'faction' ? 'factionMissions' : 'storyQuests';
+    await deleteDoc(doc(db, col, id));
+    window.showToast('Quest deleted.', 'success');
+    if (type === 'faction') loadFactionMissions();
+    else loadDeityQuests();
+  } catch(e) {
+    console.error('[deleteQuest]', e);
+    window.showToast('Failed to delete quest.', 'error');
+  }
+};
+
 
 // Toggle submissions panel open/close
 window._toggleSubmissions = function(questId) {
@@ -2699,7 +2920,16 @@ window._openPlayerProfile = async function(playerUid, playerName) {
         <div class="pp-stat"><span class="pp-stat-label">Class</span><span class="pp-stat-val">${charClass}</span></div>
         <div class="pp-stat"><span class="pp-stat-label">Race</span><span class="pp-stat-val">${race}</span></div>
         <div class="pp-stat"><span class="pp-stat-label">Deity</span><span class="pp-stat-val" style="color:var(--gold)">${deity}</span></div>
-        <div class="pp-stat"><span class="pp-stat-label">Faith Lv.</span><span class="pp-stat-val">${faithLevel}</span></div>
+        <div class="pp-stat" style="grid-column:1/-1">
+          <span class="pp-stat-label">Faith</span>
+          <span class="pp-stat-val" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span style="color:var(--gold)">${_ddGetFaithTier(faithLevel).label}</span>
+            <span style="color:var(--text-dim);font-size:0.75rem">Choir ${_ddGetFaithTier(faithLevel).choir}</span>
+            <span style="color:var(--ash);font-size:0.7rem">(Faith ${faithLevel})</span>
+            <span style="display:inline-block;width:80px;height:4px;border-radius:2px;background:rgba(255,255,255,0.08);vertical-align:middle"><span style="display:block;height:100%;border-radius:2px;background:var(--gold);width:${_ddGetFaithTier(faithLevel).progress}%"></span></span>
+            ${_ddGetFaithTier(faithLevel).nextThreshold ? `<span style="color:var(--ash);font-size:0.65rem">→ ${_ddGetFaithTier(faithLevel).nextThreshold} for next</span>` : ''}
+          </span>
+        </div>
         <div class="pp-stat"><span class="pp-stat-label">Gold</span><span class="pp-stat-val">${gold}</span></div>
         <div class="pp-stat"><span class="pp-stat-label">HP</span><span class="pp-stat-val">${hp}/${hpMax}</span></div>
         <div class="pp-stat"><span class="pp-stat-label">Faction</span><span class="pp-stat-val" style="font-size:0.78rem">${faction}</span></div>
@@ -2707,6 +2937,11 @@ window._openPlayerProfile = async function(playerUid, playerName) {
 
       <div class="pp-section-title">✦ Advancement Ingredients</div>
       <div class="pp-ing-list">${ingRowsHtml}</div>
+
+      <div class="pp-section-title" style="margin-top:14px">✦ Last Bestowments</div>
+      <div id="pp-bestow-log" style="max-height:130px;overflow-y:auto;background:var(--ink1);border:1px solid var(--border);border-radius:6px;padding:8px 10px;margin-top:6px">
+        <span style="color:var(--text-dim);font-style:italic;font-size:0.8rem">Loading…</span>
+      </div>
 
       <div class="pp-section-title" style="margin-top:14px">📋 Recent Activity</div>
       <div id="pp-activity-log" style="max-height:180px;overflow-y:auto;background:var(--ink1);border:1px solid var(--border);border-radius:6px;padding:8px 10px;margin-top:6px">
@@ -2722,8 +2957,42 @@ window._openPlayerProfile = async function(playerUid, playerName) {
   document.body.appendChild(modal);
   modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
 
-  // Load activity log for this player
+  // Load bestowments + activity log for this player
   (async () => {
+    // ── Bestowments ──
+    const bestowEl = document.getElementById('pp-bestow-log');
+    if (bestowEl) {
+      try {
+        const bSnap = await getDocs(query(
+          collection(db, 'deityNotifications'),
+          where('type',      '==', 'bestow'),
+          where('playerUid', '==', playerUid),
+          limit(50)
+        ));
+        // Filter by this deity and sort client-side (avoids composite index requirement)
+        const bDocs = bSnap.docs
+          .filter(d => d.data().deityUid === _uid)
+          .sort((a, b) => (b.data().createdAt?.toMillis?.() || 0) - (a.data().createdAt?.toMillis?.() || 0))
+          .slice(0, 10);
+        if (bDocs.length === 0) {
+          bestowEl.innerHTML = `<span style="color:var(--text-dim);font-style:italic;font-size:0.8rem">No bestowments recorded yet.</span>`;
+        } else {
+          bestowEl.innerHTML = bDocs.map(d => {
+            const b  = d.data();
+            const ts = b.createdAt?.toDate?.()?.toLocaleString() || '—';
+            const itemsStr = (b.items||[]).map(i => `${i.qty||1}× ${i.name}`).join(', ') || '—';
+            const goldStr  = b.gold > 0 ? ` · 🪙 ${b.gold} gold` : '';
+            return `<div style="padding:5px 0;border-bottom:1px solid var(--border);font-size:0.78rem">
+              <div style="color:var(--text)">${itemsStr}${goldStr}</div>
+              <div style="font-size:0.68rem;color:var(--ash);margin-top:2px">${ts}</div>
+            </div>`;
+          }).join('');
+        }
+      } catch(e) {
+        bestowEl.innerHTML = `<span style="color:var(--text-dim);font-style:italic;font-size:0.8rem">Could not load bestowments.</span>`;
+      }
+    }
+
     const logEl = document.getElementById('pp-activity-log');
     if (!logEl) return;
     try {

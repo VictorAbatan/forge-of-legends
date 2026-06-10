@@ -1816,3 +1816,22 @@ button,
   background: var(--border);
   border-radius: 2px;
 }
+/* ── Quest section collapse toggle (done/expired lists) ── */
+.quest-section-toggle {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 8px 12px;
+  background: rgba(201,168,76,0.06);
+  border: 1px solid rgba(201,168,76,0.15);
+  border-radius: var(--radius);
+  color: var(--gold);
+  font-family: var(--ff-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  margin-bottom: 10px;
+  transition: background 0.18s;
+}
+.quest-section-toggle:hover { background: rgba(201,168,76,0.12); }
+.quest-section-body { margin-top: 4px; }

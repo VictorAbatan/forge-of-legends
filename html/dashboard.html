@@ -1223,8 +1223,6 @@ button,
           </div>
         </div>
 
-        </div>
-
         <div class="zone-region-label-flat">— CORRUPTED HALLOWS — <span class="zone-region-range">Lv. 301–400</span></div>
         <div class="zone-grid" style="margin-bottom:20px">
           <div class="zone-card" data-grade="B" data-zone="Gravemarch Fields" data-continent="Vorthak" onclick="selectZone(this,'B','Gravemarch Fields')">
@@ -1474,7 +1472,7 @@ button,
           <button class="btn-secondary" style="max-width:180px" id="btn-start-auto-battle" onclick="startAutoBattle()" disabled>🔄 AUTO-BATTLE</button>
           <div id="zone-pool-status" style="display:none;font-family:var(--font-mono);font-size:0.65rem;color:var(--gold-dim)"></div>
         </div>
-      <!-- end battle-zone-select -->
+      </div><!-- end battle-zone-select -->
 
       <!-- Pool Exhausted Banner -->
       <div id="zone-pool-exhausted" style="display:none;background:rgba(192,59,43,0.12);border:1px solid #c03b2b;border-radius:var(--radius);padding:20px 18px;margin-bottom:20px;text-align:center">
@@ -1957,7 +1955,7 @@ button,
     if (name === 'chat')    window._chatInit?.();
     if (name === 'market')  window._loadPlayerListings?.();
     if (name === 'map')     { positionPlayerPin(); initMapInteraction(); }
-    if (name === 'battle')  window._refreshFarmingZones?.();
+    if (name === 'battle' && window._battleMode !== 'boss')  window._refreshFarmingZones?.();
     if (name === 'pub')     window.renderPubPanel?.();
     window._onPanelSwitch?.(name);
     closeNav();
@@ -2784,7 +2782,7 @@ button,
   }
   function attemptResurrect() { window._resurrect?.(); }
   function resetBattle() {
-    document.getElementById('battle-zone-select').style.display = 'block';
+    if (window._battleMode !== 'boss') document.getElementById('battle-zone-select').style.display = 'block';
     document.getElementById('battle-arena').style.display       = 'none';
     document.getElementById('battle-result').style.display      = 'none';
     document.getElementById('auto-battle-hud').style.display    = 'none';

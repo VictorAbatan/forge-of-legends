@@ -303,138 +303,139 @@ function getCraftingRecipes() {
   // Keyed by npc type — the craftItem function looks up by npc + recipeName.
   // Equipment uses grade sub-keys but the cloud function flattens them into
   // a single blacksmith list for lookup.
+  // PRICES: synced from CANONICAL_EQUIP_RECIPES in dashboard.js (authoritative source).
   const EQUIP = {
     E: [
-      { name:"Rusted Greatsword", type:"weapon", cost:220, requires:[{name:"Iron",qty:5},{name:"Tough Hide",qty:2}] },
-      { name:"Crude Bow",         type:"weapon", cost:210, requires:[{name:"Iron",qty:4},{name:"Leather",qty:1}] },
-      { name:"Iron Dagger",       type:"weapon", cost:200, requires:[{name:"Iron",qty:4},{name:"Bone Fragments",qty:1}] },
-      { name:"Apprentice Wand",   type:"weapon", cost:230, requires:[{name:"Quartz",qty:3},{name:"Animal Fat",qty:2}] },
-      { name:"Shortblade",        type:"weapon", cost:210, requires:[{name:"Iron",qty:5}] },
-      { name:"Bone Mace",         type:"weapon", cost:215, requires:[{name:"Bone Fragments",qty:4},{name:"Iron",qty:1}] },
-      { name:"Hunter Knife",      type:"weapon", cost:210, requires:[{name:"Iron",qty:3},{name:"Fur",qty:1}] },
-      { name:"Quartz Rod",        type:"weapon", cost:240, requires:[{name:"Quartz",qty:4},{name:"Limestone",qty:2}] },
-      { name:"Tin Blade",         type:"weapon", cost:200, requires:[{name:"Tin",qty:4}] },
-      { name:"Feather Knife",     type:"weapon", cost:215, requires:[{name:"Iron",qty:3},{name:"Feathers",qty:2}] },
-      { name:"Leather Vest",      type:"armor",  cost:200, requires:[{name:"Leather",qty:4}] },
-      { name:"Iron Plate",        type:"armor",  cost:230, requires:[{name:"Iron",qty:5}] },
-      { name:"Bone Armor",        type:"armor",  cost:210, requires:[{name:"Bone Fragments",qty:4}] },
-      { name:"Fur Coat",          type:"armor",  cost:190, requires:[{name:"Fur",qty:3}] },
-      { name:"Hide Armor",        type:"armor",  cost:205, requires:[{name:"Tough Hide",qty:4}] },
-      { name:"Feather Cloak",     type:"armor",  cost:190, requires:[{name:"Feathers",qty:3}] },
-      { name:"Tin Armor",         type:"armor",  cost:215, requires:[{name:"Tin",qty:4}] },
-      { name:"Copper Plate",      type:"armor",  cost:210, requires:[{name:"Copper",qty:4}] },
-      { name:"Marble Guard",      type:"armor",  cost:230, requires:[{name:"Marble",qty:3}] },
-      { name:"Obsidian Layer",    type:"armor",  cost:240, requires:[{name:"Obsidian",qty:3}] },
+      { name:"Rusted Greatsword", type:"weapon", cost:2200,  requires:[{name:"Iron",qty:10},{name:"Tough Hide",qty:4}] },
+      { name:"Crude Bow",         type:"weapon", cost:2100,  requires:[{name:"Iron",qty:8},{name:"Leather",qty:2}] },
+      { name:"Iron Dagger",       type:"weapon", cost:2000,  requires:[{name:"Iron",qty:8},{name:"Bone Fragments",qty:2}] },
+      { name:"Apprentice Wand",   type:"weapon", cost:2300,  requires:[{name:"Quartz",qty:6},{name:"Animal Fat",qty:4}] },
+      { name:"Shortblade",        type:"weapon", cost:2100,  requires:[{name:"Iron",qty:10}] },
+      { name:"Bone Mace",         type:"weapon", cost:2150,  requires:[{name:"Bone Fragments",qty:8},{name:"Iron",qty:2}] },
+      { name:"Hunter Knife",      type:"weapon", cost:2100,  requires:[{name:"Iron",qty:6},{name:"Fur",qty:4}] },
+      { name:"Quartz Rod",        type:"weapon", cost:2400,  requires:[{name:"Quartz",qty:8},{name:"Limestone",qty:4}] },
+      { name:"Tin Blade",         type:"weapon", cost:2000,  requires:[{name:"Tin",qty:10}] },
+      { name:"Feather Knife",     type:"weapon", cost:2150,  requires:[{name:"Iron",qty:6},{name:"Feathers",qty:4}] },
+      { name:"Leather Vest",      type:"armor",  cost:2000,  requires:[{name:"Leather",qty:10}] },
+      { name:"Iron Plate",        type:"armor",  cost:2300,  requires:[{name:"Iron",qty:10}] },
+      { name:"Bone Armor",        type:"armor",  cost:2100,  requires:[{name:"Bone Fragments",qty:10}] },
+      { name:"Fur Coat",          type:"armor",  cost:1900,  requires:[{name:"Fur",qty:9}] },
+      { name:"Hide Armor",        type:"armor",  cost:2050,  requires:[{name:"Tough Hide",qty:10}] },
+      { name:"Feather Cloak",     type:"armor",  cost:1900,  requires:[{name:"Feathers",qty:9}] },
+      { name:"Tin Armor",         type:"armor",  cost:2150,  requires:[{name:"Tin",qty:10}] },
+      { name:"Copper Plate",      type:"armor",  cost:2100,  requires:[{name:"Copper",qty:10}] },
+      { name:"Marble Guard",      type:"armor",  cost:2300,  requires:[{name:"Marble",qty:12}] },
+      { name:"Obsidian Layer",    type:"armor",  cost:2400,  requires:[{name:"Obsidian",qty:15}] },
     ],
     D: [
-      { name:"Obsidian Greatsword", type:"weapon", cost:460, requires:[{name:"Obsidian",qty:5},{name:"Coal",qty:2}] },
-      { name:"Silver Wand",         type:"weapon", cost:440, requires:[{name:"Silver",qty:4},{name:"Tough Hide",qty:2}] },
-      { name:"Longbow",             type:"weapon", cost:430, requires:[{name:"Leather",qty:5},{name:"Iron",qty:2}] },
-      { name:"Twin Daggers",        type:"weapon", cost:435, requires:[{name:"Fangs",qty:5},{name:"Copper",qty:2}] },
-      { name:"Warhammer",           type:"weapon", cost:470, requires:[{name:"Bronze",qty:6},{name:"Bone Fragments",qty:2}] },
-      { name:"Arc Rod",             type:"weapon", cost:450, requires:[{name:"Quartz",qty:4},{name:"Feathers",qty:3}] },
-      { name:"Bronze Blade",        type:"weapon", cost:430, requires:[{name:"Bronze",qty:3},{name:"Leather",qty:2}] },
-      { name:"Hunter Bow",          type:"weapon", cost:425, requires:[{name:"Fur",qty:4},{name:"Tin",qty:2}] },
-      { name:"Spiked Mace",         type:"weapon", cost:445, requires:[{name:"Marble",qty:5},{name:"Bone Fragments",qty:2}] },
-      { name:"Mystic Knife",        type:"weapon", cost:455, requires:[{name:"Claws",qty:3},{name:"Horns",qty:2}] },
-      { name:"Steel Armor",         type:"armor",  cost:460, requires:[{name:"Iron",qty:6},{name:"Silver",qty:2}] },
-      { name:"Reinforced Leather",  type:"armor",  cost:420, requires:[{name:"Leather",qty:4},{name:"Coal",qty:1}] },
-      { name:"Silver Guard",        type:"armor",  cost:450, requires:[{name:"Silver",qty:5},{name:"Animal Fat",qty:1}] },
-      { name:"Bone Plate",          type:"armor",  cost:470, requires:[{name:"Bone Fragments",qty:5},{name:"Marble",qty:2}] },
-      { name:"Fur Armor",           type:"armor",  cost:410, requires:[{name:"Fur",qty:3},{name:"Limestone",qty:2}] },
-      { name:"Horned Armor",        type:"armor",  cost:475, requires:[{name:"Horns",qty:5},{name:"Tin",qty:2}] },
-      { name:"Scale Vest",          type:"armor",  cost:445, requires:[{name:"Tough Hide",qty:4},{name:"Silver",qty:2}] },
-      { name:"Bronze Armor",        type:"armor",  cost:460, requires:[{name:"Bronze",qty:4},{name:"Copper",qty:2}] },
-      { name:"Obsidian Plate",      type:"armor",  cost:480, requires:[{name:"Obsidian",qty:4},{name:"Claws",qty:3}] },
-      { name:"Marble Armor",        type:"armor",  cost:440, requires:[{name:"Marble",qty:4},{name:"Bone Fragments",qty:2}] },
+      { name:"Obsidian Greatsword", type:"weapon", cost:8600,  requires:[{name:"Obsidian",qty:20},{name:"Coal",qty:10}] },
+      { name:"Silver Wand",         type:"weapon", cost:8400,  requires:[{name:"Silver",qty:20},{name:"Tough Hide",qty:8}] },
+      { name:"Longbow",             type:"weapon", cost:8300,  requires:[{name:"Leather",qty:20},{name:"Iron",qty:8}] },
+      { name:"Twin Daggers",        type:"weapon", cost:8350,  requires:[{name:"Fangs",qty:20},{name:"Copper",qty:8}] },
+      { name:"Warhammer",           type:"weapon", cost:8700,  requires:[{name:"Bronze",qty:25},{name:"Bone Fragments",qty:10}] },
+      { name:"Arc Rod",             type:"weapon", cost:8500,  requires:[{name:"Quartz",qty:20},{name:"Feathers",qty:12}] },
+      { name:"Bronze Blade",        type:"weapon", cost:8300,  requires:[{name:"Bronze",qty:15},{name:"Leather",qty:10}] },
+      { name:"Hunter Bow",          type:"weapon", cost:8250,  requires:[{name:"Fur",qty:15},{name:"Tin",qty:10}] },
+      { name:"Spiked Mace",         type:"weapon", cost:8450,  requires:[{name:"Marble",qty:20},{name:"Bone Fragments",qty:10}] },
+      { name:"Mystic Knife",        type:"weapon", cost:8550,  requires:[{name:"Claws",qty:15},{name:"Horns",qty:10}] },
+      { name:"Steel Armor",         type:"armor",  cost:8600,  requires:[{name:"Iron",qty:20},{name:"Silver",qty:10}] },
+      { name:"Reinforced Leather",  type:"armor",  cost:8200,  requires:[{name:"Leather",qty:14},{name:"Coal",qty:8}] },
+      { name:"Silver Guard",        type:"armor",  cost:8500,  requires:[{name:"Silver",qty:20},{name:"Animal Fat",qty:10}] },
+      { name:"Bone Plate",          type:"armor",  cost:8700,  requires:[{name:"Bone Fragments",qty:25},{name:"Marble",qty:10}] },
+      { name:"Fur Armor",           type:"armor",  cost:8100,  requires:[{name:"Fur",qty:10},{name:"Limestone",qty:10}] },
+      { name:"Horned Armor",        type:"armor",  cost:8750,  requires:[{name:"Horns",qty:28},{name:"Tin",qty:15}] },
+      { name:"Scale Vest",          type:"armor",  cost:8450,  requires:[{name:"Tough Hide",qty:15},{name:"Silver",qty:10}] },
+      { name:"Bronze Armor",        type:"armor",  cost:8600,  requires:[{name:"Bronze",qty:20},{name:"Copper",qty:15}] },
+      { name:"Obsidian Plate",      type:"armor",  cost:8800,  requires:[{name:"Obsidian",qty:30},{name:"Claws",qty:10}] },
+      { name:"Marble Armor",        type:"armor",  cost:8400,  requires:[{name:"Marble",qty:20},{name:"Bone Fragments",qty:10}] },
     ],
     C: [
-      { name:"Silver Greatsword", type:"weapon", cost:820,  requires:[{name:"Silver",qty:7},{name:"Spirit Venison",qty:2}] },
-      { name:"Arcane Staff",      type:"weapon", cost:880,  requires:[{name:"Quartz",qty:8},{name:"Shadow Hide",qty:3}] },
-      { name:"Composite Bow",     type:"weapon", cost:840,  requires:[{name:"Leather",qty:7},{name:"Gold",qty:3}] },
-      { name:"Assassin Daggers",  type:"weapon", cost:860,  requires:[{name:"Fangs",qty:7},{name:"Palladium",qty:2}] },
-      { name:"Mystic Blade",      type:"weapon", cost:830,  requires:[{name:"Marble",qty:6},{name:"Spirit Venison",qty:2}] },
-      { name:"War Maul",          type:"weapon", cost:920,  requires:[{name:"Obsidian",qty:8},{name:"Mythril",qty:3}] },
-      { name:"Spellknife",        type:"weapon", cost:870,  requires:[{name:"Quartz",qty:7},{name:"Shadow Hide",qty:2}] },
-      { name:"Dagon Bow",         type:"weapon", cost:850,  requires:[{name:"Silver",qty:7},{name:"Drake Meat",qty:3}] },
-      { name:"Bronze Cleaver",    type:"weapon", cost:840,  requires:[{name:"Bronze",qty:5},{name:"Palladium",qty:3}] },
-      { name:"Dark Rod",          type:"weapon", cost:950,  requires:[{name:"Quartz",qty:7},{name:"Obsidian",qty:7}] },
-      { name:"Shining Armor",     type:"armor",  cost:900,  requires:[{name:"Silver",qty:8},{name:"Spirit Venison",qty:5}] },
-      { name:"Bronze Cuirass",    type:"armor",  cost:930,  requires:[{name:"Bronze",qty:9},{name:"Gold",qty:5}] },
-      { name:"Jagged Chainmail",  type:"armor",  cost:880,  requires:[{name:"Claws",qty:7},{name:"Palladium",qty:3}] },
-      { name:"Bone Fortress",     type:"armor",  cost:940,  requires:[{name:"Horns",qty:9},{name:"Mythril",qty:5}] },
-      { name:"Obsidian Vest",     type:"armor",  cost:960,  requires:[{name:"Obsidian",qty:10},{name:"Shadow Hide",qty:5}] },
-      { name:"Reptilian Scale",   type:"armor",  cost:890,  requires:[{name:"Marble",qty:7},{name:"Drake Meat",qty:4}] },
-      { name:"Shadow Cloak",      type:"armor",  cost:860,  requires:[{name:"Fur",qty:6},{name:"Shadow Hide",qty:3}] },
-      { name:"Golden Cape",       type:"armor",  cost:840,  requires:[{name:"Leather",qty:6},{name:"Gold",qty:2}] },
-      { name:"Warlord Hide",      type:"armor",  cost:910,  requires:[{name:"Horns",qty:8},{name:"Palladium",qty:5}] },
-      { name:"Arcane Shell",      type:"armor",  cost:980,  requires:[{name:"Obsidian",qty:10},{name:"Spirit Venison",qty:6}] },
+      { name:"Silver Greatsword", type:"weapon", cost:32800,  requires:[{name:"Silver",qty:56},{name:"Spirit Venison",qty:16}] },
+      { name:"Arcane Staff",      type:"weapon", cost:35200,  requires:[{name:"Quartz",qty:64},{name:"Shadow Hide",qty:24}] },
+      { name:"Composite Bow",     type:"weapon", cost:33600,  requires:[{name:"Leather",qty:56},{name:"Gold",qty:24}] },
+      { name:"Assassin Daggers",  type:"weapon", cost:34400,  requires:[{name:"Fangs",qty:55},{name:"Palladium",qty:16}] },
+      { name:"Mystic Blade",      type:"weapon", cost:33200,  requires:[{name:"Marble",qty:48},{name:"Spirit Venison",qty:16}] },
+      { name:"War Maul",          type:"weapon", cost:36800,  requires:[{name:"Obsidian",qty:64},{name:"Mythril",qty:24}] },
+      { name:"Spellknife",        type:"weapon", cost:34800,  requires:[{name:"Quartz",qty:56},{name:"Shadow Hide",qty:16}] },
+      { name:"Dagon Bow",         type:"weapon", cost:34000,  requires:[{name:"Silver",qty:56},{name:"Drake Meat",qty:24}] },
+      { name:"Bronze Cleaver",    type:"weapon", cost:33600,  requires:[{name:"Bronze",qty:40},{name:"Palladium",qty:24}] },
+      { name:"Dark Rod",          type:"weapon", cost:38000,  requires:[{name:"Quartz",qty:56},{name:"Obsidian",qty:40}] },
+      { name:"Shining Armor",     type:"armor",  cost:36000,  requires:[{name:"Silver",qty:64},{name:"Spirit Venison",qty:40}] },
+      { name:"Bronze Cuirass",    type:"armor",  cost:37200,  requires:[{name:"Bronze",qty:72},{name:"Gold",qty:50}] },
+      { name:"Jagged Chainmail",  type:"armor",  cost:35200,  requires:[{name:"Claws",qty:56},{name:"Palladium",qty:24}] },
+      { name:"Bone Fortress",     type:"armor",  cost:37600,  requires:[{name:"Horns",qty:72},{name:"Mythril",qty:40}] },
+      { name:"Obsidian Vest",     type:"armor",  cost:38400,  requires:[{name:"Obsidian",qty:80},{name:"Shadow Hide",qty:40}] },
+      { name:"Reptilian Scale",   type:"armor",  cost:35600,  requires:[{name:"Marble",qty:56},{name:"Drake Meat",qty:32}] },
+      { name:"Shadow Cloak",      type:"armor",  cost:34400,  requires:[{name:"Fur",qty:48},{name:"Shadow Hide",qty:24}] },
+      { name:"Golden Cape",       type:"armor",  cost:33600,  requires:[{name:"Leather",qty:48},{name:"Gold",qty:16}] },
+      { name:"Warlord Hide",      type:"armor",  cost:36400,  requires:[{name:"Horns",qty:64},{name:"Palladium",qty:40}] },
+      { name:"Arcane Shell",      type:"armor",  cost:39200,  requires:[{name:"Obsidian",qty:80},{name:"Spirit Venison",qty:48}] },
     ],
     B: [
-      { name:"Myth-Blade",       type:"weapon", cost:2200, requires:[{name:"Mythril",qty:15},{name:"Adamantium",qty:5}] },
-      { name:"High-Scepter",     type:"weapon", cost:2250, requires:[{name:"Spirit Venison",qty:17},{name:"Adamantium",qty:5}] },
-      { name:"Draconic Bow",     type:"weapon", cost:2180, requires:[{name:"Drake Meat",qty:15},{name:"Dragon Scales",qty:4}] },
-      { name:"Shadow-Strike",    type:"weapon", cost:2220, requires:[{name:"Shadow Hide",qty:14},{name:"Titanium",qty:5}] },
-      { name:"Warbreaker",       type:"weapon", cost:2300, requires:[{name:"Palladium",qty:19},{name:"Titanium",qty:6}] },
-      { name:"Mystic Jian",      type:"weapon", cost:2240, requires:[{name:"Spirit Venison",qty:14},{name:"Dragon Scales",qty:5}] },
-      { name:"Phantom Longbow",  type:"weapon", cost:2210, requires:[{name:"Gold",qty:16},{name:"Cyclops Eye",qty:3}] },
-      { name:"Spellhammer",      type:"weapon", cost:2260, requires:[{name:"Shadow Hide",qty:18},{name:"Cyclops Eye",qty:3}] },
-      { name:"Venom Daggers",    type:"weapon", cost:2230, requires:[{name:"Palladium",qty:15},{name:"Adamantium",qty:4}] },
-      { name:"Ancient Wand",     type:"weapon", cost:2320, requires:[{name:"Mythril",qty:20},{name:"Cyclops Eye",qty:4}] },
-      { name:"Void-Spell Armor",    type:"armor",  cost:2300, requires:[{name:"Shadow Hide",qty:17},{name:"Titanium",qty:10}] },
-      { name:"Golden Scales",       type:"armor",  cost:2200, requires:[{name:"Gold",qty:15},{name:"Dragon Scales",qty:7}] },
-      { name:"Night Cloak",         type:"armor",  cost:2250, requires:[{name:"Shadow Hide",qty:14},{name:"Cyclops Eye",qty:9}] },
-      { name:"Spirit-Ward",         type:"armor",  cost:2350, requires:[{name:"Spirit Venison",qty:18},{name:"Adamantium",qty:12}] },
-      { name:"Paladin's Mantle",    type:"armor",  cost:2180, requires:[{name:"Palladium",qty:10},{name:"Dragon Scales",qty:6}] },
-      { name:"Draconic Robe",       type:"armor",  cost:2220, requires:[{name:"Drake Meat",qty:15},{name:"Dragon Scales",qty:7}] },
-      { name:"Titanic Hide",        type:"armor",  cost:2400, requires:[{name:"Palladium",qty:20},{name:"Titanium",qty:15}] },
-      { name:"Golden Warplate",     type:"armor",  cost:2380, requires:[{name:"Gold",qty:20},{name:"Adamantium",qty:12}] },
-      { name:"Mythic Cuirass",      type:"armor",  cost:2240, requires:[{name:"Mythril",qty:14},{name:"Cyclops Eye",qty:7}] },
-      { name:"Quintessence Mantle", type:"armor",  cost:2450, requires:[{name:"Spirit Venison",qty:20},{name:"Shadow Hide",qty:20}] },
+      { name:"Myth-Blade",       type:"weapon", cost:163000, requires:[{name:"Mythril",qty:150},{name:"Adamantium",qty:50}] },
+      { name:"High-Scepter",     type:"weapon", cost:163500, requires:[{name:"Spirit Venison",qty:170},{name:"Adamantium",qty:50}] },
+      { name:"Draconic Bow",     type:"weapon", cost:160000, requires:[{name:"Drake Meat",qty:150},{name:"Dragon Scales",qty:40}] },
+      { name:"Shadow-Strike",    type:"weapon", cost:163200, requires:[{name:"Shadow Hide",qty:140},{name:"Titanium",qty:50}] },
+      { name:"Warbreaker",       type:"weapon", cost:166000, requires:[{name:"Palladium",qty:190},{name:"Titanium",qty:60}] },
+      { name:"Mystic Jian",      type:"weapon", cost:163400, requires:[{name:"Spirit Venison",qty:140},{name:"Dragon Scales",qty:50}] },
+      { name:"Phantom Longbow",  type:"weapon", cost:163100, requires:[{name:"Gold",qty:160},{name:"Cyclops Eye",qty:30}] },
+      { name:"Spellhammer",      type:"weapon", cost:163600, requires:[{name:"Shadow Hide",qty:180},{name:"Cyclops Eye",qty:30}] },
+      { name:"Venom Daggers",    type:"weapon", cost:163300, requires:[{name:"Palladium",qty:150},{name:"Adamantium",qty:40}] },
+      { name:"Ancient Wand",     type:"weapon", cost:166200, requires:[{name:"Mythril",qty:200},{name:"Cyclops Eye",qty:40}] },
+      { name:"Void-Spell Armor",    type:"armor",  cost:166000, requires:[{name:"Shadow Hide",qty:170},{name:"Titanium",qty:100}] },
+      { name:"Golden Scales",       type:"armor",  cost:163000, requires:[{name:"Gold",qty:150},{name:"Dragon Scales",qty:70}] },
+      { name:"Night Cloak",         type:"armor",  cost:163500, requires:[{name:"Shadow Hide",qty:140},{name:"Cyclops Eye",qty:90}] },
+      { name:"Spirit-Ward",         type:"armor",  cost:166500, requires:[{name:"Spirit Venison",qty:180},{name:"Adamantium",qty:120}] },
+      { name:"Paladin's Mantle",    type:"armor",  cost:160800, requires:[{name:"Palladium",qty:100},{name:"Dragon Scales",qty:60}] },
+      { name:"Draconic Robe",       type:"armor",  cost:163200, requires:[{name:"Drake Meat",qty:150},{name:"Dragon Scales",qty:70}] },
+      { name:"Titanic Hide",        type:"armor",  cost:169500, requires:[{name:"Palladium",qty:200},{name:"Titanium",qty:150}] },
+      { name:"Golden Warplate",     type:"armor",  cost:166800, requires:[{name:"Gold",qty:200},{name:"Adamantium",qty:120}] },
+      { name:"Mythic Cuirass",      type:"armor",  cost:163400, requires:[{name:"Mythril",qty:140},{name:"Cyclops Eye",qty:70}] },
+      { name:"Quintessence Mantle", type:"armor",  cost:169000, requires:[{name:"Spirit Venison",qty:200},{name:"Shadow Hide",qty:150}] },
     ],
     A: [
-      { name:"Eragon-blade",  type:"weapon", cost:5600, requires:[{name:"Dragon Scales",qty:30},{name:"Adamantium",qty:12},{name:"Palladium",qty:10}] },
-      { name:"Void-Steel",    type:"weapon", cost:5500, requires:[{name:"Cyclops Eye",qty:33},{name:"Titanium",qty:10},{name:"Shadow Hide",qty:9}] },
-      { name:"Star Lance",    type:"weapon", cost:5800, requires:[{name:"Dragon Scales",qty:35},{name:"Aetherium",qty:1}] },
-      { name:"Crack",         type:"weapon", cost:5550, requires:[{name:"Adamantium",qty:27},{name:"Titanium",qty:12},{name:"Mythril",qty:14}] },
-      { name:"Divine Fall",   type:"weapon", cost:5650, requires:[{name:"Cyclops Eye",qty:31},{name:"Dragon Scales",qty:12},{name:"Gold",qty:10}] },
-      { name:"Nether-Bow",    type:"weapon", cost:5500, requires:[{name:"Adamantium",qty:27},{name:"Titanium",qty:10},{name:"Shadow Hide",qty:9}] },
-      { name:"Holy Relic",    type:"weapon", cost:5900, requires:[{name:"Dragon Scales",qty:30},{name:"Titan Heart",qty:1},{name:"Aetherium",qty:1}] },
-      { name:"Realm Cleaver", type:"weapon", cost:5750, requires:[{name:"Titanium",qty:32},{name:"Titan Heart",qty:1},{name:"Mythril",qty:12}] },
-      { name:"BeastFang",     type:"weapon", cost:5600, requires:[{name:"Dragon Scales",qty:30},{name:"Adamantium",qty:10},{name:"Drake Meat",qty:7}] },
-      { name:"Scion",         type:"weapon", cost:5700, requires:[{name:"Cyclops Eye",qty:31},{name:"Aetherium",qty:1},{name:"Spirit Venison",qty:10}] },
-      { name:"Heart Hide",        type:"armor",  cost:5700, requires:[{name:"Adamantium",qty:33},{name:"Titan Heart",qty:2}] },
-      { name:"Destroyer Mantle",  type:"armor",  cost:5900, requires:[{name:"Titanium",qty:36},{name:"Aetherium",qty:2},{name:"Gold",qty:7}] },
-      { name:"Chaos-garb",        type:"armor",  cost:5500, requires:[{name:"Cyclops Eye",qty:26},{name:"Dragon Scales",qty:10},{name:"Shadow Hide",qty:9}] },
-      { name:"Devastator Armor",  type:"armor",  cost:5400, requires:[{name:"Adamantium",qty:24},{name:"Cyclops Eye",qty:10},{name:"Drake Meat",qty:9}] },
-      { name:"Tectonic-Mail",     type:"armor",  cost:5650, requires:[{name:"Titanium",qty:30},{name:"Aetherium",qty:1}] },
-      { name:"Elemental Shroud",  type:"armor",  cost:5750, requires:[{name:"Cyclops Eye",qty:32},{name:"Aetherium",qty:1},{name:"Mythril",qty:17}] },
-      { name:"Colossal Veil",     type:"armor",  cost:5850, requires:[{name:"Titanium",qty:35},{name:"Dragon Scales",qty:13},{name:"Shadow Hide",qty:11}] },
-      { name:"Realm-Bound Tunic", type:"armor",  cost:5600, requires:[{name:"Dragon Scales",qty:30},{name:"Cyclops Eye",qty:12},{name:"Spirit Venison",qty:10}] },
-      { name:"Serpentine-Robe",   type:"armor",  cost:5450, requires:[{name:"Adamantium",qty:25},{name:"Cyclops Eye",qty:10},{name:"Drake Meat",qty:9}] },
-      { name:"Vasto-Shell",       type:"armor",  cost:5800, requires:[{name:"Titanium",qty:20},{name:"Titan Heart",qty:1},{name:"Aetherium",qty:1}] },
+      { name:"Eragon-blade",  type:"weapon", cost:684000, requires:[{name:"Dragon Scales",qty:360},{name:"Adamantium",qty:144},{name:"Palladium",qty:120}] },
+      { name:"Void-Steel",    type:"weapon", cost:682000, requires:[{name:"Cyclops Eye",qty:396},{name:"Titanium",qty:120},{name:"Shadow Hide",qty:108}] },
+      { name:"Star Lance",    type:"weapon", cost:688000, requires:[{name:"Dragon Scales",qty:420},{name:"Aetherium",qty:12}] },
+      { name:"Crack",         type:"weapon", cost:682500, requires:[{name:"Adamantium",qty:324},{name:"Titanium",qty:144},{name:"Mythril",qty:168}] },
+      { name:"Divine Fall",   type:"weapon", cost:684500, requires:[{name:"Cyclops Eye",qty:372},{name:"Dragon Scales",qty:144},{name:"Gold",qty:120}] },
+      { name:"Nether-Bow",    type:"weapon", cost:682000, requires:[{name:"Adamantium",qty:324},{name:"Titanium",qty:120},{name:"Shadow Hide",qty:108}] },
+      { name:"Holy Relic",    type:"weapon", cost:690000, requires:[{name:"Dragon Scales",qty:360},{name:"Titan Heart",qty:12},{name:"Aetherium",qty:12}] },
+      { name:"Realm Cleaver", type:"weapon", cost:686500, requires:[{name:"Titanium",qty:384},{name:"Titan Heart",qty:12},{name:"Mythril",qty:144}] },
+      { name:"BeastFang",     type:"weapon", cost:684000, requires:[{name:"Dragon Scales",qty:360},{name:"Adamantium",qty:120},{name:"Drake Meat",qty:84}] },
+      { name:"Scion",         type:"weapon", cost:686000, requires:[{name:"Cyclops Eye",qty:372},{name:"Aetherium",qty:12},{name:"Spirit Venison",qty:120}] },
+      { name:"Heart Hide",        type:"armor",  cost:686000, requires:[{name:"Adamantium",qty:396},{name:"Titan Heart",qty:24}] },
+      { name:"Destroyer Mantle",  type:"armor",  cost:690000, requires:[{name:"Titanium",qty:432},{name:"Aetherium",qty:24},{name:"Gold",qty:84}] },
+      { name:"Chaos-garb",        type:"armor",  cost:682500, requires:[{name:"Cyclops Eye",qty:312},{name:"Dragon Scales",qty:120},{name:"Shadow Hide",qty:108}] },
+      { name:"Devastator Armor",  type:"armor",  cost:680000, requires:[{name:"Adamantium",qty:288},{name:"Cyclops Eye",qty:120},{name:"Drake Meat",qty:108}] },
+      { name:"Tectonic-Mail",     type:"armor",  cost:684500, requires:[{name:"Titanium",qty:360},{name:"Aetherium",qty:12}] },
+      { name:"Elemental Shroud",  type:"armor",  cost:686500, requires:[{name:"Cyclops Eye",qty:384},{name:"Aetherium",qty:12},{name:"Mythril",qty:204}] },
+      { name:"Colossal Veil",     type:"armor",  cost:688500, requires:[{name:"Titanium",qty:420},{name:"Dragon Scales",qty:156},{name:"Shadow Hide",qty:132}] },
+      { name:"Realm-Bound Tunic", type:"armor",  cost:684000, requires:[{name:"Dragon Scales",qty:360},{name:"Cyclops Eye",qty:144},{name:"Spirit Venison",qty:120}] },
+      { name:"Serpentine-Robe",   type:"armor",  cost:680500, requires:[{name:"Adamantium",qty:300},{name:"Cyclops Eye",qty:120},{name:"Drake Meat",qty:108}] },
+      { name:"Vasto-Shell",       type:"armor",  cost:688000, requires:[{name:"Titanium",qty:240},{name:"Titan Heart",qty:12},{name:"Aetherium",qty:12}] },
     ],
     S: [
-      { name:"Abjuration", type:"weapon", cost:10500, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Titanium",qty:20},{name:"Palladium",qty:50}] },
-      { name:"Genesis",    type:"weapon", cost:10400, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Adamantium",qty:20},{name:"Spirit Venison",qty:50}] },
-      { name:"Longinus",   type:"weapon", cost:10300, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Cyclops Eye",qty:20},{name:"Gold",qty:50}] },
-      { name:"Jingu Bang", type:"weapon", cost:10600, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Dragon Scales",qty:20},{name:"Mythril",qty:50}] },
-      { name:"Ragnarok",   type:"weapon", cost:10400, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Titanium",qty:20},{name:"Shadow Hide",qty:50}] },
-      { name:"Godslayer",  type:"weapon", cost:10500, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Adamantium",qty:20},{name:"Spirit Venison",qty:50}] },
-      { name:"Durandal",   type:"weapon", cost:10300, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Dragon Scales",qty:20},{name:"Drake Meat",qty:50}] },
-      { name:"Excalibur",  type:"weapon", cost:10600, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Dragon Scales",qty:20},{name:"Gold",qty:50}] },
-      { name:"Bane",       type:"weapon", cost:10350, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Cyclops Eye",qty:20},{name:"Shadow Hide",qty:50}] },
-      { name:"Judgment",   type:"weapon", cost:10450, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Titanium",qty:20},{name:"Mythril",qty:50}] },
-      { name:"Saturn",     type:"armor",  cost:10600, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Dragon Scales",qty:20},{name:"Gold",qty:50}] },
-      { name:"Unshadowed", type:"armor",  cost:10300, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Cyclops Eye",qty:20},{name:"Spirit Venison",qty:50}] },
-      { name:"Null",       type:"armor",  cost:10400, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Titanium",qty:20},{name:"Shadow Hide",qty:50}] },
-      { name:"Dominion",   type:"armor",  cost:10700, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Adamantium",qty:20},{name:"Palladium",qty:50}] },
-      { name:"Godshroud",  type:"armor",  cost:10500, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Dragon Scales",qty:20},{name:"Gold",qty:50}] },
-      { name:"Oblivion",   type:"armor",  cost:10450, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Cyclops Eye",qty:20},{name:"Shadow Hide",qty:50}] },
-      { name:"Gungnir",    type:"armor",  cost:10550, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Titanium",qty:20},{name:"Mythril",qty:50}] },
-      { name:"Imperium",   type:"armor",  cost:10650, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Dragon Scales",qty:20},{name:"Gold",qty:50}] },
-      { name:"Worldshell", type:"armor",  cost:10400, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Adamantium",qty:20},{name:"Spirit Venison",qty:50}] },
-      { name:"Eternity",   type:"armor",  cost:10500, requires:[{name:"Aetherium",qty:10},{name:"Titan Heart",qty:10},{name:"Cyclops Eye",qty:20},{name:"Drake Meat",qty:50}] },
+      { name:"Abjuration", type:"weapon", cost:2800000, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Titanium",qty:280},{name:"Palladium",qty:700}] },
+      { name:"Genesis",    type:"weapon", cost:2800000, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Adamantium",qty:280},{name:"Spirit Venison",qty:700}] },
+      { name:"Longinus",   type:"weapon", cost:2800000, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Cyclops Eye",qty:280},{name:"Gold",qty:700}] },
+      { name:"Jingu Bang", type:"weapon", cost:2800000, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Dragon Scales",qty:280},{name:"Mythril",qty:700}] },
+      { name:"Ragnarok",   type:"weapon", cost:2800000, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Titanium",qty:280},{name:"Shadow Hide",qty:700}] },
+      { name:"Godslayer",  type:"weapon", cost:2800000, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Adamantium",qty:280},{name:"Spirit Venison",qty:700}] },
+      { name:"Durandal",   type:"weapon", cost:2800000, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Dragon Scales",qty:280},{name:"Drake Meat",qty:700}] },
+      { name:"Excalibur",  type:"weapon", cost:2800000, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Dragon Scales",qty:280},{name:"Gold",qty:700}] },
+      { name:"Bane",       type:"weapon", cost:2800000, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Cyclops Eye",qty:280},{name:"Shadow Hide",qty:700}] },
+      { name:"Judgment",   type:"weapon", cost:2800000, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Titanium",qty:280},{name:"Mythril",qty:700}] },
+      { name:"Saturn",     type:"armor",  cost:2800000, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Dragon Scales",qty:280},{name:"Gold",qty:700}] },
+      { name:"Unshadowed", type:"armor",  cost:2800000, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Cyclops Eye",qty:280},{name:"Spirit Venison",qty:700}] },
+      { name:"Null",       type:"armor",  cost:2800000, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Titanium",qty:280},{name:"Shadow Hide",qty:700}] },
+      { name:"Dominion",   type:"armor",  cost:2800000, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Adamantium",qty:280},{name:"Palladium",qty:700}] },
+      { name:"Godshroud",  type:"armor",  cost:2800000, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Dragon Scales",qty:280},{name:"Gold",qty:700}] },
+      { name:"Oblivion",   type:"armor",  cost:2800000, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Cyclops Eye",qty:280},{name:"Shadow Hide",qty:700}] },
+      { name:"Gungnir",    type:"armor",  cost:2800000, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Titanium",qty:280},{name:"Mythril",qty:700}] },
+      { name:"Imperium",   type:"armor",  cost:2800000, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Dragon Scales",qty:280},{name:"Gold",qty:700}] },
+      { name:"Worldshell", type:"armor",  cost:2800000, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Adamantium",qty:280},{name:"Spirit Venison",qty:700}] },
+      { name:"Eternity",   type:"armor",  cost:2800000, requires:[{name:"Aetherium",qty:140},{name:"Titan Heart",qty:140},{name:"Cyclops Eye",qty:280},{name:"Drake Meat",qty:700}] },
     ],
   };
 
@@ -443,7 +444,6 @@ function getCraftingRecipes() {
 
   const alchemist = [
     // ── HP Potions ───────────────────────────────────────────────────────────
-    // Source: Forge_of_Legends.docx — Potion Crafting Costs table
     { name:"Minor HP Potion",       type:"consumable", cost:100,  requires:[{name:"Mint Leaves",qty:2},{name:"Wood",qty:2},{name:"Silverleaf",qty:2}] },
     { name:"Standard HP Potion",    type:"consumable", cost:500,  requires:[{name:"Goldroot",qty:2},{name:"Spirit Herb",qty:2}] },
     { name:"Greater HP Potion",     type:"consumable", cost:1000, requires:[{name:"Phoenix Bloom",qty:2},{name:"Void Orchid",qty:2}] },
@@ -462,26 +462,30 @@ function getCraftingRecipes() {
   ];
 
   const cook = [
-    { name:"Grilled Meat Skewer",    type:"consumable", cost:30,  requires:[{name:"Meat",qty:1},{name:"Garlic",qty:1},{name:"Apples",qty:1}] },
-    { name:"Spiced Steak",           type:"consumable", cost:60,  requires:[{name:"Meat",qty:2},{name:"Golden Pears",qty:1},{name:"Bitter Root",qty:1}] },
-    { name:"Hunter's Feast",         type:"consumable", cost:140, requires:[{name:"Spirit Plum",qty:1},{name:"Shadow Fish",qty:1},{name:"Meat",qty:3}] },
-    { name:"Dragonfire Roast",       type:"consumable", cost:350, requires:[{name:"Dragonfruit",qty:1},{name:"Black Unagi",qty:1},{name:"Raw Meat",qty:2}] },
-    { name:"Eden Banquet",           type:"consumable", cost:900, requires:[{name:"Eden's Tear",qty:1},{name:"Cosmic Leviathan",qty:1},{name:"Ying Koi",qty:1},{name:"Moon Grapes",qty:1}] },
-    { name:"Herb Fish Soup",         type:"consumable", cost:30,  requires:[{name:"Trout",qty:1},{name:"Mushroom",qty:1},{name:"Melons",qty:1}] },
-    { name:"Glow Stew",              type:"consumable", cost:60,  requires:[{name:"Glowfish",qty:2},{name:"Moon Grapes",qty:1}] },
-    { name:"Mystic Broth",           type:"consumable", cost:140, requires:[{name:"Shadowfish",qty:1},{name:"Spirit Plum",qty:2}] },
-    { name:"Celestial Sashimi",      type:"consumable", cost:350, requires:[{name:"Celestial Whale",qty:3},{name:"Celestial Fig",qty:1},{name:"Red Minnow",qty:1}] },
-    { name:"Cosmic Infusion",        type:"consumable", cost:900, requires:[{name:"Cosmic Leviathan",qty:1},{name:"Eden's Tear",qty:1},{name:"Spotted Eel",qty:1},{name:"Sunfruit",qty:1}] },
-    { name:"Roasted Carp",           type:"consumable", cost:30,  requires:[{name:"Carp",qty:1},{name:"Garlic",qty:1},{name:"Apples",qty:1}] },
-    { name:"Ironbody Stew",          type:"consumable", cost:60,  requires:[{name:"Silverfin",qty:2},{name:"Bitter Root",qty:1}] },
-    { name:"Frosthide Meal",         type:"consumable", cost:140, requires:[{name:"Ying Koi",qty:3},{name:"Frost Apples",qty:1}] },
-    { name:"Titan Shell Dish",       type:"consumable", cost:350, requires:[{name:"Black Unagi",qty:2},{name:"Dragonfruit",qty:1},{name:"Coral Snapper",qty:1}] },
-    { name:"Eternal Fortress Feast", type:"consumable", cost:900, requires:[{name:"Cosmic Leviathan",qty:1},{name:"Eden's Tear",qty:1},{name:"Flamefish",qty:1},{name:"Glowfish",qty:1}] },
-    { name:"Fried Sardine",          type:"consumable", cost:30,  requires:[{name:"Sardine",qty:1},{name:"Blueberries",qty:1},{name:"Melons",qty:1}] },
-    { name:"Crystal Splash Meal",    type:"consumable", cost:60,  requires:[{name:"Red Minnow",qty:2},{name:"Crystal Berries",qty:1},{name:"Sunfruit",qty:1}] },
-    { name:"Assassin's Dish",        type:"consumable", cost:140, requires:[{name:"Flamefish",qty:3},{name:"Ember Fruit",qty:1}] },
-    { name:"Phantom Platter",        type:"consumable", cost:350, requires:[{name:"Black Unagi",qty:1},{name:"Celestial Fig",qty:2},{name:"Golden Pears",qty:1}] },
-    { name:"Divine Speed Feast",     type:"consumable", cost:900, requires:[{name:"Cosmic Leviathan",qty:1},{name:"Eden's Tear",qty:1},{name:"Ember Fruit",qty:1},{name:"Silverfin",qty:1}] },
+    // ── Strength Foods ───────────────────────────────────────────────────────
+    { name:"Grilled Meat Skewer",    type:"consumable", cost:300,   requires:[{name:"Raw Meat",qty:5},{name:"Garlic",qty:2},{name:"Apples",qty:2}] },
+    { name:"Spiced Steak",           type:"consumable", cost:900,   requires:[{name:"Raw Meat",qty:5},{name:"Golden Pears",qty:2},{name:"Bitter Root",qty:2}] },
+    { name:"Hunter's Feast",        type:"consumable", cost:2700,  requires:[{name:"Raw Meat",qty:5},{name:"Spirit Plum",qty:2},{name:"Shadowfish",qty:2}] },
+    { name:"Dragonfire Roast",       type:"consumable", cost:8100,  requires:[{name:"Raw Meat",qty:5},{name:"Dragonfruit",qty:2},{name:"Black Unagi",qty:2}] },
+    { name:"Eden Banquet",           type:"consumable", cost:24300, requires:[{name:"Eden's Tear",qty:1},{name:"Cosmic Leviathan",qty:1},{name:"Red Minnow",qty:5},{name:"Crystal Berries",qty:5}] },
+    // ── Intelligence Foods ───────────────────────────────────────────────────
+    { name:"Herb Fish Soup",         type:"consumable", cost:300,   requires:[{name:"Trout",qty:5},{name:"Garlic",qty:2},{name:"Melons",qty:2}] },
+    { name:"Glow Stew",              type:"consumable", cost:900,   requires:[{name:"Pufferfish",qty:5},{name:"Glowfish",qty:2},{name:"Moon Grapes",qty:2}] },
+    { name:"Mystic Broth",           type:"consumable", cost:2700,  requires:[{name:"Catfish",qty:5},{name:"Shadowfish",qty:2},{name:"Spirit Plum",qty:2}] },
+    { name:"Celestial Sashimi",      type:"consumable", cost:8100,  requires:[{name:"Mushroom",qty:5},{name:"Celestial Whale",qty:2},{name:"Celestial Fig",qty:2}] },
+    { name:"Cosmic Infusion",        type:"consumable", cost:24300, requires:[{name:"Cosmic Leviathan",qty:1},{name:"Eden's Tear",qty:1},{name:"Spotted Eel",qty:5},{name:"Sunfruit",qty:5}] },
+    // ── Defense Foods ────────────────────────────────────────────────────────
+    { name:"Roasted Carp",           type:"consumable", cost:300,   requires:[{name:"Carp",qty:5},{name:"Apples",qty:2},{name:"Mushroom",qty:2}] },
+    { name:"Ironbody Stew",          type:"consumable", cost:900,   requires:[{name:"Bone Fragments",qty:5},{name:"Silverfin",qty:2},{name:"Coral Snapper",qty:2}] },
+    { name:"Frosthide Meal",         type:"consumable", cost:2700,  requires:[{name:"Tough Hide",qty:5},{name:"Ying Koi",qty:2},{name:"Frost Apples",qty:2}] },
+    { name:"Titan Shell Dish",       type:"consumable", cost:8100,  requires:[{name:"Blueberries",qty:5},{name:"Black Unagi",qty:2},{name:"Dragonfruit",qty:2}] },
+    { name:"Eternal Fortress Feast", type:"consumable", cost:24300, requires:[{name:"Cosmic Leviathan",qty:1},{name:"Eden's Tear",qty:1},{name:"Silverfin",qty:5},{name:"Moon Grapes",qty:5}] },
+    // ── Dexterity Foods ──────────────────────────────────────────────────────
+    { name:"Fried Sardine",          type:"consumable", cost:300,   requires:[{name:"Sardine",qty:5},{name:"Blueberries",qty:2},{name:"Melons",qty:2}] },
+    { name:"Crystal Splash Meal",    type:"consumable", cost:900,   requires:[{name:"Melon",qty:5},{name:"Crystal Berries",qty:2},{name:"Sunfruit",qty:2}] },
+    { name:"Assassin's Dish",       type:"consumable", cost:2700,  requires:[{name:"Garlic",qty:5},{name:"Flamefish",qty:2},{name:"Ember Fruit",qty:2}] },
+    { name:"Phantom Platter",        type:"consumable", cost:8100,  requires:[{name:"Feathers",qty:5},{name:"Black Unagi",qty:2},{name:"Celestial Fig",qty:2}] },
+    { name:"Divine Speed Feast",     type:"consumable", cost:24300, requires:[{name:"Cosmic Leviathan",qty:1},{name:"Eden's Tear",qty:1},{name:"Golden Pears",qty:5},{name:"Coral Snapper",qty:5}] },
   ];
 
   return { blacksmith, alchemist, cook, enchanter: [] };
@@ -1114,6 +1118,25 @@ exports.bestowResources = onCall(CALL_OPTS, async (request) => {
     }
     return updates;
   });
+  // Write a bestow record so deities can review history per worshipper
+  try {
+    const deitySnap = await db.collection('characters').doc(uid).get();
+    const deityName = deitySnap.data()?.name || 'A Deity';
+    await db.collection('deityNotifications').add({
+      type:       'bestow',
+      deityUid:   uid,
+      deityName,
+      playerUid:  targetUid,
+      playerName: targetName,
+      items:      items || [],
+      gold:       gold  || 0,
+      read:       true,   // bestow records are informational — no badge needed
+      createdAt:  FieldValue.serverTimestamp(),
+    });
+  } catch(notifErr) {
+    console.warn('[bestowResources] Notification write failed:', notifErr.message);
+  }
+
   return { success:true, message:`Resources bestowed upon ${targetName}.` };
 });
 
@@ -1713,6 +1736,37 @@ exports.joinDevilsHandGame = onCall(CALL_OPTS, async (request) => {
 
     return { success: true, gameId: lobbySnap.docs[0].id, baseStake };
   });
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  SCHEDULED: Expire overdue quests (story + faction) every 5 min
+// ═══════════════════════════════════════════════════════════════
+
+exports.expireQuests = onSchedule({
+  schedule:  "every 5 minutes",
+  timeZone:  "Europe/London",
+  region:    "europe-west1",
+}, async () => {
+  const now   = new Date();
+  const batch = db.batch();
+  let   count = 0;
+
+  // Story quests
+  const sqSnap = await db.collection("storyQuests")
+    .where("status",    "==", "active")
+    .where("expiresAt", "<=", now)
+    .get();
+  sqSnap.forEach(d => { batch.update(d.ref, { status: "expired" }); count++; });
+
+  // Faction missions
+  const fqSnap = await db.collection("factionMissions")
+    .where("status",    "==", "active")
+    .where("expiresAt", "<=", now)
+    .get();
+  fqSnap.forEach(d => { batch.update(d.ref, { status: "expired" }); count++; });
+
+  if (count > 0) await batch.commit();
+  console.log(`[expireQuests] Expired ${count} quest(s).`);
 });
 
 exports.autoArchiveWorldEvents = require('./autoArchiveWorldEvents').autoArchiveWorldEvents;

@@ -583,9 +583,16 @@
         </div>
         <!-- Edit modal will be injected dynamically -->
       </div>
-      <div class="card" style="margin-bottom:18px">
-        <div class="card-title">CURRENT FACTION LEADERS</div>
-        <div id="faction-leader-list"><p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">No factions claimed yet.</p></div>
+      <!-- Faction leader chat — always visible at top of faction panel when deity has a leader profile -->
+      <div id="faction-leader-chat" style="margin-bottom:18px"></div>
+      <div class="fq-post-collapsible" id="faction-leaders-collapsible" style="margin-bottom:18px">
+        <button class="fq-post-toggle" onclick="window._toggleFactionLeadersSection()">
+          <span>CURRENT FACTION LEADERS</span>
+          <span class="fq-post-arrow" id="faction-leaders-arrow">▼</span>
+        </button>
+        <div class="fq-post-body" id="faction-leaders-body">
+          <div id="faction-leader-list"><p style="color:var(--text-dim);font-style:italic;font-size:0.85rem">No factions claimed yet.</p></div>
+        </div>
       </div>
       <!-- Collapsible post form -->
       <div class="fq-post-collapsible" id="fq-post-collapsible">
@@ -1121,4 +1128,4 @@
       </div>
     </div>
   </div>
-</html>
+</html> 

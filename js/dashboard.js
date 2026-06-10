@@ -319,8 +319,6 @@ async function loadFirestoreBosses() {
   }
 }
 
-
-
 // Helper: check if player can solo boss
 function canSoloBoss(char) {
   return getRankIdx(char.rank) >= 1 && (char.gold || 0) >= 20000;
@@ -330,8 +328,6 @@ function canSoloBoss(char) {
 function isValidParty(party) {
   return Array.isArray(party) && party.length >= 3;
 }
-
-
 
 let _party = null; // { id, leader, members: [{uid, name, avatar}], code }
 let _partyPicFile = null; // persists across re-renders so preview survives Firestore snapshots
@@ -524,7 +520,6 @@ function _pickNewLeader(members) {
     overlay.addEventListener('click', e => { if (e.target === overlay) { overlay.remove(); resolve(null); } });
   });
 }
-
 
 window.deleteParty = async function() {
   if (!_partyId || !_party || _party.leader !== _charData.uid) return window.showToast('Only leader can delete.');
@@ -1310,7 +1305,6 @@ window._resolveEquipGrade = function(name) {
 //  EQUIP MODAL LOGIC
 // ═══════════════════════════════════════════════════
 
-
 // ── Equipment panel renderer ──────────────────────────────────────────────────
 // Renders each equipped slot as its own card: icon, name, grade badge,
 // enchant badge, base stats + enchant bonus.
@@ -1682,7 +1676,6 @@ window.renderFactionQuestsPanel = function(force) {
         });
       }
 
-
       if (_factionQuestSubUnsub) { _factionQuestSubUnsub(); _factionQuestSubUnsub = null; }
       if (questIds.length) {
         const fqQuery = query(collection(db, 'factionQuestSubmissions'), where('uid', '==', _uid), where('questId', 'in', questIds));
@@ -1698,21 +1691,31 @@ window.renderFactionQuestsPanel = function(force) {
             if (data.status === 'approved' && !data.rewarded && !window._factionQuestDone[data.questId]) {
               const quest = snap.docs.find(doc => doc.id === data.questId)?.data();
               if (quest) {
-                // Await the flag write — only apply reward if it succeeds.
-                // If it fails (network/rules), we skip this cycle; the next
-                // listener fire will retry cleanly with no duplicate risk.
+                // Mirror story quest pattern exactly:
+                // 1. Write rewarded:true FIRST — if it fails, skip this cycle so we
+                //    never double-deliver. Next listener fire will retry cleanly.
+                // 2. Await _applyReward/_applyRewardMulti — previously these were
+                //    floating promises inside .then(), so errors were silently dropped
+                //    and the reward never landed. Wrapping in an async IIFE lets us
+                //    await them and catch errors without blocking the forEach.
                 updateDoc(d.ref, { rewarded: true })
-                  .then(() => {
+                  .then(async () => {
                     window._factionQuestDone[data.questId] = true;
-                    // Deliver ALL reward items, not just the first
-                    if (quest.reward?.items?.length > 1) {
-                      _applyRewardMulti(quest.reward?.exp||0, quest.reward?.gold||0, quest.reward.items);
+                    const xp   = quest.reward?.exp  || quest.reward?.xp  || 0;
+                    const gold = quest.reward?.gold || 0;
+                    const items = quest.reward?.items || [];
+                    // Deliver ALL reward items — multi-item or single, matching story quest logic
+                    if (items.length > 1) {
+                      await _applyRewardMulti(xp, gold, items);
                     } else {
-                      _applyReward(quest.reward?.exp||0, quest.reward?.gold||0, (quest.reward?.items?.[0]||null));
+                      await _applyReward(xp, gold, items[0] || null);
                     }
-                    window.showToast(`✅ Faction Quest complete: ${quest.title}! +${quest.reward?.gold||0} gold · +${quest.reward?.exp||0} EXP`, "success");
+                    window.showToast(`✅ Faction Quest complete: ${quest.title}! +${gold} gold · +${xp} EXP`, "success");
+                    logActivity('🛡️', `<b>Faction Quest Complete:</b> ${quest.title}. +${gold}💰 +${xp} EXP`, '#c9a84c');
+                    // Log completion on the mission doc for the deity log (mirrors story quest)
+                    window.logFactionQuestCompletion?.(data.questId);
                   })
-                  .catch(e => console.warn('[Quest] Could not mark rewarded, skipping reward this cycle:', e));
+                  .catch(e => console.warn('[FactionQuest] Could not mark rewarded, skipping reward this cycle:', e));
               }
             }
           });
@@ -2017,7 +2020,6 @@ window.updateQuestPanels = function() {
 };
 
 // Call updateQuestPanels() after _charData is loaded/updated
-
 
 // ═══════════════════════════════════════════════════
 //  STATIC DATA
@@ -3948,9 +3950,6 @@ const ITEM_ICONS = {
   "Palladium":                "🔵", "Obsidian":                 "🖤", "Marble":                   "🏛️",
   "Quartz":                   "💎", "Titanium":                 "🔩", "Adamantium":               "⚙️",
   "Aetherium":                "🌌",
-  "Runestone Fragment":       "🔷", "Starstone":                "⭐", "Darkore":                  "🌑",
-  "Ancient Ore":              "🏺", "Core Fragment":            "🔮",
-  "Primordial Stone":         "🌋",
 
   // ── FORAGER RESOURCES ────────────────────────────────────
   "Apples":                   "🍎", "Blueberries":              "🫐", "Melons":                   "🍈",
@@ -3967,8 +3966,6 @@ const ITEM_ICONS = {
   // ── HERBALIST RESOURCES ──────────────────────────────────
   "Mint Leaves":              "🌿", "Soft Bark":                "🪵", "Wild Herbs":               "🌱",
   "Mushroom":                 "🍄",
-  "Healing Fern":             "☘️", "Glow Moss":                "💚", "Dream Lily":               "🌷",
-  "Ancient Herb":             "🌿", "Spirit Root":              "🥕", "Veilbloom":                "🪷",
   "Orb of Silence":           "🔮", "Eye of All-knowing":       "👁️",
   "Tears of The Endless Goldfish": "💧",
 
@@ -3985,10 +3982,7 @@ const ITEM_ICONS = {
   "Leather":                  "🟫", "Feathers":                 "🪶", "Animal Fat":               "🫙",
   "Fangs":                    "🦷", "Fur":                      "🦊", "Horns":                    "🦌",
   "Claws":                    "🐾", "Spirit Venison":           "✨", "Shadow Hide":              "🖤",
-  "Drake Meat":               "🐉", "Titan Heart":              "❤️‍🔥",
-  "Quality Pelt":             "🦊", "Wolf Fang":                "🐺", "Bear Claw":                "🐻",
-  "Beast Core":               "💠", "Phantom Feather":          "🪶", "Blood Crystal":            "🔴",
-  "Divine Bull Essence":      "🐂", "Heart of the Red Phoenix": "🔥",
+  "Drake Meat":               "🐉", "Titan Heart":              "❤️‍🔥", "Heart of the Red Phoenix": "🔥",
   "Forgotten Desire Seed":    "🌑",
 
   // ── DEITY / SPECIAL MATERIALS ────────────────────────────
@@ -4002,12 +3996,10 @@ const ITEM_ICONS = {
   "Volcanic Roots":           "🌋", "Ash of Elder Trees":       "🌫️",
 
   // ── LOOT DROP MATERIALS ───────────────────────────────────
-  "Wood":                     "🪵", "Herb":                     "🌿", "Silk Thread":              "🧵",
-  "Magic Crystal":            "💎", "Ancient Rune":             "🔷", "Fire Essence":             "🔥",
-  "Water Essence":            "💧", "Wind Essence":             "🌬️", "Earth Essence":            "🌍",
+  "Wood":                     "🪵", "Herb":                     "🌿",
   "Dragon Scales":            "🐉", "Cyclops Eye":              "👁️", "Phoenix Bloom":            "🌺",
   "Titanium":                 "🔩", "Adamantium":               "⚙️", "Celestial Fig":            "🍇",
-  "Middlemist":               "🌸", "Void Crystal":             "🟣",
+  "Middlemist":               "🌸",
 
   // ── RUNESTONES ───────────────────────────────────────────
   "E-grade Runestone":        "🔸", "D-grade Runestone":        "🔶",
@@ -4092,10 +4084,8 @@ const ITEM_TYPES = {
     "Iron Oaths","Broken Shackles","Verdict Quill","Volcanic Roots","Ash of Elder Trees",
     "Ephemeral Footprints","Whispering Purple Sands",
     // Ascension ingredients
-    "Ink of Time","Forgotten Desire Seed","Divine Bull Essence","Heart of the Red Phoenix",
-    "Leviathan Scale","Sea Dragon Fin","Abyssal Pearl",
+    "Ink of Time","Forgotten Desire Seed","Heart of the Red Phoenix",
     "Orb of Silence","Eye of All-knowing","Tears of The Endless Goldfish",
-    "Void Crystal","Ancient Rune","Ancient Root","Spirit Root","Blood Crystal","Beast Core",
   ],
 };
 
@@ -4216,7 +4206,6 @@ window.renderInventory = function(items) {
   }).join('');
 };
 
-
 // Show gold preview before selling
 window.previewSellMaterial = function(itemName) {
   const SELL_RATES = { mythic:10000, legendary:500, rare:150, uncommon:40, common:10 };
@@ -4234,7 +4223,6 @@ window.previewSellMaterial = function(itemName) {
     `Sell <strong style="color:var(--gold)">${itemName}</strong> for <strong style="color:${tierColour}">${goldVal} 🪙</strong>?`
   ).then(confirmed => { if (confirmed) window.convertMaterialToGold(itemName); });
 };
-
 
 // Convert one material to gold (base rate: rarity-based)
 window.convertMaterialToGold = async function(itemName) {
@@ -4491,7 +4479,6 @@ window.useItem = async function(itemName, kind) {
     logActivity('🔄', `Used a <b>Stat Reset Potion</b>. Stats reset to base, ${earnedPoints} points refunded.`, '#c9a84c');
     if (typeof switchPanel === 'function') switchPanel('character');
     return;
-
 
   } else if (itemName === 'Race Rebirth Potion') {
     const confirmed = await inkConfirm('Use <b>Race Rebirth Potion</b>?<br><span style="font-size:0.85rem;color:var(--ash)">Your race and racial attribute will be cleared. Choose a new race.</span>');
@@ -5218,7 +5205,6 @@ function _listenGeneralPresence() {
   }, () => {});
 }
 
-
 async function _loadGeneralNpcsForSidebar() {
   _generalNpcs = [];
   try {
@@ -5658,7 +5644,6 @@ window._jumpToMsg = function(msgId) {
   setTimeout(() => { el.style.background = ''; }, 1200);
 };
 
-
 // ═══════════════════════════════════════════════════
 //  NPC SYSTEM
 // ═══════════════════════════════════════════════════
@@ -6035,7 +6020,6 @@ async function deleteMsg(docId, colPath) {
 }
 window.deleteMsg = deleteMsg;
 
-
 function inkConfirm(message) {
   // Remove any existing confirm modal
   document.getElementById("ink-confirm-modal")?.remove();
@@ -6240,7 +6224,6 @@ function startEditMsg(docId, colPath, btn) {
   };
 }
 window.startEditMsg = startEditMsg;
-
 
 // ═══════════════════════════════════════════════════
 //  MARKETPLACE
@@ -6623,7 +6606,6 @@ async function sellItem() {
   }
 }
 
-
 // Ensure this is defined before any calls
 window.renderPlayerMarketListings = function() {
   const container = document.getElementById("player-listings");
@@ -6746,7 +6728,6 @@ window._buyListing = async (listingId, name, icon, price, type, maxQty) => {
   };
 };
 
-
 // ═══════════════════════════════════════════════════
 //  QUEST SYSTEM (Daily + Story)
 //  (Faction Quests handled in Faction panel; World Dev quests removed)
@@ -6760,7 +6741,7 @@ const DAILY_QUESTS = {
   potions:  { target: 2,  label: "Prepared Mind",     reward: { xp:10,  gold:50,  item:{ name:"Iron",        qty:1 } } },
   food:     { target: 2,  label: "Gusto",             reward: { xp:10,  gold:50,  item:{ name:"Minor HP Potion", qty:1 } } },
   explorer: { target: 3,  label: "Explorer's Path",   reward: { xp:20,  gold:80,  item:{ name:"Iron",        qty:2 } } },
-  elite:    { target: 1,  label: "Elite Challenge",   reward: { xp:20,  gold:100, item:{ name:"Magic Crystal",   qty:2 } } },
+  elite:    { target: 1,  label: "Elite Challenge",   reward: { xp:20,  gold:100, item:{ name:"Dragon Scales",   qty:2 } } },
 };
 const DAILY_BONUS = { gold: 200 };
 
@@ -7397,7 +7378,6 @@ async function _saveAllQuestProgress() {
   } catch(err) { console.error("Quest save error:", err); }
 }
 
-
 // ═══════════════════════════════════════════════════
 //  PROFESSION GATHER SYSTEM
 // ═══════════════════════════════════════════════════
@@ -7570,6 +7550,26 @@ window._doGather = async function() {
     if (_charData.companion) {
       firestoreUpdates.companionExp   = companionExp;
       firestoreUpdates.companionLevel = companionLevel;
+    }
+    // When the player levels up mid-week and the quota hasn't been completed yet,
+    // reset the submitted counts so the new (higher) level's requirements start
+    // fresh. Without this, partial submissions at the old level would still be
+    // counted against the new level's larger thresholds, causing the system to
+    // re-prompt for a second submission and consume items a second time.
+    if (leveledProf) {
+      const _currentQP = _charData.quotaProgress || {};
+      if (!_currentQP.completed) {
+        const _resetQP = {
+          week:      _currentQP.week || getCurrentQuotaWeek(),
+          submitted: { common:0, uncommon:0, rare:0, legendary:0, mythic:0 },
+          completed: false,
+          penalty:   false,
+          bonus:     false,
+        };
+        firestoreUpdates.quotaProgress = _resetQP;
+        _charData.quotaProgress        = _resetQP;
+        window.showToast(`Profession Level ${newProfLvl}! Weekly quota reset for your new level.`, 'info');
+      }
     }
     await _invWrite(_uid, inv => {
       const ex = inv.find(i => i.name === found);
@@ -7840,7 +7840,6 @@ window.toggleBioEdit = function() {
   if (!showing) { input.value = _charData?.bio || ""; input.focus(); }
 };
 
-
 window.saveBioChange = async function() {
   const input  = document.getElementById("new-bio-input");
   const newBio = input.value.trim();
@@ -7855,7 +7854,6 @@ window.saveBioChange = async function() {
     window.showToast("Failed to update bio.", "error");
   }
 };
-
 
 function set(id, val)    { const e = document.getElementById(id); if (e) { e.textContent = val; } else { console.warn('[SET] Element not found:', id); } }
 function css(id, p, v)   { const e = document.getElementById(id); if (e) { e.style[p] = v; } else { console.warn('[CSS] Element not found:', id); } }
@@ -9490,14 +9488,13 @@ function _rollDrops(grade, zoneName) {
     }
   }
 
-  // Zone-level bonus drop (e.g. Runestone Fragment for Dark Woodlands)
+  // Zone-level bonus drop (e.g. Runestone for Dark Woodlands)
   if (bonusDrop && Math.random() < Math.min(0.50, bonusDrop.chance * totalLuck)) {
     items.push({ name: bonusDrop.name, qty: 1, type: getItemType(bonusDrop.name) });
   }
   if (rareBonusDrop && Math.random() < Math.min(0.30, rareBonusDrop.chance * totalLuck)) {
     items.push({ name: rareBonusDrop.name, qty: 1, type: getItemType(rareBonusDrop.name) });
   }
-
 
   // Sah'run blessing: X% chance to also drop a random forge material
   if (_charData?.deity === "Sah'run") {
@@ -9513,7 +9510,7 @@ function _rollDrops(grade, zoneName) {
   if (_charData?.deity === 'Elionidas') {
     const elionPct = _getFaithBlessingPct(_charData);
     if (Math.random() < elionPct) {
-      const preciousPool = ['Ancient Rune','Magic Crystal','Dragon Scales','Cyclops Eye','Phoenix Bloom','Adamantium','Titanium'];
+      const preciousPool = ['Dragon Scales','Cyclops Eye','Phoenix Bloom','Adamantium','Titanium'];
       const bonus = preciousPool[Math.floor(Math.random() * preciousPool.length)];
       items.push({ name: bonus, qty: 1, type: getItemType(bonus) });
     }
@@ -9700,7 +9697,6 @@ async function _clientBattleTurn(action, skillName) {
 
   // ── Player action ──
   let battleUpdates = {};
-
 
   if (action === 'melee') {
     const primary    = _getPrimaryStat(char.charClass, stats);
@@ -10915,7 +10911,7 @@ async function _stopAutoBattleCleanup(playerHp, playerMana) {
   document.getElementById('auto-battle-hud').style.display    = 'none';
   document.getElementById('auto-battle-bar').style.display    = 'none';
   document.getElementById('battle-arena').style.display       = 'none';
-  document.getElementById('battle-zone-select').style.display = 'block';
+  if (_battleMode !== 'boss') document.getElementById('battle-zone-select').style.display = 'block';
   updateZoneLocks();
   try {
     if (_uid) await updateDoc(doc(db, 'characters', _uid), { hp: playerHp, mana: playerMana });
@@ -11265,7 +11261,7 @@ window._battleTurn = async function(action, skillName) {
       // Return to zone select
       document.getElementById('battle-arena').style.display       = 'none';
       document.getElementById('battle-result').style.display      = 'none';
-      document.getElementById('battle-zone-select').style.display = 'block';
+      if (_battleMode !== 'boss') document.getElementById('battle-zone-select').style.display = 'block';
 
     } else {
       // victory or defeat
@@ -11630,7 +11626,7 @@ window._updateZonePoolStatus = function(zoneName) {
 
 // Show the exhausted banner with live countdown timer
 window._showPoolExhausted = function(zoneName, grade) {
-  document.getElementById('battle-zone-select').style.display = 'block';
+  if (_battleMode !== 'boss') document.getElementById('battle-zone-select').style.display = 'block';
   const banner = document.getElementById('zone-pool-exhausted');
   if (!banner) return;
   banner.style.display = 'block';
@@ -11857,7 +11853,14 @@ function checkDeathState() {
     const battleFlagActive = !!window._currentBattle || !!window._autoBattleRunning;
     const noBattleActive = !arenaVisible && !resultVisible && !bossVisible && !bossArenaVis && !autoBarVisible && !battleFlagActive;
     console.log('[BATTLE] checkDeathState: arenaVisible=', arenaVisible, 'battleFlagActive=', battleFlagActive, 'noBattleActive=', noBattleActive);
-    if (zoneArea && noBattleActive) zoneArea.style.display = 'block';
+    if (zoneArea) {
+      if (_battleMode === 'boss') {
+        // Always hide zone grid in boss mode, regardless of prior state
+        zoneArea.style.display = 'none';
+      } else if (noBattleActive) {
+        zoneArea.style.display = 'block';
+      }
+    }
     updateZoneLocks();
   }
 }
@@ -12896,7 +12899,6 @@ window.forceEndRaid = async function() {
   window.showBossSelect();
 };
 
-
 // ═══════════════════════════════════════════════════
 //  PVP SYSTEM — FULL IMPLEMENTATION
 // ═══════════════════════════════════════════════════
@@ -12985,7 +12987,6 @@ window.challengePlayer = async function(targetUid, targetName) {
     targetData: null,
     createdAt: serverTimestamp ? serverTimestamp() : new Date(),
   });
-
 
   await setDoc(doc(db, 'pvpChallenges', matchId), {
     matchId, challengerId:_uid, challengerName:_charData.name,
@@ -14233,8 +14234,6 @@ window._doEnchant = async function() {
     btn.disabled = false; btn.textContent = '✨ ENCHANT';
   }
 };
-
-
 
 // ═══════════════════════════════════════════════════
 //  REFRESH CHARACTER DATA

@@ -253,7 +253,6 @@ const WORLD_LOCATIONS = [
   "Abyssal Depths", "Abyssal Eater", "Chaoswalker", "Fallen Heaven", "Godless Thing"
 ];
 
-
 window.showLocationDropdown = function() {
   const input = document.getElementById('worlddev-location');
   const dropdown = document.getElementById('worlddev-location-dropdown');
@@ -475,9 +474,8 @@ const ITEMS = [
   { name:"Feathers",         icon:"🪶",  type:"material", rarity:"Common" },
   { name:"Bone Fragments",   icon:"🦴",  type:"material", rarity:"Common" },
   { name:"Animal Fat",       icon:"🫙",  type:"material", rarity:"Common" },
-  { name:"Meat",             icon:"🥩",  type:"material", rarity:"Common" },
+  { name:"Raw Meat",             icon:"🥩",  type:"material", rarity:"Common" },
   { name:"Wood",             icon:"🪵",  type:"material", rarity:"Common" },
-  { name:"Stone",            icon:"🪨",  type:"material", rarity:"Common" },
   // Uncommon
   { name:"Bronze",           icon:"🔶",  type:"material", rarity:"Uncommon" },
   { name:"Silver",           icon:"⚪",  type:"material", rarity:"Uncommon" },
@@ -488,10 +486,6 @@ const ITEMS = [
   { name:"Fangs",            icon:"🦷",  type:"material", rarity:"Uncommon" },
   { name:"Claws",            icon:"🦾",  type:"material", rarity:"Uncommon" },
   { name:"Horns",            icon:"🦌",  type:"material", rarity:"Uncommon" },
-  { name:"Fire Essence",     icon:"🔥",  type:"material", rarity:"Uncommon" },
-  { name:"Water Essence",    icon:"💧",  type:"material", rarity:"Uncommon" },
-  { name:"Earth Essence",    icon:"🌱",  type:"material", rarity:"Uncommon" },
-  { name:"Wind Essence",     icon:"🌬️", type:"material", rarity:"Uncommon" },
   // Rare
   { name:"Gold",             icon:"🟡",  type:"material", rarity:"Rare" },
   { name:"Palladium",        icon:"🔵",  type:"material", rarity:"Rare" },
@@ -504,11 +498,9 @@ const ITEMS = [
   { name:"Titanium",         icon:"⬜",  type:"material", rarity:"Legendary" },
   { name:"Dragon Scales",    icon:"🐲",  type:"material", rarity:"Legendary" },
   { name:"Cyclops Eye",      icon:"👁️", type:"material", rarity:"Legendary" },
-  { name:"Phoenix Feather",  icon:"🔥",  type:"material", rarity:"Legendary" },
   // Mythic
   { name:"Aetherium",        icon:"🌟",  type:"material", rarity:"Mythic" },
   { name:"Titan Heart",      icon:"❤️‍🔥", type:"material", rarity:"Mythic" },
-  { name:"Void Crystal",     icon:"🌌",  type:"material", rarity:"Mythic" },
   { name:"Eden's Tear",      icon:"💎",  type:"material", rarity:"Mythic" },
   // Deity-specific worship materials
   { name:"Ephemeral Footprints",    icon:"✨", type:"material", rarity:"Deity" },
@@ -565,9 +557,8 @@ const ITEMS = [
   { name:"Feathers",          icon:"🪶",  type:"ingredient", rarity:"Common" },
   { name:"Bone Fragments",    icon:"🦴",  type:"ingredient", rarity:"Common" },
   { name:"Animal Fat",        icon:"🫙",  type:"ingredient", rarity:"Common" },
-  { name:"Meat",              icon:"🥩",  type:"ingredient", rarity:"Common" },
+  { name:"Raw Meat",              icon:"🥩",  type:"ingredient", rarity:"Common" },
   { name:"Wood",              icon:"🪵",  type:"ingredient", rarity:"Common" },
-  { name:"Stone",             icon:"🪨",  type:"ingredient", rarity:"Common" },
   { name:"Coal",              icon:"⬛",  type:"ingredient", rarity:"Common" },
   { name:"Bronze",            icon:"🔶",  type:"ingredient", rarity:"Uncommon" },
   { name:"Silver",            icon:"⚪",  type:"ingredient", rarity:"Uncommon" },
@@ -577,10 +568,6 @@ const ITEMS = [
   { name:"Fangs",             icon:"🦷",  type:"ingredient", rarity:"Uncommon" },
   { name:"Claws",             icon:"🦾",  type:"ingredient", rarity:"Uncommon" },
   { name:"Horns",             icon:"🦌",  type:"ingredient", rarity:"Uncommon" },
-  { name:"Fire Essence",      icon:"🔥",  type:"ingredient", rarity:"Uncommon" },
-  { name:"Water Essence",     icon:"💧",  type:"ingredient", rarity:"Uncommon" },
-  { name:"Earth Essence",     icon:"🌱",  type:"ingredient", rarity:"Uncommon" },
-  { name:"Wind Essence",      icon:"🌬️", type:"ingredient", rarity:"Uncommon" },
   { name:"Gold",              icon:"🟡",  type:"ingredient", rarity:"Rare" },
   { name:"Palladium",         icon:"🔵",  type:"ingredient", rarity:"Rare" },
   { name:"Mythril",           icon:"🔷",  type:"ingredient", rarity:"Rare" },
@@ -591,10 +578,8 @@ const ITEMS = [
   { name:"Titanium",          icon:"⬜",  type:"ingredient", rarity:"Legendary" },
   { name:"Dragon Scales",     icon:"🐲",  type:"ingredient", rarity:"Legendary" },
   { name:"Cyclops Eye",       icon:"👁️", type:"ingredient", rarity:"Legendary" },
-  { name:"Phoenix Feather",   icon:"🔥",  type:"ingredient", rarity:"Legendary" },
   { name:"Aetherium",         icon:"🌟",  type:"ingredient", rarity:"Mythic" },
   { name:"Titan Heart",       icon:"❤️‍🔥", type:"ingredient", rarity:"Mythic" },
-  { name:"Void Crystal",      icon:"🌌",  type:"ingredient", rarity:"Mythic" },
   { name:"Eden's Tear",       icon:"💎",  type:"ingredient", rarity:"Mythic" },
 ];
 
