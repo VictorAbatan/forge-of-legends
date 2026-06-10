@@ -1,3 +1,172 @@
+/* ═══════════════════════════════════════════════════════════════════
+   DEITY DASHBOARD — BRIGHT THEME OVERRIDES
+   Redefines the dark global CSS variables locally so the deity
+   dashboard is visually distinct and much lighter/brighter than
+   the player-facing UI, without touching global.css.
+═══════════════════════════════════════════════════════════════════ */
+
+.deity-page,
+.deity-modal,
+.deity-modal-box,
+.deity-page * {
+  /* ── Surfaces — dark but lifted, matching dashboard.css rhythm ── */
+  --ink:          #13100C;   /* page body bg — deepest */
+  --ink1:         #1A1712;   /* secondary depth */
+  --ink2:         #222018;   /* cards, sidebar */
+  --ink3:         #2C2820;   /* inputs, hover states */
+
+  /* ── Gold — fully saturated, punchy (mirrors dashboard.css) ── */
+  --gold:         #E8C558;
+  --gold-light:   #F5DC7A;
+  --gold-dim:     #A07E38;
+
+  /* ── Text — bright and readable ── */
+  --text:         #F5EDD8;
+  --text-light:   #F0E6CC;
+  --text-dim:     #B8A888;
+  --ash-light:    #7E766E;
+
+  /* ── Borders — clearly visible gold tint ── */
+  --border:        rgba(232,197,88,0.22);
+  --border-bright: rgba(232,197,88,0.60);
+
+  /* ── Status ── */
+  --red-bright:   #D94535;
+  --teal-bright:  #2EC4A3;
+  --green-bright: #2EC46A;
+}
+
+/* ── Scrollbar ── */
+.deity-page ::-webkit-scrollbar       { width: 6px; }
+.deity-page ::-webkit-scrollbar-track { background: #13100C; }
+.deity-page ::-webkit-scrollbar-thumb { background: #A07E38; border-radius: 3px; }
+.deity-page ::-webkit-scrollbar-thumb:hover { background: #E8C558; }
+.deity-page * { scrollbar-color: #A07E38 #13100C; }
+
+/* ── Page & main ── */
+.deity-page { background: #13100C !important; }
+.deity-main { background: #13100C !important; }
+
+/* ── Sidebar — one step lighter than page ── */
+.deity-sidebar {
+  background: #1E1B13 !important;
+  border-right: 1px solid rgba(232,197,88,0.18) !important;
+  box-shadow: 2px 0 16px rgba(0,0,0,0.40);
+}
+.deity-sidebar-logo        { background: rgba(232,197,88,0.04) !important; }
+.deity-sidebar-worshippers { background: rgba(232,197,88,0.03) !important; }
+.deity-nav-item:hover      { background: rgba(232,197,88,0.06) !important; }
+.deity-nav-item.active     { background: rgba(232,197,88,0.12) !important; }
+
+/* ── Cards and panels — clearly elevated off page bg ── */
+.card,
+.deity-stat-card,
+.deity-action-card,
+.event-card,
+.worshipper-card,
+.quest-card,
+.deity-npc-card,
+.boss-card,
+.vision-history-item,
+.deity-modal-box {
+  background: #28241A !important;
+  border-color: rgba(232,197,88,0.22) !important;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.45), 0 1px 3px rgba(0,0,0,0.30);
+}
+
+/* ── Inputs ── */
+.field-input,
+.chat-input,
+select.dnpc-select {
+  background: #2C2820 !important;
+  border-color: rgba(232,197,88,0.22) !important;
+  color: #F5EDD8 !important;
+}
+.field-input:focus,
+.chat-input:focus,
+select.dnpc-select:focus {
+  border-color: rgba(232,197,88,0.60) !important;
+  box-shadow: 0 0 0 2px rgba(232,197,88,0.12) !important;
+}
+.field-input option,
+select.dnpc-select option { background: #222018 !important; color: #F5EDD8 !important; }
+
+/* ── Chat windows ── */
+.chat-window,
+.dchat-window,
+.deity-chat-window {
+  background: #1E1B13 !important;
+  border-color: rgba(232,197,88,0.18) !important;
+}
+.chat-msg-text { background: #2C2820 !important; color: #F5EDD8 !important; }
+.chat-msg.own .own-text {
+  background: rgba(232,197,88,0.14) !important;
+  border-color: rgba(232,197,88,0.22) !important;
+  color: #F5EDD8 !important;
+}
+.chat-msg-rank { background: rgba(255,255,255,0.05) !important; }
+.chat-msg.own .own-npc { background: rgba(80,60,160,0.22) !important; }
+
+/* ── NPC bubbles ── */
+.npc-bubble { background: rgba(80,60,160,0.18) !important; }
+
+/* ── Toast ── */
+.toast         { background: #1E1B13 !important; color: #E8C558 !important; box-shadow: 0 8px 40px rgba(0,0,0,0.60); }
+.toast.success { background: #0E1810 !important; color: #2EC46A !important; border-color: #2a5c3a !important; }
+.toast.error   { background: #180E0E !important; color: #D94535 !important; border-color: #6b2a2a !important; }
+.toast.warning { background: #181408 !important; color: #E8C558 !important; border-color: #A07E38 !important; }
+
+/* ── Mobile header ── */
+.deity-mobile-header { background: #1E1B13 !important; border-bottom-color: rgba(232,197,88,0.18) !important; }
+
+/* ── Modal overlay ── */
+.deity-modal { background: rgba(0,0,0,0.78) !important; }
+
+/* ── Location dropdowns ── */
+.location-dropdown,
+#worlddev-location-list { background: #222018 !important; border-color: rgba(232,197,88,0.45) !important; }
+.location-option        { background: #222018 !important; color: #F5EDD8 !important; border-bottom-color: rgba(232,197,88,0.14) !important; }
+.location-option:hover,
+.location-option.active { background: #2C2820 !important; color: #E8C558 !important; }
+
+/* ── Quest section toggle ── */
+.quest-section-toggle       { background: rgba(232,197,88,0.07) !important; border-color: rgba(232,197,88,0.20) !important; }
+.quest-section-toggle:hover { background: rgba(232,197,88,0.13) !important; }
+
+/* ── Faction arrange rows ── */
+._arrange-row:hover { background: rgba(232,197,88,0.06) !important; }
+
+/* ── Bestow / warning boxes ── */
+.bestow-warning          { background: rgba(232,197,88,0.06) !important; border-color: #A07E38 !important; }
+.modal-recipient-display { background: rgba(232,197,88,0.07) !important; border-color: #A07E38 !important; }
+
+/* ── Nav overlay ── */
+.nav-overlay { background: rgba(0,0,0,0.60) !important; }
+
+/* ── dchat tabs ── */
+.dchat-tab                     { background: #1E1B13 !important; border-color: rgba(232,197,88,0.18) !important; }
+.dchat-tab.active              { background: rgba(232,197,88,0.12) !important; border-color: rgba(232,197,88,0.50) !important; }
+.dchat-tab:hover:not(.active)  { background: #2C2820 !important; }
+
+/* ── RP chat tabs ── */
+.chat-tab        { background: transparent !important; }
+.chat-tab.active { background: #2C2820 !important; }
+
+/* ── Quest/event badges ── */
+.quest-type-badge,
+.event-type-badge { background: rgba(232,197,88,0.10) !important; border-color: rgba(232,197,88,0.25) !important; }
+
+/* ── Mini buttons ── */
+.deity-mini-btn       { background: rgba(232,197,88,0.08) !important; border-color: rgba(232,197,88,0.25) !important; color: #A07E38 !important; }
+.deity-mini-btn:hover { background: rgba(232,197,88,0.18) !important; border-color: rgba(232,197,88,0.50) !important; color: #E8C558 !important; }
+
+/* ── Btn secondary ── */
+.btn-secondary       { background: rgba(255,255,255,0.04) !important; }
+.btn-secondary:hover { background: rgba(255,255,255,0.08) !important; }
+
+/* ── Avatar upload ── */
+.avatar-upload-btn { background: rgba(255,255,255,0.02) !important; border-color: rgba(232,197,88,0.28) !important; }
+
 /* --- RP Chat Styles (copied from dashboard.css for consistency) --- */
 .chat-tabs { display: flex; gap: 8px; margin-bottom: 8px; }
 .chat-tab { background: transparent; border: 1px solid var(--border); border-radius: 8px 8px 0 0; padding: 7px 18px 6px 18px; font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-dim); cursor: pointer; transition: all 0.18s; border-bottom: none; position: relative; top: 1px; }
@@ -225,7 +394,7 @@
 /* ── Blur overlay ── */
 .nav-overlay {
   display: none; position: fixed; inset: 0; z-index: 105;
-  background: rgba(13,11,8,0.55);
+  background: rgba(80,65,40,0.45);
   backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
   opacity: 0; transition: opacity 0.3s ease; pointer-events: none;
 }
@@ -333,7 +502,7 @@
 .avatar-upload-btn:hover { border-color: var(--border-bright); color: var(--text); }
 
 /* ── Deity modal ── */
-.deity-modal { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.75); display: flex; align-items: center; justify-content: center; backdrop-filter: blur(6px); animation: fadeIn 0.2s ease; }
+.deity-modal { position: fixed; inset: 0; z-index: 200; background: rgba(80,65,40,0.45); display: flex; align-items: center; justify-content: center; backdrop-filter: blur(6px); animation: fadeIn 0.2s ease; }
 .deity-modal-box { background: var(--ink2); border: 1px solid var(--border-bright); border-radius: var(--radius); padding: 28px 28px 20px; width: 480px; max-width: 92vw; max-height: 85vh; overflow-y: auto; height: fit-content; }
 .deity-modal-title { font-family: var(--ff-display); font-size: 0.88rem; letter-spacing: 0.12em; color: var(--gold); margin-bottom: 8px; }
 .deity-modal-desc  { font-size: 0.85rem; color: var(--text-dim); font-style: italic; margin-bottom: 16px; line-height: 1.6; }
@@ -406,7 +575,7 @@ select.dnpc-select:hover {
   border-color: var(--border-bright);
 }
 select.dnpc-select option {
-  background: #1a1814;
+  background: #222018;
   color: var(--text);
   padding: 6px 10px;
 }
@@ -446,7 +615,7 @@ select.dnpc-select option:checked {
   bottom: 24px;
   left: 50%;
   transform: translateX(-50%) translateY(12px);
-  background: #0e0c08;
+  background: #222018;
   border: 1px solid var(--gold-dim);
   border-radius: 10px;
   padding: 10px 20px;
@@ -461,7 +630,7 @@ select.dnpc-select option:checked {
   width: auto;
   min-width: 120px;
   max-width: min(340px, 90vw);
-  box-shadow: 0 8px 40px rgba(0,0,0,0.75), 0 0 0 1px rgba(201,168,76,0.06);
+  box-shadow: 0 8px 40px rgba(0,0,0,0.65), 0 0 0 1px rgba(201,168,76,0.06);
   text-align: center;
   pointer-events: none;
   word-break: break-word;
@@ -473,9 +642,9 @@ select.dnpc-select option:checked {
   transform: translateX(-50%) translateY(0);
   pointer-events: auto;
 }
-.toast.success { border-color: #2a5c3a; color: #6dc99a; background: #080e0a; }
-.toast.error   { border-color: #6b2a2a; color: #e07070; background: #0e0808; }
-.toast.warning { border-color: #5c4a1a; color: #c9a84c; background: #0c0a06; }
+.toast.success { border-color: #5dbe85; color: #1a8a5a; background: #0E1810; }
+.toast.error   { border-color: #e07070; color: #e07070; background: #180E0E; }
+.toast.warning { border-color: #c9a84c; color: #c9a84c; background: #181408; }
 
 @media (max-width: 480px) {
   .toast {
@@ -940,7 +1109,7 @@ select.dnpc-select option:checked {
 .chat-msg-reply-quote {
   display: flex;
   align-items: stretch;
-  background: rgba(0,0,0,0.28);
+  background: rgba(255,255,255,0.06);
   border-radius: 6px;
   margin-bottom: 6px;
   overflow: hidden;
@@ -1028,7 +1197,7 @@ select.dnpc-select option:checked {
 .dchat-player-popup {
   position: fixed; inset: 0; z-index: 9999;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(0,0,0,0.55);
+  background: rgba(80,65,40,0.45);
 }
 .dchat-player-popup-inner {
   background: var(--ink2);
@@ -1071,8 +1240,8 @@ select.dnpc-select option:checked {
 .chat-edit-cancel:hover { color: var(--text); border-color: var(--ash-light); }
 
 /* ── Ink confirm modal ───────────────────────────────────────────────────── */
-.ink-confirm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; z-index: 9999; animation: fadeIn 0.15s ease; }
-.ink-confirm-box { background: var(--ink2); border: 1px solid var(--gold-dim); border-radius: 14px; padding: 28px 32px 22px; min-width: 280px; max-width: 380px; box-shadow: 0 8px 40px rgba(0,0,0,0.6); animation: scaleIn 0.15s ease; }
+.ink-confirm-overlay { position: fixed; inset: 0; background: rgba(80,65,40,0.40); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; z-index: 9999; animation: fadeIn 0.15s ease; }
+.ink-confirm-box { background: var(--ink2); border: 1px solid var(--gold-dim); border-radius: 14px; padding: 28px 32px 22px; min-width: 280px; max-width: 380px; box-shadow: 0 8px 40px rgba(0,0,0,0.65); animation: scaleIn 0.15s ease; }
 .ink-confirm-msg { font-family: var(--ff-display); font-size: 0.95rem; color: var(--text); letter-spacing: 0.03em; margin: 0 0 22px; text-align: center; line-height: 1.5; }
 .ink-confirm-btns { display: flex; gap: 10px; justify-content: flex-end; }
 .ink-confirm-cancel, .ink-confirm-ok { font-family: var(--ff-display); font-size: 0.78rem; letter-spacing: 0.06em; padding: 7px 20px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; transition: background 0.15s, border-color 0.15s, color 0.15s; }
@@ -1154,7 +1323,7 @@ select.dnpc-select option:checked {
   border-radius: 0 0 var(--radius) var(--radius);
   max-height: 260px;
   overflow-y: auto;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.55);
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
 }
@@ -1336,11 +1505,11 @@ button,
   width: 100%; border-radius: 10px; padding: 12px 16px;
   background: rgba(10,8,6,0.85);
   border-left: 4px solid #e05555;
-  box-shadow: 0 0 18px rgba(224,85,85,0.18), inset 0 0 30px rgba(0,0,0,0.3);
+  box-shadow: 0 0 18px rgba(224,85,85,0.18), inset 0 0 30px rgba(0,0,0,0.30);
 }
 .world-event-msg.world-event-logical .world-event-bubble {
   border-left-color: #c9a84c;
-  box-shadow: 0 0 18px rgba(201,168,76,0.18), inset 0 0 30px rgba(0,0,0,0.3);
+  box-shadow: 0 0 18px rgba(201,168,76,0.18), inset 0 0 30px rgba(0,0,0,0.30);
 }
 .world-event-header {
   display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
@@ -1506,7 +1675,7 @@ button,
   cursor: pointer; margin: 8px 0 4px; user-select: none;
 }
 .dq-sub-activity-toggle:hover { color: var(--gold); }
-.dq-sub-activity-list { background: rgba(0,0,0,0.2); border-radius: 6px; padding: 8px 10px; }
+.dq-sub-activity-list { background: rgba(255,255,255,0.04); border-radius: 6px; padding: 8px 10px; }
 .dq-sub-activity-item { font-family: var(--ff-mono); font-size: 0.62rem; color: var(--ash-light); padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.03); }
 .dq-sub-activity-item:last-child { border-bottom: none; }
 

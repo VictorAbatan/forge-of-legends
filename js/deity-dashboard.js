@@ -1283,6 +1283,10 @@ const DEITY_DATA = {
 
 let _uid = null, _deityChar = null, _worshippers = [], _visionsSent = 0;
 
+// Map of playerUid → { docId, mantle, choir, subtype, faithLevel }[]
+// Populated by startFaithNotifListener; drives the faith-advancement badge on worshipper cards.
+const _unreadFaithByPlayer = new Map();
+
 // ── Renders a duel or trade system card for deity chat ─────────────────────
 // Delegates to duel.js / trade.js renderers so CSS classes always match.
 window._renderDuelOrTradeCard = function(msg) {
@@ -1676,6 +1680,16 @@ function startFaithNotifListener() {
       limit(20)
     ),
     snap => {
+      // Rebuild the entire unread map from the current snapshot so dismissals
+      // that happen elsewhere are also reflected here.
+      _unreadFaithByPlayer.clear();
+      snap.docs.forEach(d => {
+        const n = d.data();
+        if (!n.playerUid) return;
+        if (!_unreadFaithByPlayer.has(n.playerUid)) _unreadFaithByPlayer.set(n.playerUid, []);
+        _unreadFaithByPlayer.get(n.playerUid).push({ docId: d.id, ...n });
+      });
+
       snap.docChanges().forEach(change => {
         if (change.type !== "added") return;
         const n = change.doc.data();
@@ -1685,8 +1699,6 @@ function startFaithNotifListener() {
           isMantleUp ? `🎉 ${n.playerName} ascended to ${n.mantle}!` : `✨ ${n.playerName} — ${n.mantle} Choir ${n.choir}`,
           isMantleUp ? 'success' : 'info'
         );
-        // Mark read
-        updateDoc(doc(db, "deityNotifications", change.doc.id), { read: true }).catch(()=>{});
         // Add to panel
         const livePanel = document.getElementById("deity-faith-notif-list");
         if (livePanel) {
@@ -1695,10 +1707,63 @@ function startFaithNotifListener() {
           _renderFaithNotifEntry(n, livePanel, true, true);
         }
       });
+
+      // Refresh all worshipper cards to show/hide badges based on updated map
+      _refreshWorshipperFaithBadges();
     },
     err => console.error("[FaithNotif] Live listener error:", err)
   );
 }
+
+// Refreshes only the faith badge section of each rendered worshipper card.
+// Called whenever _unreadFaithByPlayer changes, so we don't re-render full cards.
+function _refreshWorshipperFaithBadges() {
+  document.querySelectorAll('.worshipper-card[data-uid]').forEach(card => {
+    const uid = card.dataset.uid;
+    const badgeSlot = card.querySelector('.faith-adv-badge-slot');
+    if (!badgeSlot) return;
+    badgeSlot.innerHTML = _buildFaithAdvBadgeHtml(uid);
+  });
+}
+
+// Builds the HTML for a faith advancement badge for a given playerUid.
+// Returns empty string if no unread notifs for this player.
+function _buildFaithAdvBadgeHtml(playerUid) {
+  const notifs = _unreadFaithByPlayer.get(playerUid);
+  if (!notifs || notifs.length === 0) return '';
+  // Show the most recent advancement
+  const latest = notifs[0];
+  const isMantleUp = latest.subtype === 'mantle_ascension';
+  const label = isMantleUp
+    ? `↑ ${latest.mantle}`
+    : `↑ ${latest.mantle} C${latest.choir}`;
+  const bg    = isMantleUp ? 'rgba(201,168,76,0.18)' : 'rgba(93,190,133,0.15)';
+  const color = isMantleUp ? 'var(--gold)' : '#5dbe85';
+  const border = isMantleUp ? 'rgba(201,168,76,0.5)' : 'rgba(93,190,133,0.4)';
+  const countBubble = notifs.length > 1
+    ? `<span style="background:${color};color:#000;border-radius:50%;width:14px;height:14px;font-size:0.55rem;display:inline-flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0">${notifs.length}</span>`
+    : '';
+  return `
+    <div style="display:flex;align-items:center;gap:5px;margin-top:4px">
+      <span style="background:${bg};color:${color};border:1px solid ${border};border-radius:6px;font-size:0.62rem;font-family:var(--font-mono);letter-spacing:0.05em;padding:2px 7px;font-weight:700">${label}</span>
+      ${countBubble}
+      <button onclick="window._dismissFaithBadge('${playerUid}')" title="Mark as seen"
+        style="background:none;border:1px solid ${border};color:${color};border-radius:50%;width:18px;height:18px;font-size:0.6rem;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;padding:0">✓</button>
+    </div>`;
+}
+
+// Dismisses (marks read) all unread faith notifs for a player, clears badge.
+window._dismissFaithBadge = async function(playerUid) {
+  const notifs = _unreadFaithByPlayer.get(playerUid);
+  if (!notifs || notifs.length === 0) return;
+  // Mark all as read in Firestore
+  await Promise.all(notifs.map(n =>
+    updateDoc(doc(db, "deityNotifications", n.docId), { read: true }).catch(() => {})
+  ));
+  // Remove from local map immediately so UI responds without waiting for snapshot
+  _unreadFaithByPlayer.delete(playerUid);
+  _refreshWorshipperFaithBadges();
+};
 
 function renderWorshippers(list) {
   const container = document.getElementById("worshipper-list");
@@ -1710,7 +1775,7 @@ function renderWorshippers(list) {
   }
 
   container.innerHTML = list.map(w => `
-    <div class="worshipper-card">
+    <div class="worshipper-card" data-uid="${w.uid}">
       <div class="worshipper-avatar">${avatarHTML(w.avatarUrl)}</div>
       <div class="worshipper-info">
         <div class="worshipper-name">${w.name}</div>
@@ -1721,6 +1786,7 @@ function renderWorshippers(list) {
         <div class="worshipper-stat" style="flex-direction:column;align-items:flex-start;gap:2px">
           <span class="worshipper-stat-label">Faith</span>
           ${(() => { const t = _ddGetFaithTier(w.faithLevel||0); return `<span class="worshipper-stat-value faith" style="font-size:0.72rem">${t.label} · C${t.choir} <span style="color:var(--ash);font-size:0.65rem">(${w.faithLevel||0})</span></span><div style="height:3px;border-radius:2px;background:rgba(255,255,255,0.08);margin-top:3px;width:100%;max-width:80px"><div style="height:100%;border-radius:2px;background:var(--gold);width:${t.progress}%"></div></div>`; })()}
+          <div class="faith-adv-badge-slot">${_buildFaithAdvBadgeHtml(w.uid)}</div>
         </div>
         <div class="worshipper-stat"><span class="worshipper-stat-label">Gold</span><span class="worshipper-stat-value">${w.gold||0}</span></div>
         <div class="worshipper-stat"><span class="worshipper-stat-label">HP</span><span class="worshipper-stat-value">${w.hp||100}/${w.hpMax||100}</span></div>

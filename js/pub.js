@@ -38,24 +38,83 @@ let _awardedGameIds  = new Set();
 let _tdCancelTimer   = null;
 let _hrCancelTimer   = null;
 let _dhCancelTimer   = null;
+let _tdStaleTimer    = null;
+let _hrStaleTimer    = null;
+let _dhStaleTimer    = null;
+const STALE_MS       = 2 * 60 * 1000; // 2 minutes of no state change = stale
 
 // ── Location constants ─────────────────────────────────────────
-// ── Live countdown helper ──────────────────────────────────────
 // Starts a 1-second interval that rewrites only the countdown portion
 // of a status bar element. Returns the interval id.
 // buildText(secsLeft) → full string to set on statusEl.textContent
-// Clears itself automatically when secsLeft hits 0.
-function _startCancelCountdown(statusEl, createdMs, buildText) {
+// When secsLeft hits 0, deletes the game doc and refunds all players.
+function _startCancelCountdown(statusEl, createdMs, buildText, gameId) {
   const expiresMs = createdMs + 3 * 60 * 1000;
+  let _cancelled = false;
+  async function _doCancel() {
+    if (_cancelled) return;
+    _cancelled = true;
+    if (!gameId) return;
+    try {
+      const snap = await getDoc(doc(db, 'pubGames', gameId));
+      if (!snap.exists()) return;
+      const game = snap.data();
+      // Only cancel if still open/lobby — don't touch in-progress or complete games
+      if (game.status !== 'open' && game.status !== 'lobby') return;
+      // Refund all players their bets
+      for (const p of (game.players || [])) {
+        if (p.bet || p.totalBet) {
+          const refund = p.bet || p.totalBet || 0;
+          if (refund > 0) await _awardGold(p.uid, refund);
+        }
+      }
+      await deleteDoc(doc(db, 'pubGames', gameId));
+      if (statusEl && document.body.contains(statusEl)) {
+        statusEl.textContent = '⌛ Table cancelled — no one joined in time.';
+        statusEl.className = 'pub-status-bar loss';
+      }
+      // Return to lobby after a short pause so player can read the message
+      setTimeout(() => _backToLobby(), 2000);
+    } catch(e) { console.warn('[Pub] cancel cleanup error:', e); }
+  }
   function tick() {
     if (!statusEl || !document.body.contains(statusEl)) { clearInterval(id); return; }
     const secsLeft = Math.max(0, Math.ceil((expiresMs - Date.now()) / 1000));
     statusEl.textContent = buildText(secsLeft);
-    if (secsLeft === 0) clearInterval(id);
+    if (secsLeft === 0) { clearInterval(id); _doCancel(); }
   }
   tick(); // fire immediately so there's no 1-second blank
   const id = setInterval(tick, 1000);
   return id;
+}
+
+// ── Stale game watchdog ────────────────────────────────────────
+// Resets a 2-minute timeout each time a game state change is observed.
+// If no change occurs for 2 minutes while the game is mid-play (not complete/rolling),
+// the game is deleted and all players are refunded.
+function _resetStaleTimer(timerRef, setTimer, gameId, gameStatus) {
+  clearTimeout(timerRef);
+  // Only watch for stale state during active (non-terminal) statuses
+  const terminalStatuses = ['complete', 'rolling', 'resolving'];
+  if (terminalStatuses.includes(gameStatus)) return null;
+  return setTimeout(async () => {
+    if (!gameId) return;
+    try {
+      const snap = await getDoc(doc(db, 'pubGames', gameId));
+      if (!snap.exists()) return;
+      const game = snap.data();
+      if (terminalStatuses.includes(game.status)) return; // already resolved
+      console.warn(`[Pub] Stale game detected (${gameId.slice(0,8)}) — cancelling.`);
+      // Refund all players
+      for (const p of (game.players || [])) {
+        const refund = p.bet || p.totalBet || 0;
+        if (refund > 0) await _awardGold(p.uid, refund);
+      }
+      await deleteDoc(doc(db, 'pubGames', gameId));
+      window.showToast?.('⌛ Game cancelled — no activity for 2 minutes.', '');
+      setTimeout(() => _backToLobby(), 1500);
+    } catch(e) { console.warn('[Pub] stale game cleanup error:', e); }
+  }, STALE_MS);
 }
 
 const PUB_LOCATIONS = {
@@ -66,7 +125,7 @@ const PUB_LOCATIONS = {
     continent:   "Northern Continent",
     continentId: "frostveil",
     capitalDest: "Frostspire — Gladys Kingdom",
-    capitalCost: 100, capitalTime: 60,
+    capitalCost: 100, capitalTime: 30,
   },
   western: {
     location:    "Solmere",
@@ -75,7 +134,7 @@ const PUB_LOCATIONS = {
     continent:   "Western Continent",
     continentId: "verdantis",
     capitalDest: "Solmere — Elaria Kingdom",
-    capitalCost: 100, capitalTime: 60,
+    capitalCost: 100, capitalTime: 30,
   },
 };
 
@@ -210,18 +269,18 @@ function _renderPubGate(panel) {
     let statusHtml, actionHtml;
     if (atCapital) {
       statusHtml = `<div class="pub-gate-status ready">✓ You are in ${p.location}</div>`;
-      actionHtml = `<button class="pub-gate-action-btn" onclick="window._pubTravelTo('${p.travelId}','${p.continent}')">ENTER PUB — 10 💰 · 30s</button>`;
+      actionHtml = `<button class="pub-gate-action-btn" onclick="window._pubTravelTo('${p.travelId}','${p.continent}')">ENTER PUB — 10 💰 · 10s</button>`;
     } else if (inContinent) {
       statusHtml = `<div class="pub-gate-status near">📍 You are in the ${p.continent}</div>`;
       actionHtml = `
-        <button class="pub-gate-action-btn" onclick="window.openTravelModal?.('${p.capitalDest}','${p.continent}',20,60)">
-          TRAVEL TO ${p.location.toUpperCase()} — 20 💰 · 1 min
+        <button class="pub-gate-action-btn" onclick="window.openTravelModal?.('${p.capitalDest}','${p.continent}',20,30)">
+          TRAVEL TO ${p.location.toUpperCase()} — 20 💰 · 30s
         </button>`;
     } else {
       statusHtml = `<div class="pub-gate-status far">🌍 ${p.continent}</div>`;
       actionHtml = `<div class="pub-gate-hint">Travel to the ${p.continent} first, then find ${p.location}.</div>
         <button class="pub-gate-action-btn secondary" onclick="window.openTravelModal?.('${p.capitalDest}','${p.continent}',${p.capitalCost},${p.capitalTime})">
-          TRAVEL THERE — ${p.capitalCost} 💰 · 1 min
+          TRAVEL THERE — ${p.capitalCost} 💰 · 30s
         </button>`;
     }
     return `
@@ -250,9 +309,9 @@ window._pubTravelTo = function(travelId, continent) {
     return;
   }
   if (typeof window.openTravelModal === 'function') {
-    window.openTravelModal(travelId, continent, 10, 30);
+    window.openTravelModal(travelId, continent, 10, 10);
   } else if (typeof window._startTravel === 'function') {
-    window._startTravel({ dest: travelId, continent, cost: 10, seconds: 30 });
+    window._startTravel({ dest: travelId, continent, cost: 10, seconds: 10 });
     if (typeof window.switchPanel === 'function') window.switchPanel('map');
   } else {
     window.showToast?.('Open the World Map to travel.', '');
@@ -744,6 +803,9 @@ function _backToLobby() {
   if (_tdCancelTimer)   { clearInterval(_tdCancelTimer); _tdCancelTimer = null; }
   if (_hrCancelTimer)   { clearInterval(_hrCancelTimer); _hrCancelTimer = null; }
   if (_dhCancelTimer)   { clearInterval(_dhCancelTimer); _dhCancelTimer = null; }
+  if (_tdStaleTimer)    { clearTimeout(_tdStaleTimer);   _tdStaleTimer  = null; }
+  if (_hrStaleTimer)    { clearTimeout(_hrStaleTimer);   _hrStaleTimer  = null; }
+  if (_dhStaleTimer)    { clearTimeout(_dhStaleTimer);   _dhStaleTimer  = null; }
   _activeGameId = null;
   const container = document.getElementById('pub-game-container');
   if (container) container.innerHTML = '';
@@ -927,11 +989,14 @@ window._tdCreate = async function() {
       playerName:  _charData.name || 'Unknown',
     });
     _activeGameId = result.data.gameId;
-    const newGold = Math.max(0, (_charData.gold || 0) - bet);
-    if (_charData)        _charData.gold = newGold;
-    if (window._charData) window._charData.gold = newGold;
-    document.getElementById('stat-gold') && (document.getElementById('stat-gold').textContent = newGold);
-    document.getElementById('s-gold')    && (document.getElementById('s-gold').textContent    = newGold);
+    // Gold was already deducted server-side by the Cloud Function.
+    // Refresh from Firestore so the displayed balance is authoritative and never stale.
+    try {
+      await window.refreshCharData?.();
+      const g = window._charData?.gold ?? 0;
+      document.getElementById('stat-gold') && (document.getElementById('stat-gold').textContent = g);
+      document.getElementById('s-gold')    && (document.getElementById('s-gold').textContent    = g);
+    } catch(_) {}
     window.showToast?.(`Table opened! You picked ${_tdPickedNumber}. Waiting for others...`, 'success');
     _hideTableLoadingOverlay();
     _tdSubscribeGame(_activeGameId);
@@ -976,11 +1041,13 @@ window._tdJoin = async function() {
     const result = await _fnJoinGame({ gameId, pick: _tdPickedNumber, playerName: _charData.name || 'Unknown' });
     _activeGameId = gameId;
     const bet     = result.data.bet;
-    const newGold = Math.max(0, (_charData.gold || 0) - bet);
-    if (_charData)        _charData.gold = newGold;
-    if (window._charData) window._charData.gold = newGold;
-    document.getElementById('stat-gold') && (document.getElementById('stat-gold').textContent = newGold);
-    document.getElementById('s-gold')    && (document.getElementById('s-gold').textContent    = newGold);
+    // Gold was already deducted server-side. Refresh so displayed balance is authoritative.
+    try {
+      await window.refreshCharData?.();
+      const g = window._charData?.gold ?? 0;
+      document.getElementById('stat-gold') && (document.getElementById('stat-gold').textContent = g);
+      document.getElementById('s-gold')    && (document.getElementById('s-gold').textContent    = g);
+    } catch(_) {}
     window.showToast?.(`Joined! Stake: ${bet} 💰.`, 'success');
     _hideTableLoadingOverlay();
     _tdSubscribeGame(_activeGameId);
@@ -999,7 +1066,9 @@ function _tdSubscribeGame(gameId) {
   if (_activeGameUnsub) { _activeGameUnsub(); _activeGameUnsub = null; }
   _activeGameUnsub = onSnapshot(doc(db,'pubGames',gameId), snap => {
     if (!snap.exists()) return;
-    _tdRenderGameState(snap.data(), gameId);
+    const game = snap.data();
+    _tdStaleTimer = _resetStaleTimer(_tdStaleTimer, v => { _tdStaleTimer = v; }, gameId, game.status);
+    _tdRenderGameState(game, gameId);
   });
 }
 
@@ -1050,7 +1119,7 @@ function _tdRenderGameState(game, gameId) {
           const mm = Math.floor(secsLeft/60), ss = String(secsLeft%60).padStart(2,'0');
           const timerSuffix = secsLeft > 0 ? ` · Cancels in ${mm}:${ss}` : ' · Cancelling…';
           return `You're the host — roll when ready!${timerSuffix}`;
-        });
+        }, gameId);
       } else {
         statusEl.textContent = amPlaying
           ? (isHost ? `You're the host — roll when ready!` : `Waiting for the host to roll...`)
@@ -1491,11 +1560,14 @@ window._hrCreate = async function() {
       playerName:  _charData.name || 'Unknown',
     });
     _activeGameId = result.data.gameId;
-    const newGold = Math.max(0, (_charData.gold || 0) - bet);
-    if (_charData)        _charData.gold = newGold;
-    if (window._charData) window._charData.gold = newGold;
-    document.getElementById('stat-gold') && (document.getElementById('stat-gold').textContent = newGold);
-    document.getElementById('s-gold')    && (document.getElementById('s-gold').textContent    = newGold);
+    // Gold was already deducted server-side by the Cloud Function.
+    // Refresh from Firestore so the displayed balance is authoritative and never stale.
+    try {
+      await window.refreshCharData?.();
+      const g = window._charData?.gold ?? 0;
+      document.getElementById('stat-gold') && (document.getElementById('stat-gold').textContent = g);
+      document.getElementById('s-gold')    && (document.getElementById('s-gold').textContent    = g);
+    } catch(_) {}
     window.showToast?.('Table opened! Invite others and roll when ready.', 'success');
     _hideTableLoadingOverlay();
     _hrSubscribeGame(_activeGameId);
@@ -1537,11 +1609,13 @@ window._hrJoin = async function() {
     const result = await _fnJoinGame({ gameId, playerName: _charData.name || 'Unknown' });
     _activeGameId = gameId;
     const bet     = result.data.bet;
-    const newGold = Math.max(0, (_charData.gold || 0) - bet);
-    if (_charData)        _charData.gold = newGold;
-    if (window._charData) window._charData.gold = newGold;
-    document.getElementById('stat-gold') && (document.getElementById('stat-gold').textContent = newGold);
-    document.getElementById('s-gold')    && (document.getElementById('s-gold').textContent    = newGold);
+    // Gold was already deducted server-side. Refresh so displayed balance is authoritative.
+    try {
+      await window.refreshCharData?.();
+      const g = window._charData?.gold ?? 0;
+      document.getElementById('stat-gold') && (document.getElementById('stat-gold').textContent = g);
+      document.getElementById('s-gold')    && (document.getElementById('s-gold').textContent    = g);
+    } catch(_) {}
     window.showToast?.(`Joined! Stake: ${bet} 💰.`, 'success');
     _hideTableLoadingOverlay();
     _hrSubscribeGame(_activeGameId);
@@ -1559,7 +1633,9 @@ function _hrSubscribeGame(gameId) {
   if (_activeGameUnsub) { _activeGameUnsub(); _activeGameUnsub = null; }
   _activeGameUnsub = onSnapshot(doc(db,'pubGames',gameId), snap => {
     if (!snap.exists()) return;
-    _hrRenderGameState(snap.data(), gameId);
+    const game = snap.data();
+    _hrStaleTimer = _resetStaleTimer(_hrStaleTimer, v => { _hrStaleTimer = v; }, gameId, game.status);
+    _hrRenderGameState(game, gameId);
   });
 }
 
@@ -1601,7 +1677,7 @@ function _hrRenderGameState(game, gameId) {
           const mm = Math.floor(secsLeft/60), ss = String(secsLeft%60).padStart(2,'0');
           const timerSuffix = secsLeft > 0 ? ` · Cancels in ${mm}:${ss}` : ' · Cancelling…';
           return `You're the host — roll when ready!${timerSuffix}`;
-        });
+        }, gameId);
       } else {
         statusEl.textContent = amPlaying
           ? (isHost ? `You're the host — roll when ready!` : `Waiting for the host to roll...`)
@@ -1856,7 +1932,7 @@ function _dhWatchLobby() {
           const mm = Math.floor(secsLeft/60), ss = String(secsLeft%60).padStart(2,'0');
           const timerStr = secsLeft > 0 ? ` · Cancels in ${mm}:${ss}` : ' · Cancelling…';
           return `${_dhPlayerCount}/4 players ready. Need 3 minimum.${timerStr}`;
-        });
+        }, gameId);
         statusEl.className = 'pub-status-bar';
       }
 
@@ -2250,7 +2326,9 @@ function _dhSubscribeGame(gameId) {
   if (_activeGameUnsub) { _activeGameUnsub(); _activeGameUnsub = null; }
   _activeGameUnsub = onSnapshot(doc(db, 'pubGames', gameId), snap => {
     if (!snap.exists()) return;
-    _dhRenderGameState(snap.data(), gameId);
+    const game = snap.data();
+    _dhStaleTimer = _resetStaleTimer(_dhStaleTimer, v => { _dhStaleTimer = v; }, gameId, game.status);
+    _dhRenderGameState(game, gameId);
   });
 }
 

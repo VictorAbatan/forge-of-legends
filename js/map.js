@@ -482,7 +482,10 @@ function _openTT(el, e) {
         window._openTemplePanel?.();
       } else if (action === "travel-pub") {
         const d = btn.dataset;
-        window.openTravelModal?.(d.dest, d.continent, 10, 60);
+        window.openTravelModal?.(d.dest, d.continent, 10, 10);
+      } else if (action === "travel-capital") {
+        const d = btn.dataset;
+        window.openTravelModal?.(d.dest, d.continent.split("·")[0].trim(), 20, 30);
       } else if (action === "enter-pub") {
         window._openPubPanel?.();
       } else if (action === "enter-sr") {

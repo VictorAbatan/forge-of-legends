@@ -2361,31 +2361,37 @@ window.submitProfessionQuota = function() {
 function checkAndResetWeeklyQuota() {
   const progress = getPlayerQuotaProgress();
   const currentWeek = getCurrentQuotaWeek();
-  if (progress.week !== currentWeek) {
-    // If not completed, apply penalty
-    if (!progress.completed) {
-      // Penalty: -20% EXP progress (doc rule — no level loss)
-      let newExp = Math.floor((_charData.professionXp||0)*0.8);
-      updateDoc(doc(db, "characters", _uid), {
-        professionXp: newExp,
-        "quotaProgress": { week: currentWeek, submitted: {common:0,uncommon:0,rare:0,legendary:0,mythic:0}, completed: false, penalty: true, bonus: false }
-      }).then(()=>{
-        _charData.professionXp = newExp;
-        _charData.quotaProgress = { week: currentWeek, submitted: {common:0,uncommon:0,rare:0,legendary:0,mythic:0}, completed: false, penalty: true, bonus: false };
-        renderProfessionQuota();
-        window.showToast("Missed quota last week: -20% profession EXP.","error");
-      });
-    } else {
-      // Reset for new week
-      updateDoc(doc(db, "characters", _uid), {
-        "quotaProgress": { week: currentWeek, submitted: {common:0,uncommon:0,rare:0,legendary:0,mythic:0}, completed: false, penalty: false, bonus: false },
-        professionLuckBonus: false
-      }).then(()=>{
-        _charData.quotaProgress = { week: currentWeek, submitted: {common:0,uncommon:0,rare:0,legendary:0,mythic:0}, completed: false, penalty: false, bonus: false };
-        _charData.professionLuckBonus = false;
-        renderProfessionQuota();
-      });
-    }
+  // Same week — nothing to reset. Penalty flag on the current week's doc
+  // is intentional (player was penalized this week already).
+  if (progress.week === currentWeek) return;
+
+  // Week has rolled over. Check whether the player completed last week.
+  if (!progress.completed) {
+    // Missed quota: apply -20% EXP penalty
+    let newExp = Math.floor((_charData.professionXp||0)*0.8);
+    // penalty:false on the NEW week — the flag records "were you penalized
+    // during THIS week", not "were you penalized at the start of this week".
+    const newProgress = { week: currentWeek, submitted: {common:0,uncommon:0,rare:0,legendary:0,mythic:0}, completed: false, penalty: false, bonus: false };
+    updateDoc(doc(db, "characters", _uid), {
+      professionXp: newExp,
+      "quotaProgress": newProgress
+    }).then(()=>{
+      _charData.professionXp = newExp;
+      _charData.quotaProgress = newProgress;
+      renderProfessionQuota();
+      window.showToast("Missed quota last week: -20% profession EXP.","error");
+    });
+  } else {
+    // Completed last week — clean reset, no penalty
+    const newProgress = { week: currentWeek, submitted: {common:0,uncommon:0,rare:0,legendary:0,mythic:0}, completed: false, penalty: false, bonus: false };
+    updateDoc(doc(db, "characters", _uid), {
+      "quotaProgress": newProgress,
+      professionLuckBonus: false
+    }).then(()=>{
+      _charData.quotaProgress = newProgress;
+      _charData.professionLuckBonus = false;
+      renderProfessionQuota();
+    });
   }
 }
 
