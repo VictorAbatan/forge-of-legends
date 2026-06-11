@@ -882,12 +882,6 @@ exports.ascendRank = onCall(CALL_OPTS, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Must be logged in.");
 
-  const char    = await getCharacter(uid);
-  const rankIdx = getRankIdx(char.rank);
-
-  if (rankIdx >= RANK_ORDER.length - 1) throw new HttpsError("failed-precondition", "Already at maximum rank.");
-  if ((char.level||1) < 100) throw new HttpsError("failed-precondition", `Must reach Level 100 before ascending. Currently Level ${char.level||1}.`);
-
   const INGREDIENTS = {
     "Sah'run":   ["Heart of the Red Phoenix","Gem of Luminance"],
     "Alistor":   ["The Void-Eye","Orb of Silence"],
@@ -898,35 +892,49 @@ exports.ascendRank = onCall(CALL_OPTS, async (request) => {
     "Veil":      ["Ink of Time","Eye of All-knowing"],
   };
 
-  const required = INGREDIENTS[char.deity];
-  if (!required) throw new HttpsError("failed-precondition", "Unknown deity.");
+  // FIXED: was getCharacter (plain read) + raw .update() — a concurrent bestow or battle-drop
+  // arriving between those two calls would be silently overwritten because the whole inventory
+  // array was written from a stale snapshot. Now uses withCharTransaction so the ingredient
+  // check, consumption, and stat update are all atomic against the live Firestore data.
+  let result;
+  await withCharTransaction(uid, async (char) => {
+    const rankIdx = getRankIdx(char.rank);
 
-  const qtyNeeded = Math.pow(2, rankIdx);
-  const inv = [...(char.inventory||[])];
+    if (rankIdx >= RANK_ORDER.length - 1) throw new HttpsError("failed-precondition", "Already at maximum rank.");
+    if ((char.level||1) < 100) throw new HttpsError("failed-precondition", `Must reach Level 100 before ascending. Currently Level ${char.level||1}.`);
 
-  for (const ing of required) {
-    const owned = inv.find(i => i.name === ing);
-    if (!owned || owned.qty < qtyNeeded)
-      throw new HttpsError("failed-precondition", `Need ${qtyNeeded}x ${ing}. Have ${owned?.qty||0}.`);
-  }
-  for (const ing of required) {
-    const item = inv.find(i => i.name === ing);
-    item.qty -= qtyNeeded;
-    if (item.qty <= 0) inv.splice(inv.indexOf(item), 1);
-  }
+    const required = INGREDIENTS[char.deity];
+    if (!required) throw new HttpsError("failed-precondition", "Unknown deity.");
 
-  const newRank    = RANK_ORDER[rankIdx + 1];
-  const newHpMax   = (char.hpMax||100)  + 150;
-  const newManaMax = (char.manaMax||50) + 75;
-  const newBaseXp  = RANK_BASE_EXP[rankIdx + 1] || 150;
+    const qtyNeeded = Math.pow(2, rankIdx);
+    const inv = [...(char.inventory||[])];
 
-  await db.collection("characters").doc(uid).update({
-    rank: newRank, level:1, xp:0, xpMax:newBaseXp,
-    hpMax:newHpMax, hp:newHpMax, manaMax:newManaMax, mana:newManaMax,
-    statPoints:(char.statPoints||0)+25, inventory:inv,
+    for (const ing of required) {
+      const owned = inv.find(i => i.name === ing);
+      if (!owned || owned.qty < qtyNeeded)
+        throw new HttpsError("failed-precondition", `Need ${qtyNeeded}x ${ing}. Have ${owned?.qty||0}.`);
+    }
+    for (const ing of required) {
+      const item = inv.find(i => i.name === ing);
+      item.qty -= qtyNeeded;
+      if (item.qty <= 0) inv.splice(inv.indexOf(item), 1);
+    }
+
+    const newRank    = RANK_ORDER[rankIdx + 1];
+    const newHpMax   = (char.hpMax||100)  + 150;
+    const newManaMax = (char.manaMax||50) + 75;
+    const newBaseXp  = RANK_BASE_EXP[rankIdx + 1] || 150;
+
+    result = { success:true, newRank, message:`🎉 You have ascended to ${newRank}!`, newHpMax, newManaMax };
+
+    return {
+      rank: newRank, level:1, xp:0, xpMax:newBaseXp,
+      hpMax:newHpMax, hp:newHpMax, manaMax:newManaMax, mana:newManaMax,
+      statPoints:(char.statPoints||0)+25, inventory:inv,
+    };
   });
 
-  return { success:true, newRank, message:`🎉 You have ascended to ${newRank}!`, newHpMax, newManaMax };
+  return result;
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -1407,37 +1415,47 @@ exports.cancelStalePubGames = onSchedule({
 
   if (snap.empty) return;
 
-  const batch = db.batch();
-  const refunds = []; // { uid, amount } for regular games
-
-  snap.forEach(docSnap => {
+  // FIXED: previously used a batch delete + separate refund loop.
+  // Race: the client-side cancel (pub.js) also runs a transaction that sets
+  // status='cancelled' and then refunds. If both fire simultaneously, the
+  // scheduled function's refund loop would still execute after the client
+  // already refunded, resulting in a double gold award.
+  // Fix: process each game in its own transaction that atomically checks the
+  // current status before deleting and refunding — if the client already
+  // claimed it (status='cancelled' or doc deleted), we skip the refund.
+  let cancelled = 0;
+  for (const docSnap of snap.docs) {
     const game = docSnap.data();
-    // Only cancel if still just the host (no one joined)
-    if (!game.players || game.players.length !== 1) return;
+    // Only cancel solo tables (no one joined yet)
+    if (!game.players || game.players.length !== 1) continue;
 
-    batch.delete(docSnap.ref);
+    const isRegularGame = game.gameType !== "devils-hand" && game.hostUid && game.tableStake > 0;
 
-    // Refund host bet for regular games (gold was deducted on createPubGame)
-    if (game.gameType !== "devils-hand" && game.hostUid && game.tableStake > 0) {
-      refunds.push({ uid: game.hostUid, amount: game.tableStake });
-    }
-  });
-
-  await batch.commit();
-
-  // Refund gold for regular game hosts
-  for (const { uid, amount } of refunds) {
     try {
-      await db.collection("characters").doc(uid).update({
-        gold: FieldValue.increment(amount),
+      await db.runTransaction(async (tx) => {
+        const freshSnap = await tx.get(docSnap.ref);
+        if (!freshSnap.exists) return; // already deleted by client cancel
+        const freshStatus = freshSnap.data()?.status;
+        // Only proceed if still open/lobby — client cancel sets 'cancelled' first
+        if (freshStatus !== "open" && freshStatus !== "lobby") return;
+
+        tx.delete(docSnap.ref);
+
+        if (isRegularGame) {
+          const charRef = db.collection("characters").doc(game.hostUid);
+          tx.update(charRef, { gold: FieldValue.increment(game.tableStake) });
+        }
       });
-      console.log(`[cancelStalePubGames] Refunded ${amount} gold to ${uid}`);
+      cancelled++;
+      if (isRegularGame) {
+        console.log(`[cancelStalePubGames] Refunded ${game.tableStake} gold to ${game.hostUid}`);
+      }
     } catch (e) {
-      console.warn(`[cancelStalePubGames] Failed to refund ${uid}:`, e.message);
+      console.warn(`[cancelStalePubGames] Failed to cancel game ${docSnap.id}:`, e.message);
     }
   }
 
-  console.log(`[cancelStalePubGames] Cancelled ${snap.size} stale table(s).`);
+  console.log(`[cancelStalePubGames] Cancelled ${cancelled} stale table(s).`);
 });
 
 exports.createPubGame = onCall(CALL_OPTS, async (request) => {

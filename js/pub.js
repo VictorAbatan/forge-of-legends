@@ -35,6 +35,9 @@ let _activeGameId    = null;
 let _resultsUnsub    = null;
 let _lobbyGamesUnsub = null;
 let _awardedGameIds  = new Set();
+// Tracks "gameId_rN" keys for rounds where THIS client already deducted the base stake.
+// Prevents double-deduction if multiple snapshots fire while status is 'betting'.
+let _deductedRounds  = new Set();
 let _tdCancelTimer   = null;
 let _hrCancelTimer   = null;
 let _dhCancelTimer   = null;
@@ -56,19 +59,31 @@ function _startCancelCountdown(statusEl, createdMs, buildText, gameId) {
     _cancelled = true;
     if (!gameId) return;
     try {
-      const snap = await getDoc(doc(db, 'pubGames', gameId));
-      if (!snap.exists()) return;
-      const game = snap.data();
-      // Only cancel if still open/lobby — don't touch in-progress or complete games
-      if (game.status !== 'open' && game.status !== 'lobby') return;
-      // Refund all players their bets
-      for (const p of (game.players || [])) {
+      // Use a transaction to atomically claim the cancel.
+      // Multiple connected clients all run this timer; without a transaction,
+      // every client would refund every player, resulting in 2–4× over-refunds.
+      // The transaction marks status='cancelled' first so only one client wins.
+      let playersToRefund = [];
+      const gameRef = doc(db, 'pubGames', gameId);
+      await runTransaction(db, async tx => {
+        const snap = await tx.get(gameRef);
+        if (!snap.exists()) { playersToRefund = null; return; } // already gone
+        const game = snap.data();
+        // Only cancel if still open/lobby — don't touch in-progress or complete games
+        if (game.status !== 'open' && game.status !== 'lobby') { playersToRefund = null; return; }
+        // Claim the cancel atomically — any other client's transaction will see 'cancelled' and abort
+        tx.update(gameRef, { status: 'cancelled' });
+        playersToRefund = game.players || [];
+      });
+      if (!playersToRefund) return; // another client already handled it
+      // Refund all players their bets (only this client does it, guaranteed by transaction above)
+      for (const p of playersToRefund) {
         if (p.bet || p.totalBet) {
           const refund = p.bet || p.totalBet || 0;
           if (refund > 0) await _awardGold(p.uid, refund);
         }
       }
-      await deleteDoc(doc(db, 'pubGames', gameId));
+      await deleteDoc(gameRef);
       if (statusEl && document.body.contains(statusEl)) {
         statusEl.textContent = '⌛ Table cancelled — no one joined in time.';
         statusEl.className = 'pub-status-bar loss';
@@ -100,17 +115,27 @@ function _resetStaleTimer(timerRef, setTimer, gameId, gameStatus) {
   return setTimeout(async () => {
     if (!gameId) return;
     try {
-      const snap = await getDoc(doc(db, 'pubGames', gameId));
-      if (!snap.exists()) return;
-      const game = snap.data();
-      if (terminalStatuses.includes(game.status)) return; // already resolved
+      // Use a transaction to atomically claim the stale-cancel.
+      // All connected players run this watchdog; without a transaction every
+      // client would independently refund every player (N-player × N-client gold).
+      let playersToRefund = [];
+      const gameRef = doc(db, 'pubGames', gameId);
+      await runTransaction(db, async tx => {
+        const snap = await tx.get(gameRef);
+        if (!snap.exists()) { playersToRefund = null; return; }
+        const game = snap.data();
+        if (terminalStatuses.includes(game.status)) { playersToRefund = null; return; }
+        // Mark as cancelled atomically so only one client proceeds
+        tx.update(gameRef, { status: 'cancelled' });
+        playersToRefund = game.players || [];
+      });
+      if (!playersToRefund) return;
       console.warn(`[Pub] Stale game detected (${gameId.slice(0,8)}) — cancelling.`);
-      // Refund all players
-      for (const p of (game.players || [])) {
+      for (const p of playersToRefund) {
         const refund = p.bet || p.totalBet || 0;
         if (refund > 0) await _awardGold(p.uid, refund);
       }
-      await deleteDoc(doc(db, 'pubGames', gameId));
+      await deleteDoc(gameRef);
       window.showToast?.('⌛ Game cancelled — no activity for 2 minutes.', '');
       setTimeout(() => _backToLobby(), 1500);
     } catch(e) { console.warn('[Pub] stale game cleanup error:', e); }
@@ -1206,32 +1231,41 @@ window._tdCallRoll = async function() {
 window._tdLeaveGame = async function() {
   if (!_activeGameId || !_uid) return;
   try {
-    const snap = await getDoc(doc(db,'pubGames',_activeGameId));
-    if (!snap.exists()) return;
-    const game    = snap.data();
-    // Guard: never refund if game already completed — bet was already settled by the trigger
-    if (game.status === 'complete' || game.status === 'rolling') {
-      window.showToast?.('Game already ended — no refund.', '');
-      if (_tdCancelTimer) { clearInterval(_tdCancelTimer); _tdCancelTimer = null; }
-      if (_activeGameUnsub) { _activeGameUnsub(); _activeGameUnsub = null; }
-      _activeGameId = null;
-      _backToLobby();
-      return;
-    }
-    const myEntry = game.players.find(p => p.uid === _uid);
-    if (!myEntry) return;
-    const newPlayers = game.players.filter(p => p.uid !== _uid);
-    if (newPlayers.length === 0) {
-      await deleteDoc(doc(db,'pubGames',_activeGameId));
+    const gameRef = doc(db,'pubGames',_activeGameId);
+    let refundAmount = 0;
+
+    // Use a transaction so the status check and player removal are atomic.
+    // Without this, a race between the initial getDoc and the updateDoc could
+    // let a player leave (and get refunded) after the game transitions to 'rolling'.
+    await runTransaction(db, async tx => {
+      const snap = await tx.get(gameRef);
+      if (!snap.exists()) return;
+      const game = snap.data();
+      if (game.status === 'complete' || game.status === 'rolling') {
+        refundAmount = 0; // game already decided — no refund
+        return;
+      }
+      const myEntry = game.players.find(p => p.uid === _uid);
+      if (!myEntry) return;
+      refundAmount = myEntry.bet || 0;
+      const newPlayers = game.players.filter(p => p.uid !== _uid);
+      if (newPlayers.length === 0) {
+        tx.delete(gameRef);
+      } else {
+        tx.update(gameRef, {
+          players: newPlayers,
+          pot:     (game.pot || 0) - refundAmount,
+          hostUid: newPlayers[0].uid,
+        });
+      }
+    });
+
+    if (refundAmount > 0) {
+      await _awardGold(_uid, refundAmount);
+      window.showToast?.('Left the table. Bet refunded.', '');
     } else {
-      await updateDoc(doc(db,'pubGames',_activeGameId), {
-        players: newPlayers,
-        pot:     (game.pot || 0) - (myEntry.bet || 0),
-        hostUid: newPlayers[0].uid,
-      });
+      window.showToast?.('Game already ended — no refund.', '');
     }
-    await _awardGold(_uid, myEntry.bet || 0);
-    window.showToast?.('Left the table. Bet refunded.', '');
     if (_tdCancelTimer) { clearInterval(_tdCancelTimer); _tdCancelTimer = null; }
     if (_activeGameUnsub) { _activeGameUnsub(); _activeGameUnsub = null; }
     _activeGameId = null;
@@ -1743,32 +1777,38 @@ window._hrCallRoll = async function() {
 window._hrLeaveGame = async function() {
   if (!_activeGameId || !_uid) return;
   try {
-    const snap = await getDoc(doc(db,'pubGames',_activeGameId));
-    if (!snap.exists()) return;
-    const game    = snap.data();
-    // Guard: never refund if game already completed — bet was already settled by the trigger
-    if (game.status === 'complete' || game.status === 'rolling') {
-      window.showToast?.('Game already ended — no refund.', '');
-      if (_hrCancelTimer) { clearInterval(_hrCancelTimer); _hrCancelTimer = null; }
-      if (_activeGameUnsub) { _activeGameUnsub(); _activeGameUnsub = null; }
-      _activeGameId = null;
-      _backToLobby();
-      return;
-    }
-    const myEntry = game.players.find(p => p.uid === _uid);
-    if (!myEntry) return;
-    const newPlayers = game.players.filter(p => p.uid !== _uid);
-    if (newPlayers.length === 0) {
-      await deleteDoc(doc(db,'pubGames',_activeGameId));
+    const gameRef = doc(db,'pubGames',_activeGameId);
+    let refundAmount = 0;
+
+    await runTransaction(db, async tx => {
+      const snap = await tx.get(gameRef);
+      if (!snap.exists()) return;
+      const game = snap.data();
+      if (game.status === 'complete' || game.status === 'rolling') {
+        refundAmount = 0;
+        return;
+      }
+      const myEntry = game.players.find(p => p.uid === _uid);
+      if (!myEntry) return;
+      refundAmount = myEntry.bet || 0;
+      const newPlayers = game.players.filter(p => p.uid !== _uid);
+      if (newPlayers.length === 0) {
+        tx.delete(gameRef);
+      } else {
+        tx.update(gameRef, {
+          players: newPlayers,
+          pot:     (game.pot || 0) - refundAmount,
+          hostUid: newPlayers[0].uid,
+        });
+      }
+    });
+
+    if (refundAmount > 0) {
+      await _awardGold(_uid, refundAmount);
+      window.showToast?.('Left the table. Bet refunded.', '');
     } else {
-      await updateDoc(doc(db,'pubGames',_activeGameId), {
-        players: newPlayers,
-        pot:     (game.pot || 0) - (myEntry.bet || 0),
-        hostUid: newPlayers[0].uid,
-      });
+      window.showToast?.('Game already ended — no refund.', '');
     }
-    await _awardGold(_uid, myEntry.bet || 0);
-    window.showToast?.('Left the table. Bet refunded.', '');
     if (_hrCancelTimer) { clearInterval(_hrCancelTimer); _hrCancelTimer = null; }
     if (_activeGameUnsub) { _activeGameUnsub(); _activeGameUnsub = null; }
     _activeGameId = null;
@@ -2500,30 +2540,77 @@ async function _dhRenderGameState(game, gameId) {
     _dhResolveRound(gameId).finally(() => { _dhResolvingRound = false; });
   }
 
-  // Handle round_end — auto-advance after 4s (host only)
+  // Handle round_end — auto-advance after 4s (host only).
+  // _dhAdvancingRound stays true until the entire deal/finish work is done.
+  // Moving the reset to AFTER the await means any new snapshots during the
+  // 4-second window won't schedule a second _dhDealRound and double-deduct stakes.
   if (game.status === 'round_end' && game.hostUid === myUid && !_dhAdvancingRound) {
     _dhAdvancingRound = true;
     setTimeout(async () => {
-      _dhAdvancingRound = false;
-      const latestSnap = await getDoc(doc(db, 'pubGames', gameId));
-      if (!latestSnap.exists() || latestSnap.data().status !== 'round_end') return;
-      const latestGame = latestSnap.data();
-      if (latestGame.round < 5) {
-        await _dhDealRound(latestGame, gameId, latestGame.round + 1);
-      } else {
-        await _dhFinishGame(latestGame, gameId);
+      try {
+        const latestSnap = await getDoc(doc(db, 'pubGames', gameId));
+        if (!latestSnap.exists() || latestSnap.data().status !== 'round_end') return;
+        const latestGame = latestSnap.data();
+        if (latestGame.round < 5) {
+          await _dhDealRound(latestGame, gameId, latestGame.round + 1);
+        } else {
+          await _dhFinishGame(latestGame, gameId);
+        }
+      } finally {
+        // Only clear the flag AFTER all work is complete so concurrent snapshot
+        // fires during the 4s wait cannot trigger a second deal.
+        _dhAdvancingRound = false;
       }
     }, 4000);
   }
 
+  // Non-host players self-deduct their base stake when a new round begins.
+  // The host already deducts inside _dhDealRound (via _deductGold_forUid which
+  // skips non-self). Without this block, every player except the host played
+  // each round's stake for free — only paying raises/folds.
+  // DOUBLE-DEDUCTION GUARD: use both an in-memory Set (fast path) AND a
+  // Firestore-persisted flag (`clientDeducted.{uid}_r{round}`) so that a page
+  // refresh or re-subscribe can never re-deduct the same round's stake.
+  if (game.status === 'betting' && game.hostUid !== myUid) {
+    const deductKey = gameId + '_r' + game.round + '_deduct';
+    if (!_deductedRounds.has(deductKey)) {
+      // Check Firestore-persisted flag before touching gold
+      const alreadyDeducted = game.clientDeducted?.[myUid + '_r' + game.round] === true;
+      if (!alreadyDeducted) {
+        _deductedRounds.add(deductKey);
+        // Persist the flag BEFORE deducting — if deduction fails it just retries,
+        // but if we deducted first and the flag write fails the player loses twice.
+        try {
+          await updateDoc(doc(db, 'pubGames', gameId), {
+            [`clientDeducted.${myUid}_r${game.round}`]: true
+          });
+        } catch(e) { console.warn('[DH] clientDeducted flag write failed, aborting deduct:', e); return; }
+        await _deductGold(game.baseStake || 100);
+      } else {
+        // Already deducted in a prior session — just mark in-memory so we skip the check next time
+        _deductedRounds.add(deductKey);
+      }
+    }
+  }
+
   // Handle round_end: each player awards their own gold from roundPayouts.
-  // This avoids the host writing to other players' character docs.
+  // DOUBLE-AWARD GUARD: same two-tier guard as the winner prize — in-memory Set
+  // + Firestore clientSettled flag, so a page reload can't re-award a round payout.
   if (game.status === 'round_end') {
     const roundKey = gameId + '_r' + game.round;
     const myPayout = game.roundPayouts?.[myUid] || 0;
-    if (myPayout > 0 && !_awardedGameIds.has(roundKey)) {
+    const roundSettledKey = myUid + '_r' + game.round;
+    const alreadyRoundSettled = game.clientSettled?.[roundSettledKey] === true;
+    if (myPayout > 0 && !_awardedGameIds.has(roundKey) && !alreadyRoundSettled) {
       _awardedGameIds.add(roundKey);
+      try {
+        await updateDoc(doc(db, 'pubGames', gameId), {
+          [`clientSettled.${roundSettledKey}`]: true
+        });
+      } catch(e) { console.warn('[DH] round clientSettled write failed, aborting award:', e); return; }
       await _awardGold(myUid, myPayout);
+    } else if (alreadyRoundSettled) {
+      _awardedGameIds.add(roundKey); // keep in-memory in sync
     }
   }
 
@@ -2531,30 +2618,42 @@ async function _dhRenderGameState(game, gameId) {
   if (game.status === 'complete') {
     const won = game.winnerUid === myUid;
     if (won && !_awardedGameIds.has(gameId)) {
-      _awardedGameIds.add(gameId);
-      await _awardGold(myUid, game.prize); // winner awards themselves
-      _spawnCoinRain();
-      window.logActivity?.('🃏', `<b>Pub Win!</b> Devil's Hand — Won <b>${game.prize}</b> 💰.`, '#4ec878');
-      // Sync gold display from Firestore so the displayed balance is authoritative
-      setTimeout(async () => {
+      // Also check Firestore-persisted clientSettled so a page reload while the
+      // game doc is still 'complete' can't re-award the prize a second time.
+      const alreadySettled = game.clientSettled?.[myUid] === true;
+      if (!alreadySettled) {
+        _awardedGameIds.add(gameId);
+        // Write clientSettled BEFORE awarding so if _awardGold fails the flag
+        // is already set — on retry the Firestore check will catch it.
         try {
-          await window.refreshCharData?.();
-          const g = window._charData?.gold ?? 0;
-          document.getElementById('stat-gold') && (document.getElementById('stat-gold').textContent = g);
-          document.getElementById('s-gold')    && (document.getElementById('s-gold').textContent    = g);
-        } catch(e) { console.warn('[Pub] DH post-win gold sync failed:', e); }
-      }, 2500);
-      // Clear any debt the winner had from loans during this game
-      const charDebt = (_charData?.debtGold || window._charData?.debtGold || 0);
-      if (charDebt > 0) {
-        try {
-          await updateDoc(doc(db, 'characters', myUid), { debtGold: 0, debtSource: null });
-          if (_charData) _charData.debtGold = 0;
-          if (window._charData) window._charData.debtGold = 0;
-          window.showToast?.('🎉 Debt cleared by your winnings!', 'success');
-        } catch(e) { console.warn('[DH] debt clear failed:', e); }
-      }
-    }
+          await updateDoc(doc(db, 'pubGames', gameId), {
+            [`clientSettled.${myUid}`]: true
+          });
+        } catch(e) { console.warn('[DH] clientSettled write failed, aborting award:', e); return; }
+        await _awardGold(myUid, game.prize); // winner awards themselves
+        _spawnCoinRain();
+        window.logActivity?.('🃏', `<b>Pub Win!</b> Devil's Hand — Won <b>${game.prize}</b> 💰.`, '#4ec878');
+        // Sync gold display from Firestore so the displayed balance is authoritative
+        setTimeout(async () => {
+          try {
+            await window.refreshCharData?.();
+            const g = window._charData?.gold ?? 0;
+            document.getElementById('stat-gold') && (document.getElementById('stat-gold').textContent = g);
+            document.getElementById('s-gold')    && (document.getElementById('s-gold').textContent    = g);
+          } catch(e) { console.warn('[Pub] DH post-win gold sync failed:', e); }
+        }, 2500);
+        // Clear any debt the winner had from loans during this game
+        const charDebt = (_charData?.debtGold || window._charData?.debtGold || 0);
+        if (charDebt > 0) {
+          try {
+            await updateDoc(doc(db, 'characters', myUid), { debtGold: 0, debtSource: null });
+            if (_charData) _charData.debtGold = 0;
+            if (window._charData) window._charData.debtGold = 0;
+            window.showToast?.('🎉 Debt cleared by your winnings!', 'success');
+          } catch(e) { console.warn('[DH] debt clear failed:', e); }
+        }
+      } // end if (!alreadySettled)
+    } // end if (won && !_awardedGameIds)
     if (game.players.some(p => p.uid === myUid)) {
       setTimeout(() => {
         const myBet = game.players.find(p => p.uid === myUid)?.totalBet || 0;
@@ -2582,9 +2681,6 @@ window._dhFold = async function() {
 
   const myEntry   = game.players.find(p => p.uid === _uid);
   const halfStake = Math.floor((game.baseStake || 100) / 2);
-
-  // Refund half stake to folding player
-  await _awardGold(_uid, halfStake);
 
   const updatedPlayers = game.players.map(p =>
     p.uid === _uid ? { ...p, status: 'folded', totalBet: (p.totalBet || 0) } : p
@@ -2617,6 +2713,10 @@ window._dhFold = async function() {
 
   try {
     await updateDoc(doc(db, 'pubGames', _activeGameId), updates);
+    // Refund half stake AFTER the fold is committed to Firestore.
+    // Previously this was before updateDoc — if the write failed, the player
+    // got their gold back but their status remained 'waiting', letting them fold again.
+    await _awardGold(_uid, halfStake);
     // Resolution is triggered by the host's onSnapshot (see _dhRenderGameState).
     // Do NOT call _dhResolveRound here — the acting player may not be the host,
     // and calling updateDoc from a non-host client while status is still 'betting'

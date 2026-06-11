@@ -70,15 +70,20 @@ async function _invWrite(uid, mutatorFn, extra = {}) {
       // Keep _charData consistent with what was just written
       await refreshCharData();
     } catch (e) {
-      console.warn('[_invWrite] transaction failed:', e);
-      // Last-resort fallback: apply the mutation locally and write directly.
-      // This is imperfect but better than silently losing the change.
+      console.warn('[_invWrite] transaction failed, attempting fallback getDoc:', e);
+      // Last-resort fallback: re-read Firestore directly (NOT _charData which may be stale)
+      // and apply the mutation. Using _charData here was the original bug — if a prior
+      // _invWrite or a pub-game gold write had not yet propagated to _charData, this
+      // fallback would silently revert those changes.
       try {
-        const fallbackInv = ((_charData?.inventory) || []).map(i => ({ ...i }));
-        mutatorFn(fallbackInv);
-        const cleaned = fallbackInv.filter(i => (i.qty ?? 1) > 0);
-        await updateDoc(doc(db, 'characters', uid), { inventory: cleaned, ...extra });
+        const charRef = doc(db, 'characters', uid);
+        const freshSnap = await getDoc(charRef);
+        const freshInv = (freshSnap.exists() ? (freshSnap.data().inventory || []) : (_charData?.inventory || [])).map(i => ({ ...i }));
+        mutatorFn(freshInv);
+        const cleaned = freshInv.filter(i => (i.qty ?? 1) > 0);
+        await updateDoc(charRef, { inventory: cleaned, ...extra });
         if (_charData) _charData.inventory = cleaned;
+        await refreshCharData();
       } catch (e2) {
         console.error('[_invWrite] fallback also failed:', e2);
       }
@@ -4431,16 +4436,15 @@ window.useItem = async function(itemName, kind) {
     const confirmed = await inkConfirm('Use your <b>Resurrection Potion</b>?<br><span style="font-size:0.85rem;color:var(--ash)">You will be instantly revived at full HP and Mana.</span>');
     if (!confirmed) return;
     // Consume the item first
-    if (inv[idx].qty > 1) inv[idx].qty--; else inv.splice(idx, 1);
-    await updateDoc(doc(db, 'characters', _uid), {
+    await _invWrite(_uid, inv => {
+      const i = inv.findIndex(x => x.name === itemName);
+      if (i !== -1) { if (inv[i].qty > 1) inv[i].qty--; else inv.splice(i, 1); }
+    }, {
       isDead: false,
       hp: _charData.hpMax || 100,
       mana: _charData.manaMax || 50,
-      resurrectAt: null,
-      inventory: inv
+      resurrectAt: null
     });
-    Object.assign(_charData, { isDead: false, hp: _charData.hpMax || 100, mana: _charData.manaMax || 50, resurrectAt: null, inventory: inv });
-    window._allInvItems = inv;
     await refreshCharData();
     const banner   = document.getElementById('battle-dead-banner');
     const zoneArea = document.getElementById('battle-zone-select');
@@ -4456,10 +4460,10 @@ window.useItem = async function(itemName, kind) {
   } else if (itemName === 'Class Reset Potion') {
     const confirmed = await inkConfirm('Use <b>Class Reset Potion</b>?<br><span style="font-size:0.85rem;color:var(--ash)">Your class, skills, and stances will be cleared. Stat points earned are kept.</span>');
     if (!confirmed) return;
-    if (inv[idx].qty > 1) inv[idx].qty--; else inv.splice(idx, 1);
-    await updateDoc(doc(db, 'characters', _uid), { charClass: null, classRole: null, skills: [], stances: [], inventory: inv });
-    Object.assign(_charData, { charClass: null, classRole: null, skills: [], stances: [], inventory: inv });
-    window._allInvItems = inv;
+    await _invWrite(_uid, inv => {
+      const i = inv.findIndex(x => x.name === itemName);
+      if (i !== -1) { if (inv[i].qty > 1) inv[i].qty--; else inv.splice(i, 1); }
+    }, { charClass: null, classRole: null, skills: [], stances: [] });
     await refreshCharData(); _syncAllDisplays(_charData); window._refreshInvDisplay();
     logActivity('⚗️', 'Used a <b>Class Reset Potion</b>. Class cleared — choosing again.', '#c9a84c');
     openClassPickerModal();
@@ -4468,7 +4472,6 @@ window.useItem = async function(itemName, kind) {
   } else if (itemName === 'Stat Reset Potion') {
     const confirmed = await inkConfirm('Use <b>Stat Reset Potion</b>?<br><span style="font-size:0.85rem;color:var(--ash)">All stats reset to 10. Your earned stat points are refunded for redistribution.</span>');
     if (!confirmed) return;
-    if (inv[idx].qty > 1) inv[idx].qty--; else inv.splice(idx, 1);
     const baseStats = { str:10, int:10, def:10, dex:10 };
     // Stat points formula: 20 (welcome bonus) + 3 per level-up + 25 per rank ascension
     const WELCOME_BONUS = 20;
@@ -4477,9 +4480,10 @@ window.useItem = async function(itemName, kind) {
     const earnedPoints = WELCOME_BONUS
       + Math.max(0, ((_charData.level || 1) - 1) * 3)
       + rankIdx * 25;
-    await updateDoc(doc(db, 'characters', _uid), { stats: baseStats, statPoints: earnedPoints, inventory: inv });
-    Object.assign(_charData, { stats: baseStats, statPoints: earnedPoints, inventory: inv });
-    window._allInvItems = inv;
+    await _invWrite(_uid, inv => {
+      const i = inv.findIndex(x => x.name === itemName);
+      if (i !== -1) { if (inv[i].qty > 1) inv[i].qty--; else inv.splice(i, 1); }
+    }, { stats: baseStats, statPoints: earnedPoints });
     await refreshCharData(); _syncAllDisplays(_charData); window._refreshInvDisplay();
     window.showToast(`🔄 Stat Reset! ${earnedPoints} stat points refunded.`, 'success');
     logActivity('🔄', `Used a <b>Stat Reset Potion</b>. Stats reset to base, ${earnedPoints} points refunded.`, '#c9a84c');
@@ -4489,10 +4493,10 @@ window.useItem = async function(itemName, kind) {
   } else if (itemName === 'Race Rebirth Potion') {
     const confirmed = await inkConfirm('Use <b>Race Rebirth Potion</b>?<br><span style="font-size:0.85rem;color:var(--ash)">Your race and racial attribute will be cleared. Choose a new race.</span>');
     if (!confirmed) return;
-    if (inv[idx].qty > 1) inv[idx].qty--; else inv.splice(idx, 1);
-    await updateDoc(doc(db, 'characters', _uid), { race: null, raceAttr: null, inventory: inv });
-    Object.assign(_charData, { race: null, raceAttr: null, inventory: inv });
-    window._allInvItems = inv;
+    await _invWrite(_uid, inv => {
+      const i = inv.findIndex(x => x.name === itemName);
+      if (i !== -1) { if (inv[i].qty > 1) inv[i].qty--; else inv.splice(i, 1); }
+    }, { race: null, raceAttr: null });
     await refreshCharData(); _syncAllDisplays(_charData); window._refreshInvDisplay();
     logActivity('🌀', 'Used a <b>Race Rebirth Potion</b>. Race cleared — choosing again.', '#c9a84c');
     openRacePickerModal();
@@ -4501,10 +4505,10 @@ window.useItem = async function(itemName, kind) {
   } else if (itemName === 'Divine Shift Potion') {
     const confirmed = await inkConfirm('Use <b>Divine Shift Potion</b>?<br><span style="font-size:0.85rem;color:var(--ash)">Your deity will be cleared and Faith Level reset to 0. Choose a new deity.</span>');
     if (!confirmed) return;
-    if (inv[idx].qty > 1) inv[idx].qty--; else inv.splice(idx, 1);
-    await updateDoc(doc(db, 'characters', _uid), { deity: null, deityTitle: null, faithLevel: 0, blessing: null, blessingDesc: null, inventory: inv });
-    Object.assign(_charData, { deity: null, deityTitle: null, faithLevel: 0, blessing: null, blessingDesc: null, inventory: inv });
-    window._allInvItems = inv;
+    await _invWrite(_uid, inv => {
+      const i = inv.findIndex(x => x.name === itemName);
+      if (i !== -1) { if (inv[i].qty > 1) inv[i].qty--; else inv.splice(i, 1); }
+    }, { deity: null, deityTitle: null, faithLevel: 0, blessing: null, blessingDesc: null });
     await refreshCharData(); _syncAllDisplays(_charData); window._refreshInvDisplay();
     logActivity('🔮', 'Used a <b>Divine Shift Potion</b>. Deity cleared, Faith reset to 0.', '#c9a84c');
     openDeityPickerModal();
@@ -4516,13 +4520,18 @@ window.useItem = async function(itemName, kind) {
 
   // Consume 1 of the item and save for all branches that set updates/toastMsg
   if (toastMsg) {
-    if (inv[idx].qty > 1) inv[idx].qty--;
-    else inv.splice(idx, 1);
-    updates.inventory = inv;
-
-    await updateDoc(doc(db, 'characters', _uid), updates);
-    Object.assign(_charData, updates);
-    window._allInvItems = inv;
+    // FIXED: was a stale read-modify-write — concurrent battle loot/bestow/craft
+    // would be silently overwritten. Now uses _invWrite (Firestore transaction)
+    // so inventory is always merged from the live server doc.
+    // Non-inventory fields (hp, mana, etc.) pass through as the extra argument.
+    const extraUpdates = { ...updates };
+    delete extraUpdates.inventory; // _invWrite owns the inventory field
+    await _invWrite(_uid, inv => {
+      const i = inv.findIndex(x => x.name === itemName);
+      if (i !== -1) { if (inv[i].qty > 1) inv[i].qty--; else inv.splice(i, 1); }
+    }, extraUpdates);
+    await refreshCharData();
+    window._allInvItems = _charData.inventory || [];
 
     // Sync every display immediately
     _syncAllDisplays(_charData);
@@ -6247,25 +6256,28 @@ async function buyItem({ name, icon, price, type, qty = 1 }) {
   btn.disabled = true; btn.textContent = "BUYING...";
 
   try {
-    const inv = [...((_charData?.inventory)||[])];
     const isEquip = getItemType(name) === 'equipment';
-    const existing = inv.find(i => i.name === name);
-    if (existing && !isEquip) existing.qty += qty;
-    else {
-      // Equipment always gets a unique iid so enchantment works immediately
-      const newItem = { name, icon, type, qty: 1 };
-      if (isEquip) newItem.iid = Math.random().toString(36).slice(2,10) + Date.now().toString(36);
-      if (!isEquip && qty > 1) newItem.qty = qty;
-      inv.push(newItem);
-    }
+    // Generate iid for equipment outside the transaction so it's stable
+    const newIid = isEquip ? (Math.random().toString(36).slice(2,10) + Date.now().toString(36)) : null;
 
-    await updateDoc(doc(db, "characters", _uid), {
-      gold:      gold - totalPrice,
-      inventory: inv,
-    });
-    if (_charData) { _charData.gold = gold - totalPrice; _charData.inventory = inv; }
+    // FIXED: use _invWrite (Firestore transaction) instead of a raw updateDoc on stale _charData.
+    // The old code read inventory from _charData, mutated it in memory, then wrote the whole array.
+    // If _invWrite (worship, battle drops) had a queued write in-flight, the shop write would race
+    // and overwrite the server with a stale local snapshot — silently dropping items the server
+    // had already added. _invWrite queues writes serially and always reads fresh from Firestore.
+    await _invWrite(_uid, inv => {
+      const existing = inv.find(i => i.name === name);
+      if (existing && !isEquip) {
+        existing.qty += qty;
+      } else {
+        const newItem = { name, icon, type, qty: isEquip ? 1 : qty };
+        if (isEquip) newItem.iid = newIid;
+        inv.push(newItem);
+      }
+    }, { gold: (_charData?.gold ?? 0) - totalPrice });
+    // _invWrite calls refreshCharData() internally, so _charData is already up-to-date here
 
-    window._allInvItems = inv;
+    window._allInvItems = _charData?.inventory || [];
     _syncAllDisplays(_charData);
     window._refreshInvDisplay();
     document.getElementById("buy-modal").style.display = "none";
