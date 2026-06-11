@@ -2616,23 +2616,27 @@ async function _dhRenderGameState(game, gameId) {
 
   // Handle complete
   if (game.status === 'complete') {
-    const won = game.winnerUid === myUid;
+    // Support both solo winner and split-pot ties
+    const myPayout = game.splitPayouts?.[myUid] ?? (game.winnerUid === myUid ? (game.totalPot || game.prize || 0) : 0);
+    const won      = myPayout > 0;
+
     if (won && !_awardedGameIds.has(gameId)) {
-      // Also check Firestore-persisted clientSettled so a page reload while the
-      // game doc is still 'complete' can't re-award the prize a second time.
+      // Firestore-persisted clientSettled guards against double-award on reload
       const alreadySettled = game.clientSettled?.[myUid] === true;
       if (!alreadySettled) {
         _awardedGameIds.add(gameId);
-        // Write clientSettled BEFORE awarding so if _awardGold fails the flag
-        // is already set — on retry the Firestore check will catch it.
+        // Write clientSettled BEFORE awarding — if _awardGold fails, flag is already set
         try {
           await updateDoc(doc(db, 'pubGames', gameId), {
             [`clientSettled.${myUid}`]: true
           });
         } catch(e) { console.warn('[DH] clientSettled write failed, aborting award:', e); return; }
-        await _awardGold(myUid, game.prize); // winner awards themselves
+        await _awardGold(myUid, myPayout);
         _spawnCoinRain();
-        window.logActivity?.('🃏', `<b>Pub Win!</b> Devil's Hand — Won <b>${game.prize}</b> 💰.`, '#4ec878');
+        const logMsg = game.isTie
+          ? `<b>Pub Win!</b> Devil's Hand — Tied! Split pot: <b>${myPayout}</b> 💰.`
+          : `<b>Pub Win!</b> Devil's Hand — Won <b>${myPayout}</b> 💰.`;
+        window.logActivity?.('🃏', logMsg, '#4ec878');
         // Sync gold display from Firestore so the displayed balance is authoritative
         setTimeout(async () => {
           try {
@@ -2656,8 +2660,9 @@ async function _dhRenderGameState(game, gameId) {
     } // end if (won && !_awardedGameIds)
     if (game.players.some(p => p.uid === myUid)) {
       setTimeout(() => {
-        const myBet = game.players.find(p => p.uid === myUid)?.totalBet || 0;
-        _showResultOverlay(won, null, game.winnerName, game.prize, won ? game.prize : myBet);
+        const myBet       = game.players.find(p => p.uid === myUid)?.totalBet || 0;
+        const displayName = game.isTie ? `${game.winnerName} (split)` : game.winnerName;
+        _showResultOverlay(won, null, displayName, game.isTie ? myPayout : game.prize, won ? myPayout : myBet);
       }, 1200);
     }
     setTimeout(() => { if (_activeGameUnsub) { _activeGameUnsub(); _activeGameUnsub = null; } _activeGameId = null; }, 6000);
@@ -2914,28 +2919,46 @@ async function _dhResolveRound(gameId) {
 
 // ── Finish game (after 5 rounds) ───────────────────────────────────
 async function _dhFinishGame(game, gameId) {
-  // Winner = player with most rounds won
-  const sorted = [...game.players].sort((a, b) => (b.roundsWon || 0) - (a.roundsWon || 0));
-  const topWins = sorted[0].roundsWon || 0;
+  // Winner(s) = player(s) with most rounds won; ties split the pot evenly
+  const sorted     = [...game.players].sort((a, b) => (b.roundsWon || 0) - (a.roundsWon || 0));
+  const topWins    = sorted[0].roundsWon || 0;
   const topPlayers = sorted.filter(p => (p.roundsWon || 0) === topWins);
+  const totalPrize = game.totalPot || 0;
+  const isTie      = topPlayers.length > 1;
 
-  const winner = topPlayers[0]; // if still tied, first alphabetically wins
-  const prize  = game.totalPot || 0;
+  // Split pot evenly; remainder (floor division dust) goes to first winner so no gold disappears
+  const splitAmount  = Math.floor(totalPrize / topPlayers.length);
+  const remainder    = totalPrize - splitAmount * topPlayers.length;
+  const splitPayouts = {};
+  topPlayers.forEach((p, i) => {
+    splitPayouts[p.uid] = splitAmount + (i === 0 ? remainder : 0);
+  });
 
-  // No _awardGold here - winner pays themselves when they see status='complete'.
-  // winnerUid + prize are stored in the doc for each client to read.
+  const primaryWinner = topPlayers[0];
+  const winnerNames   = topPlayers.map(p => p.name).join(', ');
 
+  const notifs = [...(game.notifications || [])];
+  if (isTie) {
+    notifs.push(`🤝 Tie! ${winnerNames} each won ${topWins} round${topWins !== 1 ? 's' : ''} — pot split!`);
+    topPlayers.forEach(p => notifs.push(`💰 ${p.name}: +${splitPayouts[p.uid].toLocaleString()} 💰`));
+  } else {
+    notifs.push(`🏆 ${primaryWinner.name} wins DEVIL'S HAND with ${topWins} round${topWins !== 1 ? 's' : ''} won!`);
+    notifs.push(`💰 Total prize: ${totalPrize.toLocaleString()} 💰`);
+  }
+
+  // No _awardGold here — each winner awards themselves when they see status='complete'.
+  // splitPayouts[uid] tells each client their exact payout.
   await updateDoc(doc(db, 'pubGames', gameId), {
-    status:      'complete',
-    winnerUid:   winner.uid,
-    winnerName:  winner.name,
-    prize,
-    notifications: [...(game.notifications || []),
-      `🏆 ${winner.name} wins DEVIL'S HAND with ${topWins} round${topWins !== 1 ? 's' : ''} won!`,
-      `💰 Total prize: ${prize.toLocaleString()} 💰`,
-    ],
-    completedAt: serverTimestamp(),
-    goldSettled: true,
+    status:       'complete',
+    winnerUid:    isTie ? 'tie' : primaryWinner.uid,
+    winnerName:   isTie ? winnerNames : primaryWinner.name,
+    prize:        isTie ? splitAmount : totalPrize,
+    splitPayouts,
+    splitWinners: topPlayers.map(p => ({ uid: p.uid, name: p.name })),
+    isTie,
+    notifications: notifs,
+    completedAt:  serverTimestamp(),
+    goldSettled:  true,
   });
 
   // Log to results feed
@@ -2945,10 +2968,10 @@ async function _dhFinishGame(game, gameId) {
       status:      'complete',
       pubLocation: game.pubLocation || 'unknown',
       hostUid:     game.hostUid,
-      winnerUid:   winner.uid,
-      winnerName:  winner.name,
-      prize,
-      pot:         prize,
+      winnerUid:   isTie ? 'tie' : primaryWinner.uid,
+      winnerName:  isTie ? winnerNames : primaryWinner.name,
+      prize:       totalPrize,
+      pot:         totalPrize,
       players:     game.players,
       completedAt: serverTimestamp(),
       createdAt:   serverTimestamp(),
@@ -3009,17 +3032,21 @@ function _hideTableLoadingOverlay() {
 
 function _showResultOverlay(won, roll, winnerName, prize, myPrize) {
   document.getElementById('pub-result-overlay')?.remove();
+  const isTieWin = won && winnerName?.includes('(split)');
+  const displayName = winnerName?.replace(' (split)', '') || winnerName;
   const el = document.createElement('div');
   el.id        = 'pub-result-overlay';
   el.className = 'pub-result-overlay';
   el.innerHTML = `
     <div class="pub-result-box">
-      <div class="pub-result-emoji">${won ? '🎉' : '💸'}</div>
-      <div class="pub-result-title">${won ? 'YOU WIN!' : 'BETTER LUCK NEXT TIME'}</div>
+      <div class="pub-result-emoji">${won ? (isTieWin ? '🤝' : '🎉') : '💸'}</div>
+      <div class="pub-result-title">${won ? (isTieWin ? 'TIE — POT SPLIT!' : 'YOU WIN!') : 'BETTER LUCK NEXT TIME'}</div>
       <div class="pub-result-desc">
         ${won
-          ? (roll !== null ? `The dice landed on <strong>${roll}</strong>. You take the pot!` : `You take the pot!`)
-          : `<strong>${winnerName}</strong> wins${roll !== null ? ` with ${roll}` : ''}!`}
+          ? (isTieWin
+              ? `You tied with ${displayName}. The pot was split equally.`
+              : (roll !== null ? `The dice landed on <strong>${roll}</strong>. You take the pot!` : `You take the pot!`))
+          : `<strong>${displayName}</strong> wins${roll !== null ? ` with ${roll}` : ''}!`}
       </div>
       <div class="pub-result-coins ${won ? '' : 'loss-coins'}">
         ${won ? `+${myPrize} 💰` : `-${myPrize} 💰`}
