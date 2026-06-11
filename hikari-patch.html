@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Forge of Legends — Admin Patch</title>
+
+<style>
+  :root {
+    --ink:   #13100C;
+    --ink2:  #222018;
+    --ink3:  #2C2820;
+    --gold:  #E8C558;
+    --gold-dim: #A07E38;
+    --text:  #F5EDD8;
+    --text-dim: #B8A888;
+    --border: rgba(232,197,88,0.22);
+    --border-bright: rgba(232,197,88,0.60);
+    --green: #2EC46A;
+    --red:   #D94535;
+    --radius: 10px;
+    --ff-display: 'Palatino Linotype', Palatino, 'Book Antiqua', serif;
+    --ff-mono: 'Courier New', monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--ink);
+    color: var(--text);
+    font-family: var(--ff-display);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+
+  .panel {
+    background: var(--ink2);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    width: 100%;
+    max-width: 480px;
+    box-shadow: 0 8px 48px rgba(0,0,0,0.65);
+    overflow: hidden;
+  }
+
+  .panel-header {
+    background: #1A1610;
+    border-bottom: 1px solid var(--border);
+    padding: 24px 28px 20px;
+    text-align: center;
+  }
+  .panel-header .sigil { font-size: 2rem; margin-bottom: 8px; }
+  .panel-header h1 {
+    font-size: 1.15rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--gold);
+    font-weight: 700;
+  }
+  .panel-header p {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    margin-top: 4px;
+    letter-spacing: 0.04em;
+  }
+
+  .panel-body { padding: 28px; }
+
+  .target-card {
+    background: var(--ink3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 18px;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .target-avatar {
+    width: 42px; height: 42px;
+    border-radius: 50%;
+    background: rgba(232,197,88,0.12);
+    border: 1.5px solid var(--gold-dim);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.3rem; flex-shrink: 0;
+  }
+  .target-info .name { font-size: 1rem; color: var(--gold); font-weight: 700; }
+  .target-info .uid  { font-size: 0.7rem; color: var(--text-dim); font-family: var(--ff-mono); margin-top: 3px; word-break: break-all; }
+  .target-info .current { font-size: 0.75rem; color: var(--text-dim); margin-top: 4px; }
+  .target-info .current span { color: var(--red); font-weight: 600; }
+
+  label {
+    display: block;
+    font-size: 0.72rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+  }
+
+  .field-group { margin-bottom: 18px; }
+
+  input[type="email"],
+  input[type="password"],
+  select {
+    width: 100%;
+    background: var(--ink3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+    color: var(--text);
+    font-family: var(--ff-display);
+    font-size: 0.92rem;
+    outline: none;
+    transition: border-color 0.2s;
+    appearance: none;
+  }
+  input:focus, select:focus { border-color: var(--border-bright); }
+  select option { background: var(--ink2); }
+
+  .divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 20px 0;
+  }
+
+  .patch-summary {
+    background: rgba(232,197,88,0.06);
+    border: 1px solid rgba(232,197,88,0.18);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    margin-bottom: 20px;
+    font-size: 0.82rem;
+    color: var(--text-dim);
+    line-height: 1.6;
+  }
+  .patch-summary strong { color: var(--gold); }
+
+  .btn-patch {
+    width: 100%;
+    background: linear-gradient(135deg, #A07E38, #E8C558);
+    border: none;
+    border-radius: var(--radius);
+    padding: 12px;
+    color: #13100C;
+    font-family: var(--ff-display);
+    font-size: 0.9rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: opacity 0.2s, transform 0.1s;
+  }
+  .btn-patch:hover { opacity: 0.88; }
+  .btn-patch:active { transform: scale(0.98); }
+  .btn-patch:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .status {
+    margin-top: 18px;
+    padding: 12px 16px;
+    border-radius: var(--radius);
+    font-size: 0.85rem;
+    line-height: 1.5;
+    display: none;
+    font-family: var(--ff-mono);
+  }
+  .status.show { display: block; }
+  .status.info    { background: rgba(232,197,88,0.08); border: 1px solid rgba(232,197,88,0.25); color: var(--text-dim); }
+  .status.success { background: rgba(46,196,106,0.10); border: 1px solid rgba(46,196,106,0.30); color: var(--green); }
+  .status.error   { background: rgba(217,69,53,0.10);  border: 1px solid rgba(217,69,53,0.30);  color: var(--red); }
+
+  .log-line { margin: 2px 0; }
+  .log-line::before { content: '› '; opacity: 0.5; }
+</style>
+</head>
+<body>
+
+<div class="panel">
+  <div class="panel-header">
+    <div class="sigil">⚔️</div>
+    <h1>Admin Patch Tool</h1>
+    <p>Forge of Legends · Deity Sign-In Required</p>
+  </div>
+
+  <div class="panel-body">
+
+    <!-- Target player info (hardcoded) -->
+    <div class="target-card">
+      <div class="target-avatar">🌿</div>
+      <div class="target-info">
+        <div class="name">Hikari</div>
+        <div class="uid">0Xmmav9ol0em5cYuu9dW3isaxYt1</div>
+        <div class="current">Profession: <span>null</span> → Herbalist</div>
+      </div>
+    </div>
+
+    <!-- Deity sign-in -->
+    <div class="field-group">
+      <label>Deity Email</label>
+      <input type="email" id="email" placeholder="your@email.com" autocomplete="username">
+    </div>
+    <div class="field-group">
+      <label>Password</label>
+      <input type="password" id="password" placeholder="••••••••" autocomplete="current-password">
+    </div>
+
+    <hr class="divider">
+
+    <!-- Patch preview -->
+    <div class="patch-summary">
+      Will write to <strong>characters / 0Xmmav9ol0em5cYuu9dW3isaxYt1</strong>:<br>
+      <strong>profession</strong>: <code>null</code> → <code>"Herbalist"</code><br>
+      <strong>professionXp</strong>: set to <code>0</code> if missing<br>
+      <strong>professionLevel</strong>: set to <code>1</code> if missing
+    </div>
+
+    <button class="btn-patch" id="patchBtn" onclick="runPatch()">
+      Sign In &amp; Apply Patch
+    </button>
+
+    <div class="status" id="status"></div>
+  </div>
+</div>
+
+<!-- Firebase SDK -->
+<script type="module">
+import { initializeApp }        from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, doc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey:            "AIzaSyCUmdWY9OfzQgOPv-4KgOlBfO76c0toxYQ",
+  authDomain:        "inkcraftrp.firebaseapp.com",
+  projectId:         "inkcraftrp",
+  storageBucket:     "inkcraftrp.firebasestorage.app",
+  messagingSenderId: "125564034696",
+  appId:             "1:125564034696:web:0b09ed319024309ad2493d"
+};
+
+const app  = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db   = getFirestore(app);
+
+const TARGET_UID  = "0Xmmav9ol0em5cYuu9dW3isaxYt1";
+const TARGET_NAME = "Hikari";
+const PROFESSION  = "Herbalist";
+
+function log(msg, type = 'info') {
+  const el = document.getElementById('status');
+  el.className = `status show ${type}`;
+  el.innerHTML += `<div class="log-line">${msg}</div>`;
+}
+
+function setStatus(msg, type) {
+  const el = document.getElementById('status');
+  el.className = `status show ${type}`;
+  el.innerHTML = `<div class="log-line">${msg}</div>`;
+}
+
+window.runPatch = async function() {
+  const email    = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value;
+  const btn      = document.getElementById('patchBtn');
+
+  if (!email || !password) {
+    setStatus('Enter your deity email and password.', 'error');
+    return;
+  }
+
+  btn.disabled = true;
+  setStatus('Signing in...', 'info');
+
+  try {
+    // 1. Sign in
+    const cred = await signInWithEmailAndPassword(auth, email, password);
+    log(`✓ Signed in as ${cred.user.email}`);
+
+    // 2. Fetch target doc
+    log(`Fetching ${TARGET_NAME}'s character doc...`);
+    const ref  = doc(db, 'characters', TARGET_UID);
+    const snap = await getDoc(ref);
+
+    if (!snap.exists()) {
+      setStatus(`✗ No character doc found for UID: ${TARGET_UID}`, 'error');
+      btn.disabled = false;
+      return;
+    }
+
+    const data = snap.data();
+    log(`✓ Found character: ${data.name || TARGET_NAME}`);
+    log(`Current profession: ${JSON.stringify(data.profession ?? null)}`);
+
+    // 3. Build update — only set xp/level if they're missing
+    const update = { profession: PROFESSION };
+    if (data.professionXp   === undefined || data.professionXp   === null) update.professionXp   = 0;
+    if (data.professionLevel === undefined || data.professionLevel === null) update.professionLevel = 1;
+
+    log(`Applying patch: ${JSON.stringify(update)}`);
+
+    // 4. Write
+    await updateDoc(ref, update);
+
+    log(`✓ Patch applied successfully!`, 'success');
+    setStatus(
+      `✓ Done! ${TARGET_NAME} is now a <strong>${PROFESSION}</strong>.<br>` +
+      `professionXp: ${'professionXp' in update ? '0 (set)' : 'unchanged'} · ` +
+      `professionLevel: ${'professionLevel' in update ? '1 (set)' : 'unchanged'}`,
+      'success'
+    );
+    btn.textContent = '✓ Patch Applied';
+
+  } catch (err) {
+    console.error(err);
+    if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+      setStatus('✗ Wrong email or password.', 'error');
+    } else if (err.code === 'auth/user-not-found') {
+      setStatus('✗ No account found for that email.', 'error');
+    } else if (err.code === 'permission-denied') {
+      setStatus('✗ Firestore permission denied. Is this account a deity?', 'error');
+    } else {
+      setStatus(`✗ Error: ${err.message}`, 'error');
+    }
+    btn.disabled = false;
+  }
+};
+</script>
+</body>
+</html>

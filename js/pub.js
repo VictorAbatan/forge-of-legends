@@ -2616,8 +2616,9 @@ async function _dhRenderGameState(game, gameId) {
 
   // Handle complete
   if (game.status === 'complete') {
-    // Support both solo winner and split-pot ties
-    const myPayout = game.splitPayouts?.[myUid] ?? (game.winnerUid === myUid ? (game.totalPot || game.prize || 0) : 0);
+    // splitPayouts is always populated for every winner (solo or tie) by _dhFinishGame.
+    // Losers simply have no entry — result is undefined → 0. No fallback to totalPot needed.
+    const myPayout = game.splitPayouts?.[myUid] ?? 0;
     const won      = myPayout > 0;
 
     if (won && !_awardedGameIds.has(gameId)) {
@@ -2895,25 +2896,27 @@ async function _dhResolveRound(gameId) {
       const idx = updatedPlayers.findIndex(p => p.uid === roundWinner);
       if (idx >= 0) updatedPlayers[idx] = { ...updatedPlayers[idx], roundsWon: (updatedPlayers[idx].roundsWon || 0) + 1 };
     } else {
-      // True tie - split
+      // True mid-round tie — no winner, no payout, no roundsWon.
+      // The round pot carries forward and swells the final prize.
+      // Pot splits only happen at game end (_dhFinishGame), never mid-game.
       roundWinner = 'tie';
-      const share = Math.floor(roundPrize / tiebreaker.length);
-      for (const w of tiebreaker) {
-        roundPayouts[w.uid] = share;
-        const idx = updatedPlayers.findIndex(p => p.uid === w.uid);
-        if (idx >= 0) updatedPlayers[idx] = { ...updatedPlayers[idx], roundsWon: (updatedPlayers[idx].roundsWon || 0) + 1 };
-      }
-      notifs.push(`\u{1F91D} Tie! Pot split (${share} \u{1F4B0} each) among: ${tiebreaker.map(w=>w.name).join(', ')}`);
+      // roundPayouts stays empty — nobody gets paid, pot rolls over
+      notifs.push(`\u{1F91D} Tied round! ${tiebreaker.map(w=>w.name).join(' & ')} — no winner, pot carries over.`);
     }
   }
 
   // No _awardGold calls here - payouts stored in doc, each client pays themselves.
+  // Track cumulative awarded gold so _dhFinishGame can subtract it from totalPot,
+  // preventing the winner from being double-paid what was already won per-round.
+  const prevAwarded = (game.totalAwarded || 0);
+  const thisAward   = Object.values(roundPayouts).reduce((s, v) => s + v, 0);
   await updateDoc(doc(db, 'pubGames', gameId), {
     status:        'round_end',
     roundWinner,
     roundPayouts,
     players:       updatedPlayers,
     notifications: notifs,
+    totalAwarded:  prevAwarded + thisAward,
   });
 }
 
@@ -2923,7 +2926,10 @@ async function _dhFinishGame(game, gameId) {
   const sorted     = [...game.players].sort((a, b) => (b.roundsWon || 0) - (a.roundsWon || 0));
   const topWins    = sorted[0].roundsWon || 0;
   const topPlayers = sorted.filter(p => (p.roundsWon || 0) === topWins);
-  const totalPrize = game.totalPot || 0;
+  // Final prize = what's left in the pot after per-round payouts have been awarded.
+  // Without this, the winner gets the full accumulated totalPot even though round
+  // winners already received their shares — causing gold to be created from nothing.
+  const totalPrize = Math.max(0, (game.totalPot || 0) - (game.totalAwarded || 0));
   const isTie      = topPlayers.length > 1;
 
   // Split pot evenly; remainder (floor division dust) goes to first winner so no gold disappears
@@ -2946,8 +2952,14 @@ async function _dhFinishGame(game, gameId) {
     notifs.push(`💰 Total prize: ${totalPrize.toLocaleString()} 💰`);
   }
 
+  // Always populate splitPayouts for every winner (solo OR tie) so the 'complete'
+  // handler uses one clean code path: game.splitPayouts[myUid] → my payout or 0.
+  if (!isTie) {
+    splitPayouts[primaryWinner.uid] = totalPrize;
+  }
+
   // No _awardGold here — each winner awards themselves when they see status='complete'.
-  // splitPayouts[uid] tells each client their exact payout.
+  // splitPayouts[uid] tells each client their exact payout. Losers have no entry (undefined → 0).
   await updateDoc(doc(db, 'pubGames', gameId), {
     status:       'complete',
     winnerUid:    isTie ? 'tie' : primaryWinner.uid,
