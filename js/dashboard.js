@@ -15007,12 +15007,15 @@ const _RANDOM_EVENTS = {
     },
     { weight:20, fn: async () => {
         const gifts = ['Minor HP Potion','Minor Mana Potion','Minor Luck Potion'];
-        const goldAmt  = Math.floor(Math.random()*31)+10; // 10-40
-        const giftItem  = gifts[Math.floor(Math.random()*gifts.length)];
+        const pct     = Math.floor(Math.random()*8)+3; // 3-10%
+        const goldAmt = Math.max(10, Math.floor((_charData.gold||0) * pct/100));
+        const giftItem = gifts[Math.floor(Math.random()*gifts.length)];
         await _invWrite(_uid, inv => {
           const ex = inv.find(i=>i.name===giftItem);
           if (ex) ex.qty++; else inv.push({name:giftItem,qty:1,type:getItemType(giftItem)});
         }, { gold: increment(goldAmt) });
+        _charData.gold = (_charData.gold||0) + goldAmt;
+        set('stat-gold', _charData.gold); set('s-gold', _charData.gold);
         window._allInvItems = _charData.inventory; window._refreshInvDisplay();
         window.showToast(`A Kind Stranger gifted you ${goldAmt} coins and a ${giftItem}!`, 'success');
         logActivity('🤝', `<b>A Kind Stranger</b> crossed your path and left you <b>${goldAmt} coins</b> and a <b>${giftItem}</b>.`, '#70c090');
