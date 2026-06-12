@@ -9014,6 +9014,13 @@ const ZONE_MONSTER_POOLS = {
 };
 // Max monsters per zone before 10-min respawn
 const ZONE_POOL_SIZE = { E:80, D:60, C:40, B:25, A:15, S:10 };
+const ZONE_POOL_SIZE_BY_NAME = {
+  'Gremlin Hollows':  60,
+  'Serpent Mire':     80,
+  'Burrowdeep Basin': 100,
+  'Root Grove':       100,
+  'Crimson Fang':     120,
+};
 
 const MONSTER_TEMPLATES = {
   E: ['Prism Spider','Glass Critter','Glass Centipede','Red-mane Wolf','Blue-mane Wolf','Alpha Beast Wolf','Five-Fanged Bear','Rampage Bull','Blood-faced Yak','Groundhog Turtle','Possessed Hedgehog','Bloodlusted Warthog'],
@@ -10563,7 +10570,7 @@ function _launchAutoBattleLoop(grade, zoneName) {
   _autoBattleRunning = true;
 
   const char          = _charData;
-  const poolSize      = ZONE_POOL_SIZE[grade] || 40;
+  const poolSize      = (zoneName && ZONE_POOL_SIZE_BY_NAME[zoneName]) || ZONE_POOL_SIZE[grade] || 40;
   const stats         = _resolveCombatStats(char);
   const primary       = _getPrimaryStat(char.charClass, stats);
   const classSkills   = _getActiveBattleSkills();
@@ -11544,7 +11551,7 @@ function _getZoneKills(zoneName) {
 // Record a kill and persist to Firestore
 window._recordZoneKill = async function(zoneName, grade) {
   if (!_charData || !_uid) return;
-  const poolSize = ZONE_POOL_SIZE[grade] || 40;
+  const poolSize = (zoneName && ZONE_POOL_SIZE_BY_NAME[zoneName]) || ZONE_POOL_SIZE[grade] || 40;
   const kills    = _getZoneKills(zoneName);
   const now      = Date.now();
 
@@ -11571,7 +11578,7 @@ window._recordZoneKill = async function(zoneName, grade) {
 // Returns true if the pool is exhausted (respawn timer running) — blocks entry
 window._checkZonePool = async function(zoneName, grade) {
   if (!zoneName) return false;
-  const poolSize = ZONE_POOL_SIZE[grade] || 40;
+  const poolSize = (zoneName && ZONE_POOL_SIZE_BY_NAME[zoneName]) || ZONE_POOL_SIZE[grade] || 40;
   // Always fetch fresh from Firestore so cooldown state is authoritative
   try {
     const snap = await getDoc(doc(db, 'characters', _uid));
@@ -11610,7 +11617,7 @@ window._updateZonePoolStatus = function(zoneName) {
   const card = document.querySelector(`.zone-card[data-zone="${zoneName}"]`);
   if (!card) { el.style.display = 'none'; return; }
   const grade    = card.dataset.grade;
-  const poolSize = ZONE_POOL_SIZE[grade] || 40;
+  const poolSize = (zoneName && ZONE_POOL_SIZE_BY_NAME[zoneName]) || ZONE_POOL_SIZE[grade] || 40;
   const kills    = _getZoneKills(zoneName);
   const now      = Date.now();
   const resetAt  = kills.resetAt || 0;

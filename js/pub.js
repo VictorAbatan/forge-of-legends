@@ -35,9 +35,6 @@ let _activeGameId    = null;
 let _resultsUnsub    = null;
 let _lobbyGamesUnsub = null;
 let _awardedGameIds  = new Set();
-// Tracks "gameId_rN" keys for rounds where THIS client already deducted the base stake.
-// Prevents double-deduction if multiple snapshots fire while status is 'betting'.
-let _deductedRounds  = new Set();
 let _tdCancelTimer   = null;
 let _hrCancelTimer   = null;
 let _dhCancelTimer   = null;
@@ -584,15 +581,15 @@ function _buildPubManualHtml() {
           </div>
           <div class="pub-manual-rule-step">
             <span class="pub-manual-step-num">3</span>
-            <span><strong>Betting:</strong> Players act in turn — <strong>Raise</strong> (pay another base stake, add it to the pot) or <strong>Fold</strong> (surrender — but get half your stake back).</span>
+            <span><strong>Betting:</strong> Players act in turn — <strong>Raise</strong> (pay the full base stake into the pot) or <strong>Fold</strong> (pay only half the base stake and exit this round).</span>
           </div>
           <div class="pub-manual-rule-step">
             <span class="pub-manual-step-num">4</span>
-            <span><strong>Resolution:</strong> Cards are revealed. Whoever among the active players has the <strong>most cards matching the table's 5</strong> wins that round's pot.</span>
+            <span><strong>Resolution:</strong> Cards are revealed. Whoever among the active players has the <strong>most cards matching the table's 5</strong> wins that round (earns 1 point). The round's gold stays pooled — nobody is paid mid-game.</span>
           </div>
           <div class="pub-manual-rule-step">
             <span class="pub-manual-step-num">5</span>
-            <span><strong>Game Winner:</strong> After 5 rounds, the player who <strong>won the most rounds</strong> takes the entire accumulated pot.</span>
+            <span><strong>Game Winner:</strong> After 5 rounds, the player who <strong>won the most rounds</strong> takes the <strong>entire accumulated pot</strong>. If two or more players tied on round wins, they split the pot evenly.</span>
           </div>
         </div>
 
@@ -615,13 +612,13 @@ function _buildPubManualHtml() {
             <div class="pub-manual-mf-cell pub-manual-mf-fold">
               <div class="pub-manual-mf-icon">✖</div>
               <div class="pub-manual-mf-label">Fold</div>
-              <div class="pub-manual-mf-desc">Get back <strong>half your stake</strong>. Lose the other half to the pot.</div>
+              <div class="pub-manual-mf-desc">Pay <strong>half the base stake</strong> into the pot. Exit this round.</div>
             </div>
             <div class="pub-manual-mf-arrow">→</div>
             <div class="pub-manual-mf-cell pub-manual-mf-win">
               <div class="pub-manual-mf-icon">🏆</div>
               <div class="pub-manual-mf-label">Round Winner</div>
-              <div class="pub-manual-mf-desc">Most card matches wins that round's entire pot.</div>
+              <div class="pub-manual-mf-desc">Most card matches earns <strong>1 round win point</strong>. Gold stays in pot.</div>
             </div>
           </div>
           <div class="pub-manual-mf-note">
@@ -666,10 +663,9 @@ function _buildPubManualHtml() {
 
         <div class="pub-manual-example">
           <span class="pub-manual-example-label">Full Example</span>
-          3 players, base stake 100 💰. Round starts: 300 💰 in pot.
-          Alice raises (+100 → pot is 400 💰). Bob raises (+100 → pot 500 💰). Carl folds (gets 50 💰 back, pot stays 500 💰).
-          Reveal: Alice has 3 matches, Bob has 1. <strong>Alice wins 500 💰</strong> for this round.
-          After 5 rounds, the player with the most round wins claims the <strong>total accumulated pot</strong>.
+          3 players, base stake 100 💰. Alice raises: pays 100 💰 into pot. Bob raises: pays 100 💰. Carl folds: pays 50 💰 (half stake) — pot is now 250 💰.
+          Reveal: Alice has 3 matches, Bob has 1. <strong>Alice wins round 1 (earns 1 point)</strong> — gold stays in the pot.
+          After 5 rounds, the player with the most round wins claims the <strong>entire accumulated pot</strong>.
         </div>
       </div>
 
@@ -2029,12 +2025,12 @@ function _buildDevilsHandView(container) {
           <div>
             <div class="dh-base-stake-label">Base Stake per Round</div>
             <div class="dh-bet-presets">
-              ${[100,250,500,1000].map(v=>`
+              ${[100,250,500,1000,2500,5000].map(v=>`
                 <button class="pub-bet-preset" onclick="window._dhSetStake(${v})">${v}</button>`).join('')}
             </div>
             <input class="pub-bet-input" id="dh-stake-input" type="number" min="1" placeholder="Custom" value="100" style="margin-top:8px"/>
             <div style="font-size:0.72rem;color:var(--text-dim);font-style:italic;margin-top:6px;text-align:center">
-              5 rounds × stake = minimum required. Winners earn from folds and raises each round.
+              5 rounds × stake = minimum required. Game winner takes the entire accumulated pot.
             </div>
           </div>
 
@@ -2322,21 +2318,14 @@ async function _dhDealRound(game, gameId, roundNum) {
     hands[p.uid] = deck.splice(0, 5);
   }
 
-  // Deduct base stake from all players for this round
-  const baseStake   = game.baseStake || 100;
-  const roundPot    = baseStake * game.players.length;
-  const totalPot    = (game.totalPot || 0) + roundPot;
-  const turnOrder   = game.players.map(p => p.uid);
+  const baseStake      = game.baseStake || 100;
+  const turnOrder      = game.players.map(p => p.uid);
+  // Players reset to 'waiting' each round — no upfront deduction here.
+  // Gold is deducted when each player acts: raise = full stake, fold = half stake.
   const updatedPlayers = game.players.map(p => ({
     ...p,
-    status:   'waiting',
-    totalBet: (p.totalBet || 0) + baseStake,
+    status: 'waiting',
   }));
-
-  // Deduct from each player's gold
-  for (const p of game.players) {
-    await _deductGold_forUid(p.uid, baseStake);
-  }
 
   await updateDoc(doc(db, 'pubGames', gameId), {
     status:        'betting',
@@ -2345,20 +2334,13 @@ async function _dhDealRound(game, gameId, roundNum) {
     hands,
     players:       updatedPlayers,
     turnOrder,
-    participants:  turnOrder,   // flat uid[] — used by security rules instead of players.map()
+    participants:  turnOrder,
     currentTurn:   0,
-    roundPot,
-    totalPot,
-    notifications: [`📜 Round ${roundNum} begins. Base stake: ${baseStake} 💰 each.`, `👁 ${updatedPlayers[0].name}'s turn to act.`],
+    roundPot:      0,           // pot starts empty — filled by raises and folds
+    totalPot:      (game.totalPot || 0), // carry forward previous rounds' pot unchanged
+    notifications: [`📜 Round ${roundNum} begins. Stake: ${baseStake} 💰 to raise, ${Math.floor(baseStake/2)} 💰 to fold.`, `👁 ${updatedPlayers[0].name}'s turn to act.`],
     roundWinner:   null,
   });
-}
-
-// Deduct gold for any player uid (only works for current user on client)
-async function _deductGold_forUid(uid, amount) {
-  const myUid = _uid || window._uid;
-  if (uid !== myUid) return; // other players' gold is handled server-side or by each client
-  await _deductGold(amount);
 }
 
 // ── Subscribe to game state ────────────────────────────────────────
@@ -2505,7 +2487,7 @@ async function _dhRenderGameState(game, gameId) {
   if (statusEl) {
     if (game.status === 'betting') {
       if (isMyTurn && !alreadyActed) {
-        statusEl.textContent = `⚡ Your turn — Fold (lose half stake) or Raise (add ${(game.baseStake||100).toLocaleString()} 💰)`;
+        statusEl.textContent = `⚡ Your turn — Fold (pay ${Math.floor((game.baseStake||100)/2).toLocaleString()} 💰, half stake) or Raise (pay ${(game.baseStake||100).toLocaleString()} 💰, full stake)`;
         statusEl.className = 'pub-status-bar roll';
       } else if (alreadyActed) {
         statusEl.textContent = `You've acted. Waiting for other players...`;
@@ -2518,16 +2500,17 @@ async function _dhRenderGameState(game, gameId) {
     } else if (game.status === 'round_end') {
       const winner = game.players.find(p => p.uid === game.roundWinner);
       if (game.roundWinner === 'tie') {
-        statusEl.textContent = `🤝 Tie! Pot split between tied players.`;
+        statusEl.textContent = `🤝 Tied round! All tied players earn 1 win — pot carries over.`;
       } else {
         statusEl.textContent = `🏆 ${winner?.name || 'Someone'} wins this round!`;
       }
       statusEl.className = 'pub-status-bar win';
     } else if (game.status === 'complete') {
-      const won = game.winnerUid === myUid;
+      const myPayout = game.splitPayouts?.[myUid] ?? 0;
+      const won = myPayout > 0;
       statusEl.textContent = won
-        ? `🎉 YOU WIN THE GAME! +${game.prize} 💰`
-        : `${game.winnerName} wins the game with ${game.prize} 💰!`;
+        ? (game.isTie ? `🤝 TIE — YOU WIN A SHARE! +${myPayout.toLocaleString()} 💰` : `🎉 YOU WIN THE GAME! +${myPayout.toLocaleString()} 💰`)
+        : `${game.winnerName} wins the game!`;
       statusEl.className = `pub-status-bar ${won ? 'win' : 'loss'}`;
     }
   }
@@ -2562,56 +2545,6 @@ async function _dhRenderGameState(game, gameId) {
         _dhAdvancingRound = false;
       }
     }, 4000);
-  }
-
-  // Non-host players self-deduct their base stake when a new round begins.
-  // The host already deducts inside _dhDealRound (via _deductGold_forUid which
-  // skips non-self). Without this block, every player except the host played
-  // each round's stake for free — only paying raises/folds.
-  // DOUBLE-DEDUCTION GUARD: use both an in-memory Set (fast path) AND a
-  // Firestore-persisted flag (`clientDeducted.{uid}_r{round}`) so that a page
-  // refresh or re-subscribe can never re-deduct the same round's stake.
-  if (game.status === 'betting' && game.hostUid !== myUid) {
-    const deductKey = gameId + '_r' + game.round + '_deduct';
-    if (!_deductedRounds.has(deductKey)) {
-      // Check Firestore-persisted flag before touching gold
-      const alreadyDeducted = game.clientDeducted?.[myUid + '_r' + game.round] === true;
-      if (!alreadyDeducted) {
-        _deductedRounds.add(deductKey);
-        // Persist the flag BEFORE deducting — if deduction fails it just retries,
-        // but if we deducted first and the flag write fails the player loses twice.
-        try {
-          await updateDoc(doc(db, 'pubGames', gameId), {
-            [`clientDeducted.${myUid}_r${game.round}`]: true
-          });
-        } catch(e) { console.warn('[DH] clientDeducted flag write failed, aborting deduct:', e); return; }
-        await _deductGold(game.baseStake || 100);
-      } else {
-        // Already deducted in a prior session — just mark in-memory so we skip the check next time
-        _deductedRounds.add(deductKey);
-      }
-    }
-  }
-
-  // Handle round_end: each player awards their own gold from roundPayouts.
-  // DOUBLE-AWARD GUARD: same two-tier guard as the winner prize — in-memory Set
-  // + Firestore clientSettled flag, so a page reload can't re-award a round payout.
-  if (game.status === 'round_end') {
-    const roundKey = gameId + '_r' + game.round;
-    const myPayout = game.roundPayouts?.[myUid] || 0;
-    const roundSettledKey = myUid + '_r' + game.round;
-    const alreadyRoundSettled = game.clientSettled?.[roundSettledKey] === true;
-    if (myPayout > 0 && !_awardedGameIds.has(roundKey) && !alreadyRoundSettled) {
-      _awardedGameIds.add(roundKey);
-      try {
-        await updateDoc(doc(db, 'pubGames', gameId), {
-          [`clientSettled.${roundSettledKey}`]: true
-        });
-      } catch(e) { console.warn('[DH] round clientSettled write failed, aborting award:', e); return; }
-      await _awardGold(myUid, myPayout);
-    } else if (alreadyRoundSettled) {
-      _awardedGameIds.add(roundKey); // keep in-memory in sync
-    }
   }
 
   // Handle complete
@@ -2687,20 +2620,66 @@ window._dhFold = async function() {
 
   const myEntry   = game.players.find(p => p.uid === _uid);
   const halfStake = Math.floor((game.baseStake || 100) / 2);
+  const currentGold = (_charData?.gold || window._charData?.gold || 0);
+  const willLoan    = currentGold < halfStake;
+
+  if (willLoan) {
+    const shortfall = halfStake - currentGold;
+    const confirmed = await new Promise(resolve => {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9999;display:flex;align-items:center;justify-content:center';
+      overlay.innerHTML = `
+        <div style="background:var(--card-bg,#1a1a2e);border:1px solid var(--border,#333);border-radius:12px;padding:24px;max-width:320px;width:90%;text-align:center">
+          <div style="font-size:1.5rem;margin-bottom:8px">💸</div>
+          <div style="font-weight:700;margin-bottom:8px;color:var(--gold,#c9a84c)">Fold on Loan?</div>
+          <div style="font-size:0.9rem;color:var(--text-dim,#aaa);margin-bottom:16px">
+            You're short <b>${shortfall} 💰</b>.<br>
+            Folding will put you <b style="color:#e05555">−${shortfall} in debt</b>.<br>
+            You owe the house — pay it back or face consequences.
+          </div>
+          <div style="display:flex;gap:12px;justify-content:center">
+            <button id="_dh_fold_loan_no"  style="padding:8px 20px;border-radius:8px;border:1px solid var(--border,#333);background:transparent;color:var(--text,#eee);cursor:pointer">Cancel</button>
+            <button id="_dh_fold_loan_yes" style="padding:8px 20px;border-radius:8px;border:none;background:#c9a84c;color:#000;font-weight:700;cursor:pointer">Fold Anyway</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      overlay.querySelector('#_dh_fold_loan_yes').onclick = () => { document.body.removeChild(overlay); resolve(true); };
+      overlay.querySelector('#_dh_fold_loan_no').onclick  = () => { document.body.removeChild(overlay); resolve(false); };
+    });
+    if (!confirmed) {
+      if (btn) btn.disabled = false;
+      const raiseBtn = document.getElementById('dh-raise-btn');
+      if (raiseBtn) raiseBtn.disabled = false;
+      return;
+    }
+    const existingDebt = (_charData?.debtGold || window._charData?.debtGold || 0);
+    const newDebt = existingDebt + shortfall;
+    try {
+      await updateDoc(doc(db, 'characters', _uid), { debtGold: newDebt, debtSource: "Devil's Hand" });
+      if (_charData) _charData.debtGold = newDebt;
+      if (window._charData) window._charData.debtGold = newDebt;
+    } catch(e) { console.warn('[DH] fold debt record failed:', e); }
+    window.showToast?.(`📜 Loan granted — you're ${shortfall} 💰 in debt. Gamble wisely.`, 'warning');
+  }
+
+  // Fold costs half stake — deduct it now
+  await _deductGold(halfStake);
 
   const updatedPlayers = game.players.map(p =>
-    p.uid === _uid ? { ...p, status: 'folded', totalBet: (p.totalBet || 0) } : p
+    p.uid === _uid ? { ...p, status: 'folded', totalBet: (p.totalBet || 0) + halfStake } : p
   );
 
-  // Remove fold amount from round pot (they lose half, so the pot gets the other half)
-  const newRoundPot = (game.roundPot || 0); // pot stays; fold means you lose half stake = half stays in pot
+  // Fold pays halfStake into the pot
+  const newRoundPot = (game.roundPot || 0) + halfStake;
+  const newTotalPot = (game.totalPot || 0) + halfStake;
 
-  const notif = `${myEntry?.name || 'Player'} folds. Keeps ${halfStake} 💰.`;
+  const notif = `${myEntry?.name || 'Player'} folds. Pays ${halfStake} 💰 (half stake).`;
   const nextTurn = _dhNextActiveTurn(game, game.currentTurn);
 
   const updates = {
     players:       updatedPlayers,
     roundPot:      newRoundPot,
+    totalPot:      newTotalPot,
     currentTurn:   nextTurn,
     notifications: [...(game.notifications || []), notif],
   };
@@ -2719,10 +2698,6 @@ window._dhFold = async function() {
 
   try {
     await updateDoc(doc(db, 'pubGames', _activeGameId), updates);
-    // Refund half stake AFTER the fold is committed to Firestore.
-    // Previously this was before updateDoc — if the write failed, the player
-    // got their gold back but their status remained 'waiting', letting them fold again.
-    await _awardGold(_uid, halfStake);
     // Resolution is triggered by the host's onSnapshot (see _dhRenderGameState).
     // Do NOT call _dhResolveRound here — the acting player may not be the host,
     // and calling updateDoc from a non-host client while status is still 'betting'
@@ -2730,6 +2705,8 @@ window._dhFold = async function() {
   } catch(e) {
     console.warn('[DH] fold error:', e);
     window.showToast?.('Action failed. Try again.', 'error');
+    // Refund the fold payment since the write failed
+    await _awardGold(_uid, halfStake);
     if (btn) btn.disabled = false;
     const raiseBtn = document.getElementById('dh-raise-btn');
     if (raiseBtn) raiseBtn.disabled = false;
@@ -2868,55 +2845,46 @@ async function _dhResolveRound(gameId) {
   const winners    = scored.filter(s => s.matches === maxMatches);
 
   let roundWinner  = null;
-  let roundPrize   = game.roundPot || 0;
   let notifs       = [...(game.notifications || [])];
   const updatedPlayers = [...game.players];
 
-  // roundPayouts: { uid: goldAmount } written to Firestore so each player's
-  // own client awards themselves. Host must never write to others' character docs.
-  const roundPayouts = {};
+  // No gold moves mid-round. Rounds are purely a scoring mechanism.
+  // The entire accumulated pot stays locked until game end, when the player
+  // with the most roundsWon takes everything (or tied players split it).
 
   notifs.push(`\u{1F0CF} Cards revealed!`);
   scored.forEach(s => notifs.push(`  ${s.name}: ${s.matches} match${s.matches !== 1 ? 'es' : ''}`));
 
   if (winners.length === 1) {
     roundWinner = winners[0].uid;
-    roundPayouts[roundWinner] = roundPrize;
-    notifs.push(`\u{1F3C6} ${winners[0].name} wins the round with ${maxMatches} match${maxMatches !== 1 ? 'es' : ''}! +${roundPrize} \u{1F4B0}`);
+    notifs.push(`\u{1F3C6} ${winners[0].name} wins round ${game.round} with ${maxMatches} match${maxMatches !== 1 ? 'es' : ''}! (pot still accumulating)`);
     const idx = updatedPlayers.findIndex(p => p.uid === roundWinner);
     if (idx >= 0) updatedPlayers[idx] = { ...updatedPlayers[idx], roundsWon: (updatedPlayers[idx].roundsWon || 0) + 1 };
   } else {
-    // Tie - raisers beat folders; if still tied, split pot
+    // Tie - raisers beat non-raisers; if still tied, all tied players earn a round win
     const raisers    = winners.filter(w => game.players.find(p => p.uid === w.uid)?.status === 'raised');
     const tiebreaker = raisers.length === 1 ? raisers : winners;
     if (tiebreaker.length === 1) {
       roundWinner = tiebreaker[0].uid;
-      roundPayouts[roundWinner] = roundPrize;
-      notifs.push(`\u2694 Tiebreaker! ${tiebreaker[0].name} wins (raised). +${roundPrize} \u{1F4B0}`);
+      notifs.push(`\u2694 Tiebreaker! ${tiebreaker[0].name} wins round ${game.round} (raised). (pot still accumulating)`);
       const idx = updatedPlayers.findIndex(p => p.uid === roundWinner);
       if (idx >= 0) updatedPlayers[idx] = { ...updatedPlayers[idx], roundsWon: (updatedPlayers[idx].roundsWon || 0) + 1 };
     } else {
-      // True mid-round tie — no winner, no payout, no roundsWon.
-      // The round pot carries forward and swells the final prize.
-      // Pot splits only happen at game end (_dhFinishGame), never mid-game.
+      // True tie — all tied players each earn 1 roundsWon. Pot keeps building.
       roundWinner = 'tie';
-      // roundPayouts stays empty — nobody gets paid, pot rolls over
-      notifs.push(`\u{1F91D} Tied round! ${tiebreaker.map(w=>w.name).join(' & ')} — no winner, pot carries over.`);
+      tiebreaker.forEach(w => {
+        const idx = updatedPlayers.findIndex(p => p.uid === w.uid);
+        if (idx >= 0) updatedPlayers[idx] = { ...updatedPlayers[idx], roundsWon: (updatedPlayers[idx].roundsWon || 0) + 1 };
+      });
+      notifs.push(`\u{1F91D} Tied round! ${tiebreaker.map(w=>w.name).join(' & ')} each earn 1 round win — pot keeps building.`);
     }
   }
 
-  // No _awardGold calls here - payouts stored in doc, each client pays themselves.
-  // Track cumulative awarded gold so _dhFinishGame can subtract it from totalPot,
-  // preventing the winner from being double-paid what was already won per-round.
-  const prevAwarded = (game.totalAwarded || 0);
-  const thisAward   = Object.values(roundPayouts).reduce((s, v) => s + v, 0);
   await updateDoc(doc(db, 'pubGames', gameId), {
     status:        'round_end',
     roundWinner,
-    roundPayouts,
     players:       updatedPlayers,
     notifications: notifs,
-    totalAwarded:  prevAwarded + thisAward,
   });
 }
 
@@ -2926,10 +2894,9 @@ async function _dhFinishGame(game, gameId) {
   const sorted     = [...game.players].sort((a, b) => (b.roundsWon || 0) - (a.roundsWon || 0));
   const topWins    = sorted[0].roundsWon || 0;
   const topPlayers = sorted.filter(p => (p.roundsWon || 0) === topWins);
-  // Final prize = what's left in the pot after per-round payouts have been awarded.
-  // Without this, the winner gets the full accumulated totalPot even though round
-  // winners already received their shares — causing gold to be created from nothing.
-  const totalPrize = Math.max(0, (game.totalPot || 0) - (game.totalAwarded || 0));
+  // Game winner gets the ENTIRE accumulated pot — rounds are just scoring.
+  // No gold was paid out during rounds; everything sits in totalPot until now.
+  const totalPrize = game.totalPot || 0;
   const isTie      = topPlayers.length > 1;
 
   // Split pot evenly; remainder (floor division dust) goes to first winner so no gold disappears
