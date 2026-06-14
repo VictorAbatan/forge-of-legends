@@ -6445,6 +6445,36 @@ function _getItemRarity(itemName) {
 }
 window._getItemRarity = _getItemRarity;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// _getMarketClass(item) → 'Resources' | 'Weapons' | 'Armor' | 'Food'
+// Automatically classifies a listable item into a Player Market category so
+// listings can be grouped/sorted (and so the seller's chosen item is auto-tagged
+// at listing time — the player never has to pick a class themselves).
+// Only called for items that already pass _getListingBracket (i.e. listable).
+// ─────────────────────────────────────────────────────────────────────────────
+window._getMarketClass = function(item) {
+  if (!item) return 'Resources';
+  const itemType = getItemType(item.name);
+  const baseName = (item.name || '').replace(/\s*\+\d+$/, '').trim();
+
+  if (itemType === 'equipment') {
+    if (ALL_WEAPON_NAMES.includes(baseName)) return 'Weapons';
+    if (ALL_ARMOR_NAMES.includes(baseName))  return 'Armor';
+    // Fallback: item.type set at acquisition time (weapon/armor)
+    if (item.type === 'weapon') return 'Weapons';
+    if (item.type === 'armor')  return 'Armor';
+    return 'Weapons';
+  }
+
+  if (itemType === 'consumable') {
+    // Non-potion consumables that reach here are cooked food (potions are blocked)
+    return 'Food';
+  }
+
+  // Materials / resources
+  return 'Resources';
+};
+
 // Returns { minP, maxP, blocked } for a given inventory item — used by the sell modal UI
 // to show the price range hint before the player enters an amount.
 window._getListingBracket = function(item) {
@@ -6582,12 +6612,14 @@ async function sellItem() {
     btn.textContent = "LISTING...";
   }
   try {
+    const marketClass = window._getMarketClass ? window._getMarketClass(item) : 'Resources';
     await addDoc(collection(db, "marketListings"), {
       sellerUid:   _uid,
       sellerName:  _charData.name,
       itemName:    item.name,
       itemIcon:    getItemIcon(item.name),
       itemType:    item.type || "material",
+      marketClass,
       qty,
       pricePerUnit: price,
       totalPrice:   price * qty,
@@ -6628,19 +6660,33 @@ async function sellItem() {
 window.renderPlayerMarketListings = function() {
   const container = document.getElementById("player-listings");
   if (!container) return;
-  const search = (document.getElementById("market-search-input")?.value || "").toLowerCase();
-  let listings = window._allMarketListings || [];
+  const search    = (document.getElementById("market-search-input")?.value || "").toLowerCase();
+  const classSel  = document.getElementById("market-class-filter")?.value || "";
+  const viewSel   = document.getElementById("market-view-filter")?.value || "all";
+  const showMine  = viewSel === "mine";
+
+  let listings = showMine
+    ? (window._myMarketListings || [])
+    : (window._allMarketListings || []);
+
   if (search) {
     listings = listings.filter(l => l.itemName.toLowerCase().includes(search));
   }
+  if (classSel) {
+    listings = listings.filter(l => (l.marketClass || window._classifyExistingListing?.(l)) === classSel);
+  }
+
   if (!listings.length) {
-    container.innerHTML = `<div class="listing-empty">No items found.</div>`;
+    container.innerHTML = `<div class="listing-empty">${showMine ? "You have no listings yet." : "No items found."}</div>`;
     return;
   }
   container.innerHTML = "";
   let displayedAny = false;
   listings.forEach(l => {
-    if (l.qty <= 0) return;
+    // In the general browse view, sold-out listings are hidden (nothing left to buy)
+    // but they are NEVER deleted — they remain in Firestore and still show up
+    // under "My Listings" so sellers can see their full listing history.
+    if (!showMine && l.qty <= 0) return;
     displayedAny = true;
     const el = document.createElement("div");
     el.className = "listing-card";
@@ -6648,12 +6694,19 @@ window.renderPlayerMarketListings = function() {
     const viewBtn = hasStatView
       ? `<button class="vendor-buy-btn" style="margin-bottom:4px;width:100%" onclick="openItemStatModal('${l.itemName.replace(/'/g,"\\'")}')">VIEW STATS</button>`
       : '';
-    const buyBtn = l.sellerUid !== _uid
-      ? `<button class="vendor-buy-btn" style="width:100%" onclick="window._buyListing('${l.id}','${l.itemName}','${l.itemIcon}',${l.pricePerUnit},'${l.itemType}',${l.qty})">BUY</button>`
-      : `<button class="vendor-buy-btn" style="opacity:0.5;cursor:not-allowed;width:100%">Your listing</button>`;
+    let buyBtn;
+    if (l.sellerUid === _uid) {
+      buyBtn = `<button class="vendor-buy-btn" style="opacity:0.5;cursor:not-allowed;width:100%">Your listing</button>`;
+    } else if (l.qty <= 0) {
+      buyBtn = `<button class="vendor-buy-btn" style="opacity:0.5;cursor:not-allowed;width:100%">Sold Out</button>`;
+    } else {
+      buyBtn = `<button class="vendor-buy-btn" style="width:100%" onclick="window._buyListing('${l.id}','${l.itemName}','${l.itemIcon}',${l.pricePerUnit},'${l.itemType}',${l.qty})">BUY</button>`;
+    }
+    const cls = l.marketClass || window._classifyExistingListing?.(l) || 'Resources';
     el.innerHTML = `
       <div class="listing-item-icon">${l.itemIcon && l.itemIcon !== '📦' ? l.itemIcon : getItemIcon(l.itemName)}</div>
       <div class="listing-item-name">${l.itemName}</div>
+      <div class="listing-item-class" style="font-family:var(--font-mono);font-size:0.6rem;letter-spacing:0.1em;color:var(--gold-dim);text-transform:uppercase;margin:2px 0">${cls}</div>
       <div class="listing-item-qty">Qty: ${l.qty}</div>
       <div class="listing-price">${l.pricePerUnit} 🪙 <span class="listing-price-sub">per unit</span></div>
       <div class="listing-seller">by ${l.sellerName}</div>
@@ -6661,8 +6714,23 @@ window.renderPlayerMarketListings = function() {
     container.appendChild(el);
   });
   if (!displayedAny) {
-    container.innerHTML = `<div class="listing-empty">No items found.</div>`;
+    container.innerHTML = `<div class="listing-empty">${showMine ? "You have no listings yet." : "No items found."}</div>`;
   }
+};
+
+// Best-effort classification for listings created before marketClass was tracked —
+// derives the category from itemType/name so old listings still sort correctly.
+window._classifyExistingListing = function(l) {
+  if (!l) return 'Resources';
+  if (l.itemType === 'weapon') return 'Weapons';
+  if (l.itemType === 'armor')  return 'Armor';
+  if (l.itemType === 'equipment') {
+    if (ALL_WEAPON_NAMES.includes(l.itemName)) return 'Weapons';
+    if (ALL_ARMOR_NAMES.includes(l.itemName))  return 'Armor';
+    return 'Weapons';
+  }
+  if (l.itemType === 'consumable') return 'Food';
+  return 'Resources';
 };
 
 window.filterPlayerMarketListings = function() {
@@ -6678,10 +6746,41 @@ async function loadPlayerListings() {
   container.innerHTML = `<div class="listing-empty">Loading listings...</div>`;
 
   try {
-    const q    = query(collection(db, "marketListings"), orderBy("listedAt","desc"), limit(100));
-    const snap = await getDocs(q);
+    // FIXED: previously capped at limit(100) ordered by listedAt desc — once 100+
+    // newer listings existed, a player's older (still-active, unsold) listing would
+    // fall outside the window and silently vanish from the market even though the
+    // Firestore doc still existed. We now pull a much larger window so active
+    // listings are effectively never hidden by recency, AND we separately fetch
+    // the current player's own listings (any age, any qty) so sellers can always
+    // find their listings under "My Listings" regardless of how long they've been up.
+    const q    = query(collection(db, "marketListings"), orderBy("listedAt","desc"), limit(1000));
+    const mineQ = query(collection(db, "marketListings"), where("sellerUid","==", _uid));
+
+    const [snap, mineSnap] = await Promise.all([getDocs(q), getDocs(mineQ)]);
 
     window._allMarketListings = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    // Merge: ensure the player's own listings are present even if they fell
+    // outside the general 1000-item window, then sort by listedAt desc.
+    const merged = new Map(window._allMarketListings.map(l => [l.id, l]));
+    mineSnap.docs.forEach(d => {
+      const data = { id: d.id, ...d.data() };
+      merged.set(d.id, data);
+    });
+    window._allMarketListings = Array.from(merged.values()).sort((a, b) => {
+      const at = a.listedAt?.toMillis ? a.listedAt.toMillis() : 0;
+      const bt = b.listedAt?.toMillis ? b.listedAt.toMillis() : 0;
+      return bt - at;
+    });
+
+    window._myMarketListings = mineSnap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => {
+        const at = a.listedAt?.toMillis ? a.listedAt.toMillis() : 0;
+        const bt = b.listedAt?.toMillis ? b.listedAt.toMillis() : 0;
+        return bt - at;
+      });
+
     window.renderPlayerMarketListings();
   } catch(err) {
     console.error(err);
