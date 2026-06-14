@@ -6086,6 +6086,18 @@ function _inkPickerOverlay(title, bodyHtml) {
     </div>`;
   document.body.appendChild(overlay);
   overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+  // Delegated click handler for picker cards — avoids broken inline onclick
+  // attributes when a name/class/race contains an apostrophe (e.g. "Mah'run"),
+  // which previously caused a JS syntax error and made that card unclickable.
+  overlay.addEventListener('click', e => {
+    const card = e.target.closest('.ink-picker-card');
+    if (!card) return;
+    overlay.querySelectorAll('.ink-picker-card').forEach(el => el.classList.remove('ink-picker-selected'));
+    card.classList.add('ink-picker-selected');
+    window._inkPickerSel = card.dataset.class || card.dataset.race || card.dataset.deity || null;
+  });
+
   return overlay;
 }
 
@@ -6169,7 +6181,7 @@ async function openDeityPickerModal() {
       <div id="ink-picker-cards">${_buildDeityCards()}</div>
       <div style="display:flex;gap:10px;margin-top:18px;justify-content:center;">
         <button class="btn-ghost" style="font-size:0.7rem;" onclick="document.getElementById('ink-picker-modal').remove();">✕ CANCEL</button>
-        <button class="btn-primary" style="max-width:200px;" onclick="window._inkPickerConfirmDeity()">CONFIRM DEITY</button>
+        <button class="btn-primary" id="ink-confirm-deity-btn" style="max-width:200px;" onclick="window._inkPickerConfirmDeity()">CONFIRM DEITY</button>
       </div>`);
 
     window._inkPickerSel = null;
@@ -6177,6 +6189,8 @@ async function openDeityPickerModal() {
       const deityName = window._inkPickerSel;
       if (!deityName) { window.showToast('Please select a deity first.', 'error'); return; }
       const deityTitle = DEITY_LORE[deityName]?.title || '';
+      const btn = document.getElementById('ink-confirm-deity-btn');
+      if (btn) { btn.disabled = true; btn.textContent = 'CONFIRMING...'; }
       try {
         const newBlessing     = DEITY_BLESSING_NAMES[deityName] || deityName;
         const newBlessingDesc = _getBlessingDesc(deityName, _charData.faithLevel || 0);
@@ -6189,6 +6203,7 @@ async function openDeityPickerModal() {
         resolve(deityName);
       } catch(err) {
         window.showToast('Failed to save deity. Try again.', 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'CONFIRM DEITY'; }
       }
     };
   });
@@ -14754,7 +14769,7 @@ function _checkPotionResetPending() {
         </div>
         <div id="ink-picker-cards">${_buildDeityCards()}</div>
         <div style="display:flex;gap:10px;margin-top:18px;justify-content:center;">
-          <button class="btn-primary" style="max-width:200px;" onclick="window._inkPickerConfirmDeity()">CONFIRM DEITY</button>
+          <button class="btn-primary" id="ink-confirm-deity-btn-2" style="max-width:200px;" onclick="window._inkPickerConfirmDeity()">CONFIRM DEITY</button>
         </div>`
       );
       window._inkPickerSel = null;
@@ -14762,6 +14777,8 @@ function _checkPotionResetPending() {
         const deityName = window._inkPickerSel;
         if (!deityName) { window.showToast('Please select a deity first.', 'error'); return; }
         const deityTitle = DEITY_LORE[deityName]?.title || '';
+        const btn = document.getElementById('ink-confirm-deity-btn-2');
+        if (btn) { btn.disabled = true; btn.textContent = 'CONFIRMING...'; }
         try {
           await updateDoc(doc(db, 'characters', _uid), { deity: deityName, deityTitle });
           Object.assign(_charData, { deity: deityName, deityTitle });
@@ -14769,7 +14786,10 @@ function _checkPotionResetPending() {
           await refreshCharData(); _syncAllDisplays(_charData);
           window.showToast(`🔮 Deity set to ${deityName}!`, 'success');
           logActivity('🔮', `Pledged faith to <b>${deityName}</b> as their new deity.`, '#c9a84c');
-        } catch(err) { window.showToast('Failed to save deity. Try again.', 'error'); }
+        } catch(err) {
+          window.showToast('Failed to save deity. Try again.', 'error');
+          if (btn) { btn.disabled = false; btn.textContent = 'CONFIRM DEITY'; }
+        }
       };
     }, 300);
   }
@@ -14787,7 +14807,7 @@ function _buildClassCards() {
     { name:'Summoner', icon:'🌀', role:'Summoner',       desc:'Commands summoned creatures. INT-based with debuff utility.' },
   ];
   return classes.map(c => `
-    <div class="ink-picker-card" data-class="${c.name}" onclick="document.querySelectorAll('.ink-picker-card').forEach(el=>el.classList.remove('ink-picker-selected'));this.classList.add('ink-picker-selected');window._inkPickerSel='${c.name}';"
+    <div class="ink-picker-card" data-class="${c.name}"
       style="cursor:pointer;border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px;display:flex;align-items:flex-start;gap:12px;transition:border-color .2s,background .2s;background:var(--ink3);">
       <div style="font-size:1.6rem;line-height:1;min-width:32px;text-align:center;">${c.icon}</div>
       <div>
@@ -14800,7 +14820,7 @@ function _buildClassCards() {
 
 function _buildRaceCards() {
   return RACE_LIST.map(r => `
-    <div class="ink-picker-card" data-race="${r.name}" onclick="document.querySelectorAll('.ink-picker-card').forEach(el=>el.classList.remove('ink-picker-selected'));this.classList.add('ink-picker-selected');window._inkPickerSel='${r.name}';"
+    <div class="ink-picker-card" data-race="${r.name}"
       style="cursor:pointer;border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px;display:flex;align-items:flex-start;gap:12px;transition:border-color .2s,background .2s;background:var(--ink3);">
       <div style="font-size:1.6rem;line-height:1;min-width:32px;text-align:center;">${r.icon}</div>
       <div>
@@ -14815,7 +14835,7 @@ function _buildDeityCards() {
   return Object.entries(DEITY_LORE).map(([name, lore]) => {
     const icon = DEITY_ICONS[name] || '⛩️';
     return `
-    <div class="ink-picker-card" data-deity="${name}" onclick="document.querySelectorAll('.ink-picker-card').forEach(el=>el.classList.remove('ink-picker-selected'));this.classList.add('ink-picker-selected');window._inkPickerSel='${name}';"
+    <div class="ink-picker-card" data-deity="${name}"
       style="cursor:pointer;border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px;display:flex;align-items:flex-start;gap:12px;transition:border-color .2s,background .2s;background:var(--ink3);">
       <div style="font-size:1.6rem;line-height:1;min-width:32px;text-align:center;">${icon}</div>
       <div>
