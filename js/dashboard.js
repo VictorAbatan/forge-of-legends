@@ -3,7 +3,7 @@ import {
   onAuthStateChanged, signOut
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-  doc, getDoc, setDoc, updateDoc, addDoc, deleteDoc,
+  doc, getDoc, getDocFromServer, setDoc, updateDoc, addDoc, deleteDoc,
   collection, query, where, orderBy, limit, limitToLast,
   onSnapshot, serverTimestamp, getDocs, increment, runTransaction,
   arrayUnion, arrayRemove
@@ -6811,8 +6811,7 @@ window._buyListing = async (listingId, name, icon, price, type, maxQty) => {
       const fnBuyListing = httpsCallable(functions, "buyListing");
       const result = await fnBuyListing({ listingId, qty });
 
-      // Locally update gold and inventory from the latest server state
-      if (_charData) { _charData.gold = gold - totalPrice; }
+      // Pull authoritative gold/inventory straight from the server (no optimistic guess)
       await refreshCharData();
       window._allInvItems = _charData?.inventory || [];
       _syncAllDisplays(_charData);
@@ -6858,7 +6857,7 @@ const DAILY_QUESTS = {
   potions:  { target: 2,  label: "Prepared Mind",     reward: { xp:10,  gold:50,  item:{ name:"Iron",        qty:1 } } },
   food:     { target: 2,  label: "Gusto",             reward: { xp:10,  gold:50,  item:{ name:"Minor HP Potion", qty:1 } } },
   explorer: { target: 3,  label: "Explorer's Path",   reward: { xp:20,  gold:80,  item:{ name:"Iron",        qty:2 } } },
-  elite:    { target: 1,  label: "Elite Challenge",   reward: { xp:20,  gold:100, item:{ name:"Dragon Scales",   qty:2 } } },
+  slayer:   { target: 5,  label: "Combat Drills",     reward: { xp:20,  gold:100, item:{ name:"Dragon Scales",   qty:2 } } },
 };
 const DAILY_BONUS = { gold: 200 };
 
@@ -7266,7 +7265,7 @@ async function _incrementQuest(type, value = 1) {
   if (!_uid) return;
   if (_charData?.isDead) return; // ── Dead player restriction ──
   if (type === "kill")    { window._questProgress.hunter = (_questProgress.hunter||0) + value; await _checkDailyCompletion("hunter"); }
-  if (type === "eliteKill") { window._questProgress.elite = (_questProgress.elite||0) + value; await _checkDailyCompletion("elite"); }
+  if (type === "kill")    { window._questProgress.slayer = (_questProgress.slayer||0) + value; await _checkDailyCompletion("slayer"); }
   if (type === "gather")  { window._questProgress.gatherer = (_questProgress.gatherer||0) + value; await _checkDailyCompletion("gatherer"); }
   if (type === "listing") { window._questProgress.market = (_questProgress.market||0) + value; await _checkDailyCompletion("market"); }
   if (type === "potion")  { window._questProgress.potions = (_questProgress.potions||0) + value; await _checkDailyCompletion("potions"); }
@@ -7459,7 +7458,7 @@ async function loadQuestProgress() {
     const prog = data.progress || {};
     window._questProgress = {
       hunter:prog.hunter||0, gatherer:prog.gatherer||0, market:prog.market||0,
-      potions:prog.potions||0, food:prog.food||0, explorer:new Set(prog.explorer||[]), elite:prog.elite||0,
+      potions:prog.potions||0, food:prog.food||0, explorer:new Set(prog.explorer||[]), slayer:prog.slayer||0,
     };
     window._bonusClaimed = data.bonusClaimed || false;
     (data.completed||[]).forEach(id => window._completedQuests.add(id));
@@ -7484,7 +7483,7 @@ async function _saveAllQuestProgress() {
     const prog = {
       hunter:_questProgress.hunter||0, gatherer:_questProgress.gatherer||0, market:_questProgress.market||0,
       potions:_questProgress.potions||0, food:_questProgress.food||0,
-      explorer:[...(_questProgress.explorer instanceof Set?_questProgress.explorer:[])], elite:_questProgress.elite||0,
+      explorer:[...(_questProgress.explorer instanceof Set?_questProgress.explorer:[])], slayer:_questProgress.slayer||0,
     };
     const storyProgress = {};
     STORY_QUESTS.forEach(q => {
@@ -9944,7 +9943,6 @@ async function _clientBattleTurn(action, skillName) {
     await updateDoc(doc(db, "battles", uid), { status:"victory" });
     const isElite = ["B","A","S"].includes(b.grade);
     await _incrementQuest("kill", 1);
-    if (isElite) await _incrementQuest("eliteKill", 1);
     // Track zone kill count for pool system
     const _manualZone = window._currentBattleZone || null;
     if (_manualZone) await window._recordZoneKill(_manualZone, b.grade);
@@ -10132,7 +10130,6 @@ async function _clientAutoBattle(grade, maxTurns=15, zoneName=null) {
     await updateDoc(doc(db, "characters", uid), updates);
     const isElite = ["B","A","S"].includes(grade);
     await _incrementQuest("kill", 1);
-    if (isElite) await _incrementQuest("eliteKill", 1);
     // Track zone kill count for pool system
     if (zoneName) await window._recordZoneKill(zoneName, grade);
     logActivity('⚔️', `<b>Defeated ${monster.name}</b>${isElite ? ' <span style="color:#e8d070">[Elite]</span>' : ''} · +${drops.gold}💰 +${expGain} EXP`, isElite ? '#e8d070' : '#e05555');
@@ -10933,7 +10930,6 @@ function _launchAutoBattleLoop(grade, zoneName) {
     const isElite = ['B','A','S'].includes(grade);
     await window._recordZoneKill(zoneName, grade);
     await _incrementQuest('kill', 1);
-    if (isElite) await _incrementQuest('eliteKill', 1);
     await updateDoc(doc(db, 'characters', _uid), {
       gold: increment(drops.gold),
       inventory: char.inventory,
@@ -14491,7 +14487,7 @@ function _syncAllDisplays(c) {
 async function refreshCharData() {
   if (!_uid) return;
   try {
-    const snap = await getDoc(doc(db, 'characters', _uid));
+    const snap = await getDocFromServer(doc(db, 'characters', _uid));
     if (snap.exists()) {
       _charData        = snap.data();
       window._charData = _charData;
