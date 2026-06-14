@@ -14780,8 +14780,10 @@ function _checkPotionResetPending() {
         const btn = document.getElementById('ink-confirm-deity-btn-2');
         if (btn) { btn.disabled = true; btn.textContent = 'CONFIRMING...'; }
         try {
-          await updateDoc(doc(db, 'characters', _uid), { deity: deityName, deityTitle });
-          Object.assign(_charData, { deity: deityName, deityTitle });
+          const newBlessing     = DEITY_BLESSING_NAMES[deityName] || deityName;
+          const newBlessingDesc = _getBlessingDesc(deityName, _charData.faithLevel || 0);
+          await updateDoc(doc(db, 'characters', _uid), { deity: deityName, deityTitle, blessing: newBlessing, blessingDesc: newBlessingDesc });
+          Object.assign(_charData, { deity: deityName, deityTitle, blessing: newBlessing, blessingDesc: newBlessingDesc });
           overlay.remove();
           await refreshCharData(); _syncAllDisplays(_charData);
           window.showToast(`🔮 Deity set to ${deityName}!`, 'success');
