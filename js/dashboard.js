@@ -67,8 +67,14 @@ async function _invWrite(uid, mutatorFn, extra = {}) {
         const cleaned = inv.filter(i => (i.qty ?? 1) > 0);
         tx.update(charRef, { inventory: cleaned, ...extra });
       });
-      // Keep _charData consistent with what was just written
-      await refreshCharData();
+      // Keep _charData consistent with what was just written.
+      // Skip during auto-battle: the battle loop owns live HP/mana/inventory
+      // locally. Calling refreshCharData() here would pull a potentially stale
+      // Firestore snapshot and overwrite those values, causing potions to visually
+      // reappear and HP/mana to snap back after use.
+      if (!_autoBattleRunning) {
+        await refreshCharData();
+      }
     } catch (e) {
       console.warn('[_invWrite] transaction failed, attempting fallback getDoc:', e);
       // Last-resort fallback: re-read Firestore directly (NOT _charData which may be stale)
@@ -83,7 +89,10 @@ async function _invWrite(uid, mutatorFn, extra = {}) {
         const cleaned = freshInv.filter(i => (i.qty ?? 1) > 0);
         await updateDoc(charRef, { inventory: cleaned, ...extra });
         if (_charData) _charData.inventory = cleaned;
-        await refreshCharData();
+        // Same guard as the main path — skip during auto-battle
+        if (!_autoBattleRunning) {
+          await refreshCharData();
+        }
       } catch (e2) {
         console.error('[_invWrite] fallback also failed:', e2);
       }
@@ -3116,7 +3125,12 @@ export function initDashboard() {
     window.loadNotifications();
     window.loadDivineVisions();
     try {
-      const snap = await getDoc(doc(db, "characters", user.uid));
+      // BUG FIX (Inventory loss): getDoc() can return Firestore's local IndexedDB cache
+      // even in a fresh browser/tab, serving stale data from a previous session.
+      // This was the root cause of players seeing an old inventory after switching browsers —
+      // the cache had an older snapshot that pre-dated hours of farming.
+      // getDocFromServer forces a network read, guaranteeing the live server state.
+      const snap = await getDocFromServer(doc(db, "characters", user.uid));
       if (!snap.exists()) { window.location.href = "create-character.html"; return; }
       _charData = snap.data();
       _charData.uid = user.uid; // ensure uid is always available on charData
@@ -3173,10 +3187,19 @@ export function initDashboard() {
           _charData.professionXp = d.professionXp;
           _charData.professionLvl= d.professionLvl;
           _charData.gold         = d.gold;
-          _charData.hp           = d.hp;
-          _charData.mana         = d.mana;
-          _charData.hpMax        = d.hpMax;
-          _charData.manaMax      = d.manaMax;
+          // During auto-battle the battle loop owns live HP/mana — never let a
+          // background Firestore write (regen tick, XP award, etc.) snap those
+          // values back to a stale server state. Only update the maximums, which
+          // can legitimately change (e.g. a deity bestow raises hpMax).
+          if (!_autoBattleRunning) {
+            _charData.hp    = d.hp;
+            _charData.mana  = d.mana;
+            _charData.hpMax   = d.hpMax;
+            _charData.manaMax = d.manaMax;
+          } else {
+            _charData.hpMax   = d.hpMax;
+            _charData.manaMax = d.manaMax;
+          }
           // ── Sync inventory from confirmed server snapshot ────────────────
           // The bestow Cloud Function writes inventory server-side. Without this,
           // _charData.inventory and window._allInvItems can go stale between
@@ -4530,7 +4553,14 @@ window.useItem = async function(itemName, kind) {
       const i = inv.findIndex(x => x.name === itemName);
       if (i !== -1) { if (inv[i].qty > 1) inv[i].qty--; else inv.splice(i, 1); }
     }, extraUpdates);
-    await refreshCharData();
+    // _invWrite already calls refreshCharData() internally. Calling it again here
+    // (a) doubles the Firestore round-trip latency and (b) can overwrite the live
+    // battle HP/Mana with the character's out-of-battle values from Firestore.
+    // Skip it when called from _useBattlePotion (which manages HP/Mana directly).
+    // For all other useItem calls (outside battle), do refresh as normal.
+    if (!_autoBattleRunning && document.getElementById('battle-arena')?.style.display === 'none') {
+      await refreshCharData();
+    }
     window._allInvItems = _charData.inventory || [];
 
     // Sync every display immediately
@@ -8067,7 +8097,10 @@ window.showNotifications = function() {
               <span class="notif-tab-badge" id="ntab-badge-visions"></span>
             </button>
           </div>
-          <button onclick="window.dismissNotificationsModal()" class="notif-close-btn">✕</button>
+          <div style="display:flex;align-items:center;gap:6px">
+            <button onclick="window.markAllNotificationsRead()" class="notif-close-btn" style="font-size:0.65rem;padding:3px 8px;letter-spacing:0.04em" title="Mark all as read">✓ All read</button>
+            <button onclick="window.dismissNotificationsModal()" class="notif-close-btn">✕</button>
+          </div>
         </div>
         <div id="notifications-list"></div>
       </div>`;
@@ -8155,14 +8188,33 @@ window.renderNotificationsList = function() {
 window.markNotificationRead = async function(id) {
   try {
     await updateDoc(doc(db, "notifications", id), { read: true });
-    window.loadNotifications();
+    // BUG FIX: do NOT call loadNotifications() here — the onSnapshot listener
+    // already fires automatically when the doc updates, recomputing _unreadCount
+    // and calling updateNotificationBadge(). Re-calling loadNotifications() was
+    // creating a duplicate listener which could cause a race where the badge
+    // flickered or stayed non-zero until the new listener settled.
   } catch(e) { window.showToast("Failed to mark as read.", "error"); }
+};
+
+// Mark ALL notifications and visions as read in one shot
+window.markAllNotificationsRead = async function() {
+  try {
+    const unread = (window._notifications || []).filter(n => !n.read);
+    const unreadVisions = (window._divineVisions || []).filter(v => !v.read);
+    const allOps = [
+      ...unread.map(n => updateDoc(doc(db, "notifications", n.id), { read: true })),
+      ...unreadVisions.map(v => updateDoc(doc(db, 'divineVisions', _uid, 'messages', v.id), { read: true })),
+    ];
+    if (allOps.length === 0) { window.showToast('No unread notifications.', 'info'); return; }
+    await Promise.all(allOps);
+    // Snapshots will fire and update the badge automatically
+  } catch(e) { window.showToast("Failed to mark all as read.", "error"); }
 };
 
 window.deleteNotification = async function(id) {
   try {
     await deleteDoc(doc(db, "notifications", id));
-    window.loadNotifications();
+    // onSnapshot handles the badge update automatically — no need to re-subscribe
   } catch(e) { window.showToast("Failed to delete notification.", "error"); }
 };
 
@@ -10367,8 +10419,13 @@ function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stat
       break;
     }
     case "hpbuff": {
+      // BUG FIX: was Math.min(playerHpMax + gained, playerHp + gained) which let
+      // playerHp exceed playerHpMax. updateBattleBars uses playerHpMax as the
+      // denominator, so the HP bar would show 100% regardless of damage taken —
+      // making the player effectively immortal until HP dropped below playerHpMax.
+      // Cap at playerHpMax so the bar and damage tracking stay correct.
       const gained = Math.round(playerHpMax * sk.hpMult);
-      playerHp = Math.min(playerHpMax + gained, playerHp + gained);
+      playerHp = Math.min(playerHpMax, playerHp + gained);
       log.push(`💛 ${skillName}: HP surged by ${gained}!`);
       break;
     }
@@ -10666,6 +10723,11 @@ window._startAutoBattle = async function(grade, zoneName) {
 let _autoBattleRunning   = false;
 let _autoBattleForceMelee = false;
 let _autoBattlePotionPending = false; // set true when a potion is used mid-battle
+// BUG FIX: store exact healed HP/Mana values so the loop applies them directly
+// to its local playerHp/playerMana variables. Reading from _charData was unreliable
+// because refreshCharData() could race with the auto-battle loop and clobber values.
+let _autoBattleHealedHp   = null;
+let _autoBattleHealedMana = null;
 
 window._toggleAutoBattleMelee = function() {
   _autoBattleForceMelee = !_autoBattleForceMelee;
@@ -10764,9 +10826,16 @@ function _launchAutoBattleLoop(grade, zoneName) {
     while (monHp > 0 && playerHp > 0 && _autoBattleRunning) {
       // Pull potion heal from _charData only when a potion was actually just used
       if (_autoBattlePotionPending) {
-        playerHp   = Math.max(playerHp,   _charData?.hp   ?? playerHp);
-        playerMana = Math.max(playerMana, _charData?.mana ?? playerMana);
+        // BUG FIX: use the exact healed values stored by _useBattlePotion instead of
+        // Math.max(playerHp, _charData.hp). The old approach could revert to pre-battle
+        // HP if _charData was refreshed from Firestore mid-battle (which writes the
+        // character's out-of-battle HP). _autoBattleHealedHp/_Mana are set atomically
+        // by _useBattlePotion right after the heal is computed, before any async ops.
+        if (_autoBattleHealedHp   !== null) playerHp   = _autoBattleHealedHp;
+        if (_autoBattleHealedMana !== null) playerMana = _autoBattleHealedMana;
         _autoBattlePotionPending = false;
+        _autoBattleHealedHp      = null;
+        _autoBattleHealedMana    = null;
       }
       // No mana regen during combat — skills have real cost.
       // Out-of-battle passive regen (_regenTick) handles mana recovery.
@@ -10814,9 +10883,18 @@ function _launchAutoBattleLoop(grade, zoneName) {
         }
       }
 
-      const skillNameLabel = usedSkill ? usedSkill.name : 'Melee Strike';
       const skillEl = document.getElementById('auto-current-skill');
-      if (skillEl) skillEl.textContent = skillNameLabel;
+      if (!usedSkill) {
+        // No affordable skill — auto-switched to melee. Show clear indicator.
+        const reason = _autoBattleForceMelee ? 'MELEE ONLY' : 'MP exhausted';
+        if (skillEl) skillEl.textContent = `⚔ Melee Strike (${reason})`;
+      } else {
+        // Show skill name and MP cost so player can see mana being consumed
+        const manaCost = usedSkill.mana || 0;
+        if (skillEl) skillEl.textContent = manaCost > 0
+          ? `${usedSkill.name} (-${manaCost} MP)`
+          : usedSkill.name;
+      }
 
       let dmg = 0;
       if (usedSkill) {
@@ -11484,58 +11562,102 @@ function _renderBattlePotionStrip() {
   }).join('');
 }
 
-// Use a potion from the battle strip — calls existing useItem then re-renders strip + battle bars
+// Use a potion from the battle strip — applies heal locally for instant feedback,
+// then writes to Firestore in the background (no blocking round-trips during battle).
 window._useBattlePotion = async function(itemName, kind) {
-  // Sync the live battle HP/Mana into _charData before useItem reads it.
-  // In auto-battle: _autoBattleLiveHp is kept up-to-date by the battle loop.
-  // In manual Fight: the live values live in the Firestore battles doc — read them now.
-  if (_charData) {
-    if (window._autoBattleLiveHp !== undefined) {
-      _charData.hp   = window._autoBattleLiveHp;
-    } else {
-      // Manual Fight mode — read current HP/Mana from the battles doc
-      try {
-        const uid = auth.currentUser?.uid;
-        if (uid) {
-          const bSnap = await getDoc(doc(db, 'battles', uid));
-          if (bSnap.exists()) {
-            const bData = bSnap.data();
-            if (bData.playerHp   !== undefined) _charData.hp   = bData.playerHp;
-            if (bData.playerMana !== undefined) _charData.mana = bData.playerMana;
-          }
-        }
-      } catch(_) {}
-    }
-    if (window._autoBattleLiveMana !== undefined) _charData.mana = window._autoBattleLiveMana;
+  if (!_charData) return;
+
+  // ── Step 1: Grab the item from local inventory first ──────────────────────
+  // If the item doesn't exist locally, do nothing (prevents double-use exploit).
+  const invIdx = (_charData.inventory || []).findIndex(i => i.name === itemName);
+  if (invIdx === -1) { window.showToast('Potion not found in inventory.', 'error'); return; }
+
+  // ── Step 2: Compute the live battle HP/Mana from the running loop ─────────
+  const liveHp   = (window._autoBattleLiveHp   !== undefined) ? window._autoBattleLiveHp   : (_charData.hp   || 0);
+  const liveMana = (window._autoBattleLiveMana !== undefined) ? window._autoBattleLiveMana : (_charData.mana || 0);
+  const hpMax   = _charData.hpMax   || 100;
+  const manaMax = _charData.manaMax || 50;
+
+  // ── Step 3: Compute healed values immediately (no async needed) ───────────
+  const isHpPotion   = kind === 'hp'   || itemName.includes('HP Potion')   || itemName.includes('Health Potion');
+  const isManaPotion = kind === 'mana' || itemName.includes('Mana Potion');
+  let newHp   = liveHp;
+  let newMana = liveMana;
+
+  if (isHpPotion) {
+    const pct  = itemName.includes('Minor') ? 0.20 : itemName.includes('Greater') ? 0.70 : 0.40;
+    const heal = Math.round(hpMax * pct);
+    newHp = Math.min(hpMax, liveHp + heal);   // cap strictly at hpMax — prevents immortality
+    window.showToast(`💊 ${itemName}: +${heal} HP restored!`, 'success');
+  } else if (isManaPotion) {
+    const pct     = itemName.includes('Minor') ? 0.20 : itemName.includes('Greater') ? 0.70 : 0.40;
+    const restore = Math.round(manaMax * pct);
+    newMana = Math.min(manaMax, liveMana + restore);
+    window.showToast(`💠 ${itemName}: +${restore} Mana restored!`, 'success');
   }
 
-  await window.useItem(itemName, 'potion');
-  _autoBattlePotionPending = true; // signal the auto-battle loop to pick up the healed values
+  // ── Step 4: Deduct the item from local _charData.inventory immediately ────
+  // This is purely local — the Firestore write happens async below.
+  // Doing it NOW means _renderBattlePotionStrip() shows the correct count instantly
+  // and the player can't use the same potion twice before the write completes.
+  const localInv = (_charData.inventory || []).map(i => ({ ...i }));
+  const li = localInv.findIndex(i => i.name === itemName);
+  if (li !== -1) {
+    if ((localInv[li].qty ?? 1) > 1) localInv[li].qty--;
+    else localInv.splice(li, 1);
+  }
+  _charData.inventory  = localInv;
+  window._allInvItems  = localInv;
 
-  const curHp   = _charData?.hp   ?? 0;
-  const curMana = _charData?.mana ?? 0;
-  const hpMax   = _charData?.hpMax   || 100;
-  const manaMax = _charData?.manaMax || 50;
+  // ── Step 5: Signal the auto-battle loop to pick up the new HP/Mana ────────
+  _autoBattleHealedHp      = newHp;
+  _autoBattleHealedMana    = newMana;
+  _autoBattlePotionPending = true;
 
-  // CRITICAL: write healed values into the battles doc so _clientBattleTurn
-  // reads the correct HP/Mana on the next manual turn (it reads from Firestore, not _charData).
-  try {
-    const uid = auth.currentUser?.uid;
-    if (uid) {
-      await updateDoc(doc(db, 'battles', uid), { playerHp: curHp, playerMana: curMana });
-    }
-  } catch(_) {}
+  // Update live tracking vars immediately so any concurrent reads are correct
+  window._autoBattleLiveHp   = newHp;
+  window._autoBattleLiveMana = newMana;
 
-  // Also keep the live variables in sync for auto-battle
-  window._autoBattleLiveHp   = curHp;
-  window._autoBattleLiveMana = curMana;
-
-  _renderBattlePotionStrip();
-  // Update the battle bars visually
+  // ── Step 6: Update bars and strip instantly (zero lag for the player) ──────
   const monHpEl  = document.getElementById('monster-hp-text');
   const monHpStr = monHpEl?.textContent || '0 / 100';
   const [monCur, monMax] = monHpStr.split('/').map(s => parseInt(s.trim()) || 0);
-  updateBattleBars(monCur, monMax || 1, curHp, hpMax, curMana, manaMax);
+  updateBattleBars(monCur, monMax || 1, newHp, hpMax, newMana, manaMax);
+  _renderBattlePotionStrip();
+
+  // ── Step 7: Write to Firestore in the background (non-blocking) ───────────
+  // _invWrite uses a transaction so it reads fresh server inventory and deducts
+  // exactly one potion regardless of any concurrent writes. We fire-and-forget
+  // from the battle loop's perspective — the player already sees the result.
+  const capturedItemName = itemName;
+  const fsExtra = isHpPotion ? { hp: newHp } : isManaPotion ? { mana: newMana } : {};
+  _invWrite(_uid, inv => {
+    const i = inv.findIndex(x => x.name === capturedItemName);
+    if (i !== -1) { if ((inv[i].qty ?? 1) > 1) inv[i].qty--; else inv.splice(i, 1); }
+  }, fsExtra).then(() => {
+    // After the write settles, re-inject live HP/Mana into _charData so it
+    // doesn't get overwritten by refreshCharData's out-of-battle values.
+    if (_autoBattleRunning) {
+      const curLiveHp   = window._autoBattleLiveHp;
+      const curLiveMana = window._autoBattleLiveMana;
+      if (curLiveHp   !== undefined) _charData.hp   = curLiveHp;
+      if (curLiveMana !== undefined) _charData.mana = curLiveMana;
+    }
+    // Re-render strip after Firestore confirms (keeps qty in sync if there was a race)
+    _renderBattlePotionStrip();
+  }).catch(e => console.warn('[BattlePotion] Firestore write failed:', e));
+
+  // Manual fight mode: also update the battles doc so _clientBattleTurn reads
+  // the correct HP/Mana (it reads from Firestore, not _charData).
+  if (!_autoBattleRunning) {
+    try {
+      const uid = auth.currentUser?.uid;
+      if (uid) await updateDoc(doc(db, 'battles', uid), { playerHp: newHp, playerMana: newMana });
+    } catch(_) {}
+  }
+
+  await _incrementQuest(kind === 'hp' ? 'potion' : kind === 'mana' ? 'potion' : 'potion', 1);
+  logActivity('🧪', `Used <b>${itemName}</b> during battle.`, '#888');
 };
 
 function updateBattleBars(monHp, monMax, plHp, plMax, plMana, plManaMax) {

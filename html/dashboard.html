@@ -2604,7 +2604,10 @@ button,
   function openBuyModal(name, icon, price, type, maxQty = 99) {
     // Weapons/armour: single-purchase only; consumables/materials: allow stacking
     const stackable = ['consumable','material','food'].includes(type);
-    const effectiveMax = stackable ? Math.max(maxQty, 99) : 1;
+    // BUG FIX: was Math.max(maxQty, 99) which ignored the real listing quantity and
+    // always showed 99. Now: vendor items (no explicit maxQty) cap at 99; listing
+    // purchases pass the real stock quantity which is respected as-is.
+    const effectiveMax = stackable ? maxQty : 1;
     _buyTarget = { name, icon, price, type, maxQty: effectiveMax };
     _buyQty = 1;
     document.getElementById('buy-modal-icon').textContent = icon;
