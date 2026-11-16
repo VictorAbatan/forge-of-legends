@@ -130,6 +130,28 @@ const KINGDOM_DATA = {
 const BASE_STATS = { str: 10, int: 10, def: 10, dex: 10 };
 const WELCOME_STAT_POINTS = 20;
 
+// ── HP/Mana scaling (matches dashboard.js's _migrateAccountStats formula) ────
+// hpMax   = 100 + levelWithinRank×10 + rankIdx×150
+// manaMax = 50  + levelWithinRank×5  + rankIdx×75
+// levelWithinRank = ((level-1) % 100) + 1  →  1 at level 1 (NOT 0 — this is
+// the detail that matters: a level-1 character already counts as
+// levelWithinRank=1, so base creation values are 110 HP / 55 mana, not
+// 100/50). Mirroring this exactly means a new character already matches
+// what _migrateAccountStats would compute on first login, instead of being
+// silently bumped up the moment they log in.
+const RANK_ORDER = ['Wanderer','Follower','Disciple','Master','Exalted','Crown','Supreme','Legend','Myth','Eternal'];
+function _levelWithinRank(level) {
+  return ((Math.max(1, level || 1) - 1) % 100) + 1;
+}
+function _calcHpMax(rank, level) {
+  const rankIdx = Math.max(0, RANK_ORDER.indexOf(rank));
+  return 100 + _levelWithinRank(level) * 10 + rankIdx * 150;
+}
+function _calcManaMax(rank, level) {
+  const rankIdx = Math.max(0, RANK_ORDER.indexOf(rank));
+  return 50 + _levelWithinRank(level) * 5 + rankIdx * 75;
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 export function initCharacterCreation() {
   onAuthStateChanged(auth, (user) => {
@@ -258,11 +280,11 @@ async function createCharacter() {
     xp:        0,
     xpMax:     100, // Level 1→2 base EXP per doc
 
-    // Health & Mana (doc: base HP=100, base Mana=50)
-    hp:        100,
-    hpMax:     100,
-    mana:      50,
-    manaMax:   50,
+    // Health & Mana (matches _migrateAccountStats scaling — see helpers above)
+    hp:        _calcHpMax("Wanderer", 1),
+    hpMax:     _calcHpMax("Wanderer", 1),
+    mana:      _calcManaMax("Wanderer", 1),
+    manaMax:   _calcManaMax("Wanderer", 1),
 
     // Stats (doc: base=10 each, STR/INT/DEF/DEX)
     stats:     { ...BASE_STATS },

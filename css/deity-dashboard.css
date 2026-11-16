@@ -95,8 +95,10 @@ select.dnpc-select option { background: #222018 !important; color: #F5EDD8 !impo
 .chat-window,
 .dchat-window,
 .deity-chat-window {
-  background: #1E1B13 !important;
   border-color: rgba(232,197,88,0.18) !important;
+}
+.deity-chat-window {
+  background: #1E1B13 !important;
 }
 .chat-msg-text { background: #2C2820 !important; color: #F5EDD8 !important; }
 .chat-msg.own .own-text {
@@ -1025,7 +1027,7 @@ select.dnpc-select option:checked {
 /* Players in location bar */
 .dchat-players-bar {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   padding: 8px 12px;
   background: var(--ink2);
@@ -1033,6 +1035,39 @@ select.dnpc-select option:checked {
   border-radius: var(--radius);
   margin-bottom: 10px;
   flex-wrap: wrap;
+}
+.dchat-players-toggle { display: none; }
+@media (max-width: 768px) {
+  .dchat-players-bar { position: relative; flex-wrap: nowrap; padding-right: 36px; }
+  .dchat-players-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    width: 22px;
+    height: 22px;
+    background: var(--ink3);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    color: var(--text-dim);
+    font-size: 0.7rem;
+    line-height: 1;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: transform 0.2s ease;
+  }
+  .dchat-players-bar.collapsed .dchat-players-toggle { transform: rotate(-90deg); }
+  .dchat-players-list {
+    max-height: 160px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .dchat-players-bar.collapsed .dchat-players-list {
+    max-height: 0;
+    overflow: hidden;
+  }
 }
 .dchat-players-label {
   font-family: var(--font-mono);

@@ -150,14 +150,7 @@
   text-align: center;
   margin-bottom: 6px;
 }
-.duel-stance-tag {
-  font-size: 0.65rem;
-  color: var(--gold-dim, #9a7a3a);
-  text-align: center;
-  margin-bottom: 6px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
+
 
 /* HP / MP bars */
 .duel-hp-row, .duel-mp-row {
@@ -213,6 +206,7 @@
 /* Stance tag under fighter rank */
 .duel-stance-tag {
   font-size: 0.62rem;
+  font-weight: 600;
   color: var(--gold-dim, #9a7a3a);
   letter-spacing: 0.04em;
   background: rgba(201,168,76,0.10);
@@ -226,6 +220,46 @@
   color: var(--gold, #c9a84c);
   background: rgba(201,168,76,0.18);
   border-color: rgba(201,168,76,0.4);
+}
+
+/* Floating damage/heal numbers over a fighter panel */
+.duel-float {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  font-family: var(--font-mono, monospace);
+  font-weight: 800;
+  font-size: 0.95rem;
+  pointer-events: none;
+  z-index: 5;
+  text-shadow: 0 2px 6px rgba(0,0,0,0.7);
+  animation: duel-float-up 1.4s ease-out forwards;
+}
+.duel-float-dmg  { color: #e05555; }
+.duel-float-heal { color: #4caf8a; }
+@keyframes duel-float-up {
+  0%   { opacity: 0; transform: translate(-50%, 6px) scale(0.9); }
+  15%  { opacity: 1; transform: translate(-50%, -4px) scale(1.08); }
+  100% { opacity: 0; transform: translate(-50%, -44px) scale(1); }
+}
+
+/* Status effect icon row (stun, dot, hot, shield, buffs, etc.) */
+.duel-status-icons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 3px;
+  margin-bottom: 5px;
+  max-width: 120px;
+}
+.duel-status-icon {
+  font-size: 0.72rem;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 5px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.08);
+  cursor: default;
 }
 
 /* VS column */
@@ -668,4 +702,73 @@
 }
 .duel-stance-banner b {
   color: var(--gold-dim, #9a7a3a);
+}
+
+/* ── Mobile: tighten the battle HUD on narrow screens ──────────── */
+/* Previously duel.css had no media queries at all, so on phones the
+   fixed 52px avatars + unconstrained name widths + full-size action
+   buttons pushed the card wide and cramped the VS column. */
+@media (max-width: 480px) {
+  .duel-arena {
+    padding: 10px 8px 8px;
+  }
+  .duel-fighter {
+    padding: 8px 4px;
+    gap: 3px;
+  }
+  .duel-fighter-av {
+    width: 40px;
+    height: 40px;
+  }
+  .duel-fighter-name {
+    font-size: 0.72rem;
+    max-width: 76px;
+  }
+  .duel-fighter-rank {
+    font-size: 0.56rem;
+    margin-bottom: 4px;
+  }
+  .duel-stance-tag {
+    font-size: 0.56rem;
+    padding: 1px 5px;
+  }
+  .duel-status-icons {
+    max-width: 90px;
+  }
+  .duel-status-icon {
+    font-size: 0.62rem;
+    padding: 1px 3px;
+  }
+  .duel-hp-label {
+    width: 13px;
+    font-size: 0.52rem;
+  }
+  .duel-hp-num {
+    font-size: 0.54rem;
+    min-width: 32px;
+  }
+  .duel-vs-col {
+    padding: 0 3px;
+  }
+  .duel-vs-badge {
+    font-size: 0.62rem;
+  }
+  .duel-float {
+    font-size: 0.8rem;
+  }
+  .duel-action-panel {
+    gap: 5px;
+    padding: 8px 8px 10px;
+  }
+  .duel-act-btn {
+    padding: 8px 3px;
+    font-size: 0.64rem;
+  }
+  .duel-act-btn span:first-child {
+    font-size: 1rem;
+  }
+  .duel-band {
+    padding: 8px 10px;
+    font-size: 0.72rem;
+  }
 }

@@ -52,20 +52,44 @@ import { getApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.
 // ═══════════════════════════════════════════════════
 let _invWriteQueue = Promise.resolve();
 
+// A mutator (or extra-fields function) can call `throw _invAbort("message")` to
+// cancel the write because the SERVER copy no longer allows it (item already
+// gone, not enough gold, rank changed in another tab...). The abort is the only
+// kind of error that reaches the caller; everything else is still logged and
+// swallowed exactly as before.
+function _invAbort(message) { const e = new Error(message); e.userAbort = true; return e; }
+window._invAbort = _invAbort;
+
+// Removes ONE of `name` from a fresh inventory copy, or aborts the write if the
+// server no longer has it. Used by every "consume an item" mutator so an item
+// that was already used (second tab, double click) can never grant its effect twice.
+function _consumeOne(inv, name) {
+  const i = inv.findIndex(x => x.name === name);
+  if (i === -1 || (inv[i].qty ?? 1) < 1) throw _invAbort('You no longer have this item.');
+  if ((inv[i].qty ?? 1) > 1) inv[i].qty--; else inv.splice(i, 1);
+}
+
+// mutatorFn(inv, fresh)  — inv is a deep copy of the SERVER inventory, fresh is the
+//                          whole SERVER character doc (use it to validate / compute).
+// extra                   — object of extra fields, OR a function (fresh) => fields,
+//                          evaluated inside the transaction so values like XP, gold
+//                          and faith are computed from server data, never stale local.
 async function _invWrite(uid, mutatorFn, extra = {}) {
-  _invWriteQueue = _invWriteQueue.then(async () => {
+  const job = _invWriteQueue.then(async () => {
     try {
       const charRef = doc(db, 'characters', uid);
       await runTransaction(db, async tx => {
         const snap = await tx.get(charRef);
         if (!snap.exists()) throw new Error('[_invWrite] Character doc not found');
+        const fresh = snap.data();
         // Work on a deep copy of the server's live inventory
-        const inv = (snap.data().inventory || []).map(i => ({ ...i }));
+        const inv = (fresh.inventory || []).map(i => ({ ...i }));
         // Let the caller describe their mutation against the fresh data
-        mutatorFn(inv);
+        mutatorFn(inv, fresh);
+        const extraFields = typeof extra === 'function' ? extra(fresh) : extra;
         // Remove zero-qty items that the mutator may have left behind
         const cleaned = inv.filter(i => (i.qty ?? 1) > 0);
-        tx.update(charRef, { inventory: cleaned, ...extra });
+        tx.update(charRef, { inventory: cleaned, ...extraFields });
       });
       // Keep _charData consistent with what was just written.
       // Skip during auto-battle: the battle loop owns live HP/mana/inventory
@@ -76,6 +100,7 @@ async function _invWrite(uid, mutatorFn, extra = {}) {
         await refreshCharData();
       }
     } catch (e) {
+      if (e && e.userAbort) throw e;   // deliberate cancel — tell the caller
       console.warn('[_invWrite] transaction failed, attempting fallback getDoc:', e);
       // Last-resort fallback: re-read Firestore directly (NOT _charData which may be stale)
       // and apply the mutation. Using _charData here was the original bug — if a prior
@@ -84,23 +109,140 @@ async function _invWrite(uid, mutatorFn, extra = {}) {
       try {
         const charRef = doc(db, 'characters', uid);
         const freshSnap = await getDoc(charRef);
-        const freshInv = (freshSnap.exists() ? (freshSnap.data().inventory || []) : (_charData?.inventory || [])).map(i => ({ ...i }));
-        mutatorFn(freshInv);
+        const freshDoc = freshSnap.exists() ? freshSnap.data() : (_charData || {});
+        const freshInv = (freshDoc.inventory || []).map(i => ({ ...i }));
+        mutatorFn(freshInv, freshDoc);
+        const extraFields = typeof extra === 'function' ? extra(freshDoc) : extra;
         const cleaned = freshInv.filter(i => (i.qty ?? 1) > 0);
-        await updateDoc(charRef, { inventory: cleaned, ...extra });
+        await updateDoc(charRef, { inventory: cleaned, ...extraFields });
         if (_charData) _charData.inventory = cleaned;
         // Same guard as the main path — skip during auto-battle
         if (!_autoBattleRunning) {
           await refreshCharData();
         }
       } catch (e2) {
+        if (e2 && e2.userAbort) throw e2;
         console.error('[_invWrite] fallback also failed:', e2);
       }
     }
-  }).catch(e => console.warn('[_invWrite] queue error:', e));
-  return _invWriteQueue;
+  });
+  _invWriteQueue = job.catch(e => { if (!(e && e.userAbort)) console.warn('[_invWrite] queue error:', e); });
+  return job;
 }
+
+// Generic "validate against the server, then update scalar fields" transaction,
+// serialised with every inventory write. fn(fresh) returns
+//   { updates: <Firestore fields, may use increment()>, local: <absolute values for _charData> }
+// and may `throw _invAbort(msg)` to cancel. Rejects on abort or hard failure.
+async function _charTx(uid, fn) {
+  let out = null;
+  const job = _invWriteQueue.then(async () => {
+    const charRef = doc(db, 'characters', uid);
+    await runTransaction(db, async tx => {
+      const snap = await tx.get(charRef);
+      if (!snap.exists()) throw new Error('[_charTx] Character doc not found');
+      out = fn(snap.data());
+      tx.update(charRef, out.updates);
+    });
+  });
+  _invWriteQueue = job.catch(() => {});
+  await job;
+  return out;
+}
+window._charTx = _charTx;
 window._invWrite = _invWrite;
+
+// ═══════════════════════════════════════════════════
+//  _commitKillReward — the ONLY way a monster kill should pay out.
+//
+//  Kill rewards used to be written with a plain updateDoc built from the
+//  battle loop's LOCAL copy of the character (inventory, gold, xp...). That
+//  blind overwrite raced with every other writer (potions, quest rewards,
+//  trades) and silently dropped whichever landed first. It also wrote
+//  xp: increment(gain) next to a locally-computed level, so after a level-up
+//  the server xp overflowed xpMax while the client showed the remainder.
+//
+//  This helper runs inside _invWriteQueue (so it serialises with potion/shop
+//  writes) and inside a transaction that reads the FRESH server doc, adds the
+//  drops to the SERVER inventory, recomputes xp/level from SERVER values and
+//  applies gold via increment(). It returns absolute values for the caller to
+//  patch onto _charData, or null if the write failed entirely.
+// ═══════════════════════════════════════════════════
+function _mergeDropsIntoInv(inv, items) {
+  const out = (inv || []).map(i => ({ ...i }));
+  (items || []).forEach(item => {
+    const ex = out.find(i => i.name === item.name);
+    const isEquip = getItemType(item.name) === 'equipment';
+    if (ex && !isEquip) { ex.qty = (ex.qty ?? 1) + (item.qty ?? 1); }
+    else {
+      const ni = { ...item };
+      if (isEquip) ni.iid = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+      out.push(ni);
+    }
+  });
+  return out;
+}
+
+async function _commitKillReward(uid, { drops, expGain, hp, mana, extra = {} }) {
+  const build = (fresh) => {
+    const inv  = _mergeDropsIntoInv(fresh.inventory, drops.items);
+    const gain = drops.gold || 0;
+    const px   = _processExp(fresh.xp || 0, fresh.xpMax || 100, fresh.level || 1,
+                             fresh.rank || 'Wanderer', expGain, fresh.charClass);
+    const local = {
+      gold: (fresh.gold || 0) + gain, inventory: inv,
+      xp: px.newXp, xpMax: px.newXpMax, level: px.newLevel, rank: px.newRank,
+      ...(hp   !== undefined ? { hp }   : {}),
+      ...(mana !== undefined ? { mana } : {}),
+      ...extra,
+    };
+    const fs = { ...local, gold: increment(gain) };
+    if (px.leveledUp) {
+      local.hpMax     = (fresh.hpMax   || 100) + 10;
+      local.manaMax   = (fresh.manaMax || 50)  + 5;
+      local.statPoints = (fresh.statPoints || 0) + 3;
+      fs.hpMax = local.hpMax; fs.manaMax = local.manaMax; fs.statPoints = increment(3);
+    }
+    return { local, fs, px };
+  };
+
+  let built = null;
+  const job = _invWriteQueue.then(async () => {
+    const charRef = doc(db, 'characters', uid);
+    try {
+      await runTransaction(db, async tx => {
+        const snap = await tx.get(charRef);
+        if (!snap.exists()) throw new Error('[_commitKillReward] Character doc not found');
+        built = build(snap.data());
+        tx.update(charRef, built.fs);
+      });
+    } catch (e) {
+      console.warn('[_commitKillReward] transaction failed, retrying with fresh getDoc:', e);
+      const snap = await getDoc(charRef);
+      if (!snap.exists()) throw e;
+      built = build(snap.data());
+      await updateDoc(charRef, built.fs);
+    }
+  });
+  _invWriteQueue = job.catch(e => console.error('[_commitKillReward] failed:', e));
+  try { await job; } catch (_) { return null; }
+  return built;
+}
+
+// Patch the live _charData after a committed kill. Scalars come from the
+// server-derived result; inventory is merged LOCALLY so any in-flight local
+// change (e.g. a potion just used) is preserved instead of being overwritten
+// by a server snapshot that hasn't seen it yet.
+function _applyKillRewardLocal(kr, drops) {
+  const { inventory, ...scalars } = kr.local;
+  Object.assign(_charData, scalars);
+  _charData.inventory = _mergeDropsIntoInv(_charData.inventory, drops.items);
+  window._allInvItems = _charData.inventory;
+  // Redraw the sidebar EXP bar, gold, level and rank NOW. During auto-battle
+  // these only refreshed when the fight ended, so XP and gold looked frozen
+  // for the whole session even though the kills were being paid out.
+  _syncAllDisplays(_charData);
+}
 
 // ═══════════════════════════════════════════════════
 //  WORLD DEVELOPMENT EVENTS (PLAYER VIEW)
@@ -397,9 +539,20 @@ window.createParty = async function() {
       members: [{ uid: _uid, name: _charData.name, avatar: _charData.avatarUrl, rank: _charData.rank || 'Wanderer', level: _charData.level || 1 }],
       raid: null
     };
-    await updateDoc(doc(db, 'characters', _uid), { gold: increment(-5000) }); // FIXED: use increment to avoid concurrent-write clobber
-    _charData.gold = Math.max(0, (_charData.gold || 0) - 5000);
-    await setDoc(partyDoc, partyData);
+    // Fee is checked against the SERVER balance (there was no balance check at
+    // all before — the server gold could go negative) and charged with increment().
+    const _pf = await _charTx(_uid, fresh => {
+      if ((fresh.gold ?? 0) < 5000) throw _invAbort('Not enough gold to create a party (5,000 needed).');
+      return { updates: { gold: increment(-5000) }, local: { gold: (fresh.gold ?? 0) - 5000 } };
+    });
+    _charData.gold = _pf.local.gold;
+    try {
+      await setDoc(partyDoc, partyData);
+    } catch (createErr) {
+      // Party doc failed after the fee was taken — give the gold back.
+      try { await updateDoc(doc(db, 'characters', _uid), { gold: increment(5000) }); _charData.gold += 5000; } catch (_) {}
+      throw createErr;
+    }
     _partyId = partyDoc.id;
     _party = partyData;
     subscribeParty(_partyId);
@@ -407,7 +560,7 @@ window.createParty = async function() {
     window._raidState = 'party';
     window.showBossSelect();
   } catch(e) {
-    window.showToast('Failed to create party. Try again.', 'error');
+    window.showToast(e?.userAbort ? e.message : 'Failed to create party. Try again.', 'error');
     window._raidState = 'init'; window.showBossSelect();
   }
 };
@@ -1136,11 +1289,16 @@ window.tryStartBossRaid = function(bossId) {
   }
   if (canSoloBoss(char)) {
     _showPartyLoader('raid');
-    updateDoc(doc(db, "characters", _uid), { gold: (char.gold || 0) - 20000 }).then(() => {
-      char.gold -= 20000;
+    // Fee is checked against the SERVER balance and charged with increment().
+    _charTx(_uid, fresh => {
+      if ((fresh.gold ?? 0) < 20000) throw _invAbort('Not enough gold for a solo raid (20,000 needed).');
+      return { updates: { gold: increment(-20000) }, local: { gold: (fresh.gold ?? 0) - 20000 } };
+    }).then((r) => {
+      char.gold = r.local.gold;
+      if (_charData) _charData.gold = r.local.gold;
       window.showToast('20,000 gold paid for solo raid.', 'info');
       setTimeout(() => window.startBossRaid([char], boss), 800);
-    }).catch(() => { window.showToast('Failed to deduct gold. Try again.', 'error'); window.showBossSelect(); });
+    }).catch((e) => { window.showToast(e?.userAbort ? e.message : 'Failed to deduct gold. Try again.', 'error'); window.showBossSelect(); });
     return;
   }
   if (getRankIdx(char.rank) < 1) { window.showToast('Solo boss raids require Follower rank or higher.', 'error'); return; }
@@ -2379,34 +2537,29 @@ function checkAndResetWeeklyQuota() {
   // is intentional (player was penalized this week already).
   if (progress.week === currentWeek) return;
 
-  // Week has rolled over. Check whether the player completed last week.
-  if (!progress.completed) {
-    // Missed quota: apply -20% EXP penalty
-    let newExp = Math.floor((_charData.professionXp||0)*0.8);
-    // penalty:false on the NEW week — the flag records "were you penalized
-    // during THIS week", not "were you penalized at the start of this week".
+  // Week has rolled over. The penalty decision and the new profession XP are
+  // taken from the SERVER doc inside one transaction, and it is skipped if another
+  // tab/device already reset this week — previously each open tab applied its own
+  // -20% from its local copy, so the penalty could be applied more than once.
+  _charTx(_uid, fresh => {
+    const fp = fresh.quotaProgress || {};
+    if (fp.week === currentWeek) throw _invAbort('Weekly quota already reset.');
     const newProgress = { week: currentWeek, submitted: {common:0,uncommon:0,rare:0,legendary:0,mythic:0}, completed: false, penalty: false, bonus: false };
-    updateDoc(doc(db, "characters", _uid), {
-      professionXp: newExp,
-      "quotaProgress": newProgress
-    }).then(()=>{
-      _charData.professionXp = newExp;
-      _charData.quotaProgress = newProgress;
-      renderProfessionQuota();
-      window.showToast("Missed quota last week: -20% profession EXP.","error");
-    });
-  } else {
+    if (!fp.completed) {
+      // Missed quota: apply -20% EXP penalty. penalty:false on the NEW week — the
+      // flag records "were you penalized during THIS week".
+      const newExp = Math.floor((fresh.professionXp || 0) * 0.8);
+      const f = { professionXp: newExp, quotaProgress: newProgress };
+      return { updates: f, local: f, penalized: true };
+    }
     // Completed last week — clean reset, no penalty
-    const newProgress = { week: currentWeek, submitted: {common:0,uncommon:0,rare:0,legendary:0,mythic:0}, completed: false, penalty: false, bonus: false };
-    updateDoc(doc(db, "characters", _uid), {
-      "quotaProgress": newProgress,
-      professionLuckBonus: false
-    }).then(()=>{
-      _charData.quotaProgress = newProgress;
-      _charData.professionLuckBonus = false;
-      renderProfessionQuota();
-    });
-  }
+    const f = { quotaProgress: newProgress, professionLuckBonus: false };
+    return { updates: f, local: f, penalized: false };
+  }).then(r => {
+    Object.assign(_charData, r.local);
+    renderProfessionQuota();
+    if (r.penalized) window.showToast("Missed quota last week: -20% profession EXP.", "error");
+  }).catch(e => { if (!(e && e.userAbort)) console.error('[checkAndResetWeeklyQuota]', e); });
 }
 
 // Call on dashboard load
@@ -2830,19 +2983,23 @@ window._doShrineSacrifice = async function() {
   const choiredUp = !tieredUp && newTier.choir > prevState.choir;
 
   try {
+    // Materials are verified against the SERVER inventory (a missing material
+    // used to be skipped silently, so the offering still granted faith) and
+    // faith is incremented rather than written as a stale absolute.
     await _invWrite(_uid, inv => {
-      // Consume 1 of each required material from the live server inventory
       for (const mat of matsToConsume) {
         const item = inv.find(i => i.name === mat);
-        if (item) {
-          item.qty -= 1;
-          if (item.qty <= 0) inv.splice(inv.indexOf(item), 1);
-        }
+        if (!item || (item.qty ?? 0) < 1) throw _invAbort(`Missing: ${mat}`);
       }
-    }, { faithLevel: newFaith });
+      for (const mat of matsToConsume) {
+        const item = inv.find(i => i.name === mat);
+        item.qty -= 1;
+        if (item.qty <= 0) inv.splice(inv.indexOf(item), 1);
+      }
+    }, { faithLevel: increment(1) });
     window._allInvItems = _charData.inventory;
     window._refreshInvDisplay?.();
-    set('s-faith', newFaith);
+    set('s-faith', (typeof _charData.faithLevel === 'number' ? _charData.faithLevel : newFaith));
 
     if (resultEl) {
       resultEl.style.color = '#4fc870';
@@ -2905,7 +3062,7 @@ window._doShrineSacrifice = async function() {
 
   } catch(e) {
     console.error(e);
-    if (resultEl) { resultEl.style.color = '#e05555'; resultEl.textContent = 'Sacrifice failed. Try again.'; }
+    if (resultEl) { resultEl.style.color = '#e05555'; resultEl.textContent = e?.userAbort ? e.message : 'Sacrifice failed. Try again.'; }
     sacBtn.disabled = false;
     sacBtn.textContent = '🙏 OFFER SACRIFICE';
   }
@@ -3091,7 +3248,16 @@ async function _migrateAccountStats(c) {
   }
   // Always clamp xp to xpMax — catches stale xp > xpMax regardless of xpMax drift
   const effectiveXpMax = updates.xpMax || (c.xpMax || 100);
-  if ((c.xp || 0) >= effectiveXpMax) {
+  if (levelWithinRankM === 100) {
+    // At the rank cap the game stores xp === xpMax to mean "ready to ascend"
+    // (_processExp clamps there and doRankAscension requires xp >= xpMax).
+    // Only clamp genuine overflow — resetting a full bar to xpMax-1 made the
+    // ascend button vanish after every relog until another point of XP landed.
+    if ((c.xp || 0) > effectiveXpMax) {
+      updates.xp = effectiveXpMax;
+      needsPatch = true;
+    }
+  } else if ((c.xp || 0) >= effectiveXpMax) {
     updates.xp = effectiveXpMax - 1;
     needsPatch = true;
   }
@@ -3207,9 +3373,17 @@ export function initDashboard() {
           // subsequent confirmed write (regen tick, lastActive stamp, etc.) fires
           // this listener with a snapshot that has the correct inventory, but the
           // old code never applied it, leaving the display stuck on pre-bestow data.
-          // Guard: skip during auto-battle to avoid clobbering unsaved kill-loot
-          // deltas that the battle loop has accumulated but not yet flushed.
-          if (!_autoBattleRunning && Array.isArray(d.inventory)) {
+          // Guard: skip during auto-battle OR manual battle to avoid clobbering
+          // locally-decremented potion counts. When a potion is used mid-battle,
+          // _useBattlePotion immediately decrements _charData.inventory locally
+          // for instant UI feedback. The Firestore transaction then fires an
+          // onSnapshot which (before the write settles) can arrive with the stale
+          // pre-use qty and silently revert the local count back to 95×.
+          // _isBattleActive() returns true when either mode is running.
+          const _isBattleActive = () =>
+            _autoBattleRunning ||
+            document.getElementById('battle-arena')?.style.display !== 'none';
+          if (!_isBattleActive() && Array.isArray(d.inventory)) {
             const prevJson = JSON.stringify(_charData.inventory || []);
             const nextJson = JSON.stringify(d.inventory);
             if (prevJson !== nextJson) {
@@ -4335,7 +4509,7 @@ window._refreshInvDisplay = function() {
   }
 };
 
-window.useItem = async function(itemName, kind) {
+async function _useItemInner(itemName, kind) {
   const inv = [...(_charData?.inventory||[])];
   const idx = inv.findIndex(i => i.name === itemName);
   if (idx === -1) return;
@@ -4460,8 +4634,7 @@ window.useItem = async function(itemName, kind) {
     if (!confirmed) return;
     // Consume the item first
     await _invWrite(_uid, inv => {
-      const i = inv.findIndex(x => x.name === itemName);
-      if (i !== -1) { if (inv[i].qty > 1) inv[i].qty--; else inv.splice(i, 1); }
+      _consumeOne(inv, itemName);   // aborts if the server no longer has it
     }, {
       isDead: false,
       hp: _charData.hpMax || 100,
@@ -4484,8 +4657,7 @@ window.useItem = async function(itemName, kind) {
     const confirmed = await inkConfirm('Use <b>Class Reset Potion</b>?<br><span style="font-size:0.85rem;color:var(--ash)">Your class, skills, and stances will be cleared. Stat points earned are kept.</span>');
     if (!confirmed) return;
     await _invWrite(_uid, inv => {
-      const i = inv.findIndex(x => x.name === itemName);
-      if (i !== -1) { if (inv[i].qty > 1) inv[i].qty--; else inv.splice(i, 1); }
+      _consumeOne(inv, itemName);   // aborts if the server no longer has it
     }, { charClass: null, classRole: null, skills: [], stances: [] });
     await refreshCharData(); _syncAllDisplays(_charData); window._refreshInvDisplay();
     logActivity('⚗️', 'Used a <b>Class Reset Potion</b>. Class cleared — choosing again.', '#c9a84c');
@@ -4504,8 +4676,7 @@ window.useItem = async function(itemName, kind) {
       + Math.max(0, ((_charData.level || 1) - 1) * 3)
       + rankIdx * 25;
     await _invWrite(_uid, inv => {
-      const i = inv.findIndex(x => x.name === itemName);
-      if (i !== -1) { if (inv[i].qty > 1) inv[i].qty--; else inv.splice(i, 1); }
+      _consumeOne(inv, itemName);   // aborts if the server no longer has it
     }, { stats: baseStats, statPoints: earnedPoints });
     await refreshCharData(); _syncAllDisplays(_charData); window._refreshInvDisplay();
     window.showToast(`🔄 Stat Reset! ${earnedPoints} stat points refunded.`, 'success');
@@ -4517,8 +4688,7 @@ window.useItem = async function(itemName, kind) {
     const confirmed = await inkConfirm('Use <b>Race Rebirth Potion</b>?<br><span style="font-size:0.85rem;color:var(--ash)">Your race and racial attribute will be cleared. Choose a new race.</span>');
     if (!confirmed) return;
     await _invWrite(_uid, inv => {
-      const i = inv.findIndex(x => x.name === itemName);
-      if (i !== -1) { if (inv[i].qty > 1) inv[i].qty--; else inv.splice(i, 1); }
+      _consumeOne(inv, itemName);   // aborts if the server no longer has it
     }, { race: null, raceAttr: null });
     await refreshCharData(); _syncAllDisplays(_charData); window._refreshInvDisplay();
     logActivity('🌀', 'Used a <b>Race Rebirth Potion</b>. Race cleared — choosing again.', '#c9a84c');
@@ -4529,8 +4699,7 @@ window.useItem = async function(itemName, kind) {
     const confirmed = await inkConfirm('Use <b>Divine Shift Potion</b>?<br><span style="font-size:0.85rem;color:var(--ash)">Your deity will be cleared and Faith Level reset to 0. Choose a new deity.</span>');
     if (!confirmed) return;
     await _invWrite(_uid, inv => {
-      const i = inv.findIndex(x => x.name === itemName);
-      if (i !== -1) { if (inv[i].qty > 1) inv[i].qty--; else inv.splice(i, 1); }
+      _consumeOne(inv, itemName);   // aborts if the server no longer has it
     }, { deity: null, deityTitle: null, faithLevel: 0, blessing: null, blessingDesc: null });
     await refreshCharData(); _syncAllDisplays(_charData); window._refreshInvDisplay();
     logActivity('🔮', 'Used a <b>Divine Shift Potion</b>. Deity cleared, Faith reset to 0.', '#c9a84c');
@@ -4550,8 +4719,7 @@ window.useItem = async function(itemName, kind) {
     const extraUpdates = { ...updates };
     delete extraUpdates.inventory; // _invWrite owns the inventory field
     await _invWrite(_uid, inv => {
-      const i = inv.findIndex(x => x.name === itemName);
-      if (i !== -1) { if (inv[i].qty > 1) inv[i].qty--; else inv.splice(i, 1); }
+      _consumeOne(inv, itemName);   // aborts if the server no longer has it
     }, extraUpdates);
     // _invWrite already calls refreshCharData() internally. Calling it again here
     // (a) doubles the Firestore round-trip latency and (b) can overwrite the live
@@ -4572,6 +4740,23 @@ window.useItem = async function(itemName, kind) {
     logActivity('🧪', `Used <b>${itemName}</b>.`, '#888');
     // Re-render potion strip if battle is active
     if (document.getElementById('battle-arena')?.style.display !== 'none') _renderBattlePotionStrip();
+  }
+}
+
+// Wrapper: when the SERVER says the item is already gone (second tab, double
+// click), _consumeOne aborts the write before any effect is applied — tell the
+// player and resync instead of leaving a phantom item on screen.
+window.useItem = async function(itemName, kind) {
+  try {
+    return await _useItemInner(itemName, kind);
+  } catch (e) {
+    if (e && e.userAbort) {
+      window.showToast(e.message, 'error');
+      if (!_autoBattleRunning) { try { await refreshCharData(); } catch (_) {} }
+      window._refreshInvDisplay?.();
+      return;
+    }
+    throw e;
   }
 };
 
@@ -4680,52 +4865,48 @@ You will gain:
   if (btn) { btn.disabled = true; btn.textContent = 'Ascending...'; }
 
   try {
-    // Consume ingredients
-    for (const ing of ings) {
-      const idx = inv.findIndex(i => i.name === ing);
-      if (idx !== -1) {
-        inv[idx].qty -= required;
-        if (inv[idx].qty <= 0) inv.splice(idx, 1);
-      }
-    }
-
     const newRank      = RANK_ORDER[rankIdx + 1];
     const newRankIdx   = rankIdx + 1;
     // Level resets to 1 within the new rank (absolute level = newRankIdx * 100 + 1)
     const newAbsLevel  = newRankIdx * 100 + 1;
     const newXpMax     = _calcXpMax(newRankIdx, newAbsLevel);
-    const newHpMax     = (_charData.hpMax  || 100) + 150;
-    const newManaMax   = (_charData.manaMax || 50) + 75;
-    const newStatPts   = (_charData.statPoints || 0) + 25;
+    let   startXp      = 0;
 
-    // Carry overflow XP into the new rank (xp was clamped to xpMax at the cap, so
-    // anything stored beyond xpMax is the overflow that happens at the moment of ascension)
-    const xpCarry = Math.max(0, (_charData.xp || 0) - (_charData.xpMax || 1) + 1);
-    // Cap carry so it can't instantly level up in the new rank
-    const startXp = Math.min(xpCarry, newXpMax - 1);
-
-    await updateDoc(doc(db, 'characters', _uid), {
-      rank:       newRank,
-      level:      newAbsLevel,
-      xp:         startXp,
-      xpMax:      newXpMax,
-      hpMax:      newHpMax,
-      manaMax:    newManaMax,
-      statPoints: newStatPts,
-      inventory:  inv,
+    // Everything is validated and applied against the SERVER doc inside one
+    // transaction (see _invWrite): rank/level/XP are re-checked, ingredients are
+    // consumed from the server inventory, and the bonuses are increments. The old
+    // code validated local data and then overwrote rank, stats, XP AND the whole
+    // inventory with local values — which could erase recent loot or let a stale
+    // tab ascend twice.
+    await _invWrite(_uid, (invFresh, fresh) => {
+      if ((fresh.rank || 'Wanderer') !== rank) throw _invAbort('Your rank has already changed. Check your status.');
+      const lvlFresh = (((fresh.level || 1) - 1) % 100) + 1;
+      if (lvlFresh !== 100 || (fresh.xp ?? 0) < (fresh.xpMax ?? 1)) throw _invAbort('Reach Level 100 and fill your EXP bar before ascending.');
+      for (const ing of ings) {
+        const it = invFresh.find(i => i.name === ing);
+        if (!it || (it.qty ?? 0) < required) throw _invAbort(`Not enough ${ing}. Need ${required}×.`);
+        it.qty -= required;
+      }
+    }, (fresh) => {
+      // Carry overflow XP into the new rank (xp is clamped to xpMax at the cap),
+      // capped so it can't instantly level up in the new rank.
+      const xpCarry = Math.max(0, (fresh.xp || 0) - (fresh.xpMax || 1) + 1);
+      startXp = Math.min(xpCarry, newXpMax - 1);
+      return { rank: newRank, level: newAbsLevel, xp: startXp, xpMax: newXpMax,
+               hpMax: increment(150), manaMax: increment(75), statPoints: increment(25) };
     });
 
-    // Update local cache
-    _charData.rank       = newRank;
-    _charData.level      = newAbsLevel;
-    _charData.xp         = startXp;
-    _charData.xpMax      = newXpMax;
-    _charData.hpMax      = newHpMax;
-    _charData.manaMax    = newManaMax;
-    _charData.statPoints = newStatPts;
-    _charData.inventory  = inv;
+    // _invWrite re-syncs _charData from the server unless a live auto-battle owns
+    // it; in that case patch just the ascension fields locally.
+    if (_autoBattleRunning) {
+      _charData.rank = newRank; _charData.level = newAbsLevel; _charData.xp = startXp; _charData.xpMax = newXpMax;
+      _charData.hpMax = (_charData.hpMax || 100) + 150; _charData.manaMax = (_charData.manaMax || 50) + 75;
+      _charData.statPoints = (_charData.statPoints || 0) + 25;
+      _charData.inventory = (_charData.inventory || []).map(i => ings.includes(i.name) ? { ...i, qty: (i.qty ?? 1) - required } : i).filter(i => (i.qty ?? 1) > 0);
+    }
 
     // Refresh UI
+    _syncAllDisplays(_charData);   // sidebar rank/level/EXP bar + stat cards
     buildDeityIngredients(deity);
     if (typeof renderCharacterPanel === 'function') renderCharacterPanel(_charData);
     if (typeof refreshStatDisplay   === 'function') refreshStatDisplay(_charData);
@@ -4735,7 +4916,8 @@ You will gain:
     window.showToast(`✦ You have ascended to ${newRank}!`, 'success');
   } catch(e) {
     console.error('[doRankAscension]', e);
-    window.showToast('Ascension failed. Try again.', 'error');
+    window.showToast(e?.userAbort ? e.message : 'Ascension failed. Try again.', 'error');
+    if (e?.userAbort && !_autoBattleRunning) { try { await refreshCharData(); buildDeityIngredients(deity); } catch (_) {} }
     if (btn) { btn.disabled = false; btn.textContent = `⬆ ASCEND TO ${RANK_ORDER[rankIdx + 1].toUpperCase()}`; }
   }
 };
@@ -4772,15 +4954,18 @@ function showActiveProfession(c) {
 
   const lvl  = c.professionLvl || 0;
   const xp   = c.professionXp  || 0;
-  const maxXp = (lvl < 10) ? (PROF_EXP_TABLE[lvl] || 3000) : 0;
-  const pct  = Math.min(100, Math.round((xp / maxXp) * 100));
+  // At max profession level there is no next threshold: the old maths divided by
+  // zero, so the bar got width "NaN%" and the label read "/ 0 EXP".
+  const isMax = lvl >= 10;
+  const maxXp = isMax ? 0 : (PROF_EXP_TABLE[lvl] || 3000);
+  const pct  = isMax ? 100 : Math.min(100, Math.max(0, Math.round((xp / maxXp) * 100)));
   const rates = FIND_RATES[Math.min(lvl, FIND_RATES.length-1)];
 
   set("active-prof-name",  `${c.profession}`);
   set("active-prof-desc",  PROFESSION_DESCS[c.profession] || "");
-  set("active-prof-level", `Level ${lvl}`);
-  set("prof-exp-current",  xp);
-  set("prof-exp-max",      `/ ${maxXp} EXP`);
+  set("active-prof-level", isMax ? `Level ${lvl} (MAX)` : `Level ${lvl}`);
+  set("prof-exp-current",  isMax ? "MAX" : xp);
+  set("prof-exp-max",      isMax ? "" : `/ ${maxXp} EXP`);
   css("prof-exp-fill","width", pct+"%");
   set("prof-find-count",   FIND_COUNT[Math.min(lvl, FIND_COUNT.length-1)]);
 
@@ -4819,16 +5004,23 @@ async function startTravel({ dest, continent, cost, seconds }) {
 
   try {
     const arrivalTime = new Date(Date.now() + travelSeconds * 1000);
-    const travelUpdate = { travelingUntil: arrivalTime, travelDest: dest, travelContinent: continent };
-    if (travelCost > 0) travelUpdate.gold = gold - travelCost;
-    await updateDoc(doc(db, "characters", _uid), travelUpdate);
+    // Balance and "already traveling" are re-checked on the SERVER doc and the
+    // fare is charged with increment() — not an absolute computed from local gold.
+    const _tr = await _charTx(_uid, fresh => {
+      if ((fresh.gold ?? 0) < travelCost) throw _invAbort(`Not enough gold. You have ${fresh.gold ?? 0} coins.`);
+      const _tu = fresh.travelingUntil?.toDate?.();
+      if (_tu && _tu > new Date()) throw _invAbort("You're already traveling.");
+      const updates = { travelingUntil: arrivalTime, travelDest: dest, travelContinent: continent };
+      if (travelCost > 0) updates.gold = increment(-travelCost);
+      return { updates, local: { gold: (fresh.gold ?? 0) - travelCost } };
+    });
+    const newGold = _tr.local.gold;
     if (_charData) {
-      if (travelCost > 0) _charData.gold = gold - travelCost;
+      _charData.gold = newGold;
       _charData.travelingUntil = { toDate: () => arrivalTime };
       _charData.travelDest = dest;
       _charData.travelContinent = continent;
     }
-    const newGold = travelCost > 0 ? gold - travelCost : gold;
     set("stat-gold", newGold);
     set("s-gold",    newGold);
     document.getElementById("travel-modal").style.display = "none";
@@ -4837,7 +5029,7 @@ async function startTravel({ dest, continent, cost, seconds }) {
     logActivity('🚶', `<b>Departed</b> for <b>${dest}</b>${travelCost > 0 ? ` · -${travelCost}💰` : ''}.`, '#5b9fe0');
   } catch(err) {
     console.error(err);
-    errEl.textContent = "Failed to travel. Try again.";
+    errEl.textContent = err?.userAbort ? err.message : "Failed to travel. Try again.";
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = "DEPART"; }
   }
@@ -5699,6 +5891,7 @@ window._jumpToMsg = function(msgId) {
 
 let _npcUnsub = null;
 let _locationNpcs = [];   // NPCs in current location
+let _generalNpcs = [];    // NPCs shown in General chat
 let _npcSidebarTab = "players"; // "players" | "npcs"
 
 // ── Render the NPC sidebar tab toggle ──────────────
@@ -6310,7 +6503,12 @@ async function buyItem({ name, icon, price, type, qty = 1 }) {
     // If _invWrite (worship, battle drops) had a queued write in-flight, the shop write would race
     // and overwrite the server with a stale local snapshot — silently dropping items the server
     // had already added. _invWrite queues writes serially and always reads fresh from Firestore.
-    await _invWrite(_uid, inv => {
+    // Gold is checked against the SERVER balance and charged with increment().
+    // It used to be written as an absolute (_charData.gold - price) from the local
+    // copy: a stale local balance meant gold was silently restored/duplicated or
+    // lost, and nothing stopped a purchase the server balance couldn't cover.
+    await _invWrite(_uid, (inv, fresh) => {
+      if ((fresh.gold ?? 0) < totalPrice) throw _invAbort(`Not enough gold. You have ${fresh.gold ?? 0} coins.`);
       const existing = inv.find(i => i.name === name);
       if (existing && !isEquip) {
         existing.qty += qty;
@@ -6319,7 +6517,7 @@ async function buyItem({ name, icon, price, type, qty = 1 }) {
         if (isEquip) newItem.iid = newIid;
         inv.push(newItem);
       }
-    }, { gold: (_charData?.gold ?? 0) - totalPrice });
+    }, { gold: increment(-totalPrice) });
     // _invWrite calls refreshCharData() internally, so _charData is already up-to-date here
 
     window._allInvItems = _charData?.inventory || [];
@@ -6336,7 +6534,8 @@ async function buyItem({ name, icon, price, type, qty = 1 }) {
     logActivity('🛍️', `<b>Purchased</b> ${qty}x ${name} from the NPC shop for ${totalPrice}💰.`, '#a09080');
   } catch(err) {
     console.error(err);
-    errEl.textContent = "Purchase failed. Try again.";
+    errEl.textContent = err?.userAbort ? err.message : "Purchase failed. Try again.";
+    if (err?.userAbort && !_autoBattleRunning) { try { await refreshCharData(); _syncAllDisplays(_charData); } catch (_) {} }
   } finally {
     btn.disabled = false; btn.textContent = "BUY";
   }
@@ -7397,92 +7596,47 @@ window.logFactionQuestCompletion = async function(questId) {
   }
 }
 
+// Quest/faction/story rewards pay out through _commitKillReward: one queued
+// transaction that reads the SERVER doc, adds the items, recomputes XP/level from
+// server values and increments gold. (The old versions replaced _charData with a
+// full server read on every reward; a daily quest completing in the middle of a
+// battle did that while a potion write was still in flight, reverting potion counts
+// and HP. kill-based quests complete on ordinary kills, so it happened constantly.)
 async function _applyReward(xp, gold, item) {
-  // FIXED: Was a raw updateDoc reading from stale _charData — raced with any
-  // concurrent write (auto-battle, bestow, trade) and silently dropped changes.
-  // Now uses a transaction so inventory and gold are always merged from the
-  // server-side doc, never from a potentially-stale local snapshot.
   if (!_charData || !_uid) return;
-  let leveledUp = false, newLevel, newRank;
-  const charRef = doc(db, 'characters', _uid);
-  await runTransaction(db, async tx => {
-    const snap = await tx.get(charRef);
-    if (!snap.exists()) throw new Error('Character not found');
-    const fresh = snap.data();
-    const inv = [...(fresh.inventory || [])];
-    if (item) {
-      const ex = inv.find(i => i.name === item.name);
-      const _isEquip = getItemType(item.name) === 'equipment';
-      if (ex && !_isEquip) { ex.qty += (item.qty || 1); }
-      else { const _ni = {...item}; if (_isEquip) _ni.iid = Math.random().toString(36).slice(2,10)+Date.now().toString(36); inv.push(_ni); }
-    }
-    const res = _processExp(fresh.xp||0, fresh.xpMax||100, fresh.level||1, fresh.rank||'Wanderer', xp, fresh.charClass);
-    leveledUp = res.leveledUp; newLevel = res.newLevel; newRank = res.newRank;
-    const updates = {
-      // Use increment() for gold so two concurrent +gold rewards both land
-      gold: increment(gold),
-      inventory: inv,
-      xp: res.newXp, xpMax: res.newXpMax, level: res.newLevel, rank: res.newRank,
-    };
-    if (res.leveledUp) {
-      updates.statPoints = increment(3);
-      updates.hpMax  = (fresh.hpMax  || 100) + 10;
-      updates.manaMax = (fresh.manaMax || 50)  + 5;
-    }
-    tx.update(charRef, updates);
-  });
-  // Refresh local cache from server so subsequent reads are consistent
-  await refreshCharData();
-  window._allInvItems = _charData.inventory || [];
-  _syncAllDisplays(_charData);
-  if (leveledUp) {
-    window.showToast(`🎉 LEVEL UP! Now Level ${newLevel}!`, 'success');
-    logActivity('⬆️', `<b>Level Up!</b> You reached <b>Level ${newLevel}</b>.`, '#e8d070');
-    if (newRank !== (_charData.rank || 'Wanderer')) {
-      logActivity('👑', `<b>Rank Ascension!</b> You are now <b>${newRank}</b>.`, '#c9a84c');
-    }
-  }
+  const drops    = { gold: gold || 0, items: item && item.name ? [item] : [] };
+  const prevRank = _charData.rank || 'Wanderer';
+  const kr = await _commitKillReward(_uid, { drops, expGain: xp || 0 });
+  if (!kr) throw new Error('Reward could not be saved');
+  await _finishRewardLocal(kr, drops, prevRank);
 }
 
 // Multi-item reward variant — delivers every item in the items array
 async function _applyRewardMulti(xp, gold, items) {
-  // FIXED: Same race-condition fix as _applyReward — use a transaction and
-  // increment() for gold instead of a stale read-modify-write.
   if (!_charData || !_uid) return;
-  let leveledUp = false, newLevel, newRank;
-  const charRef = doc(db, 'characters', _uid);
-  await runTransaction(db, async tx => {
-    const snap = await tx.get(charRef);
-    if (!snap.exists()) throw new Error('Character not found');
-    const fresh = snap.data();
-    const inv = [...(fresh.inventory || [])];
-    for (const item of (items || [])) {
-      if (!item || !item.name) continue;
-      const ex = inv.find(i => i.name === item.name);
-      const _isEquip = getItemType(item.name) === 'equipment';
-      if (ex && !_isEquip) { ex.qty += (item.qty || 1); }
-      else { const _ni = {...item}; if (_isEquip) _ni.iid = Math.random().toString(36).slice(2,10)+Date.now().toString(36); inv.push(_ni); }
+  const drops    = { gold: gold || 0, items: (items || []).filter(i => i && i.name) };
+  const prevRank = _charData.rank || 'Wanderer';
+  const kr = await _commitKillReward(_uid, { drops, expGain: xp || 0 });
+  if (!kr) throw new Error('Reward could not be saved');
+  await _finishRewardLocal(kr, drops, prevRank);
+}
+
+async function _finishRewardLocal(kr, drops, prevRank) {
+  if (_autoBattleRunning || _currentBattle) {
+    // A battle owns the live HP/mana/inventory — patch only what the reward
+    // changed instead of replacing _charData with a server read.
+    _applyKillRewardLocal(kr, drops);
+  } else {
+    await refreshCharData();
+    window._allInvItems = _charData.inventory || [];
+    _syncAllDisplays(_charData);
+  }
+  if (kr.px.leveledUp) {
+    window.showToast(`🎉 LEVEL UP! Now Level ${kr.px.newLevel}!`, 'success');
+    logActivity('⬆️', `<b>Level Up!</b> You reached <b>Level ${kr.px.newLevel}</b>.`, '#e8d070');
+    if (kr.px.newRank !== prevRank) {
+      logActivity('👑', `<b>Rank Ascension!</b> You are now <b>${kr.px.newRank}</b>.`, '#c9a84c');
     }
-    const res = _processExp(fresh.xp||0, fresh.xpMax||100, fresh.level||1, fresh.rank||'Wanderer', xp, fresh.charClass);
-    leveledUp = res.leveledUp; newLevel = res.newLevel; newRank = res.newRank;
-    const updates = {
-      gold: increment(gold),
-      inventory: inv,
-      xp: res.newXp, xpMax: res.newXpMax, level: res.newLevel, rank: res.newRank,
-    };
-    if (res.leveledUp) {
-      updates.statPoints = increment(3);
-      updates.hpMax  = (fresh.hpMax  || 100) + 10;
-      updates.manaMax = (fresh.manaMax || 50)  + 5;
-    }
-    tx.update(charRef, updates);
-  });
-  await refreshCharData();
-  window._allInvItems = _charData.inventory || [];
-  _syncAllDisplays(_charData);
-  if (leveledUp) {
-    window.showToast(`🎉 LEVEL UP! Now Level ${newLevel}!`, 'success');
-    logActivity('⬆️', `<b>Level Up!</b> You reached <b>Level ${newLevel}</b>.`, '#e8d070');
   }
 }
 
@@ -7665,32 +7819,40 @@ window._doGather = async function() {
     const _veilBonus = _charData?.deity === 'Veil' ? (1 + _getFaithBlessingPct(_charData)) : 1;
     const xpGainFinal = Math.round(baseXpGain * count * _veilBonus);
 
-    let newProfXp  = (_charData.professionXp  || 0) + xpGainFinal;
-    let newProfLvl = lvl;
-    let leveledProf = false;
-    while (newProfLvl < 10) {
-      const needed = PROF_EXP_TABLE[newProfLvl];
-      if (needed == null || newProfXp < needed) break;
-      newProfXp -= needed;
-      newProfLvl++;
-      leveledProf = true;
-    }
-    if (newProfLvl >= 10) newProfXp = 0;
-
-    // ── Companion XP ──────────────────────────────────────────────────────
+    // Progression is a pure function of (profession XP/level, companion XP/level) so
+    // the SAME maths runs twice: instantly on the local copy for the optimistic
+    // bar, and again inside the write transaction on the SERVER doc. Before, the
+    // server value was an absolute computed from the local copy, so a stale tab,
+    // the weekly penalty or a refresh mid-gather left the XP bar and the stored
+    // XP disagreeing.
     const COMP_TABLE = [0,1000,1800,3000,4200,5700,7000,9600,12000,15000];
-    let companionLeveledUp = false;
-    let companionLevel = _charData.companionLevel || 1;
-    let companionExp   = _charData.companionExp   || 0;
-    if (_charData.companion) {
-      const compGain = ({ common:10, uncommon:25, rare:60, legendary:150, mythic:500 }[rarity] || 10) * count;
-      companionExp += compGain;
-      while (companionLevel < 10 && companionExp >= (COMP_TABLE[companionLevel-1] || 1000)) {
-        companionExp -= (COMP_TABLE[companionLevel-1] || 1000);
-        companionLevel++;
-        companionLeveledUp = true;
+    const compGain = ({ common:10, uncommon:25, rare:60, legendary:150, mythic:500 }[rarity] || 10) * count;
+    const _prog = (src) => {
+      let profXp = (src.professionXp || 0) + xpGainFinal;
+      let profLvl = src.professionLvl || 0;
+      let leveled = false;
+      while (profLvl < 10) {
+        const needed = PROF_EXP_TABLE[profLvl];
+        if (needed == null || profXp < needed) break;
+        profXp -= needed;
+        profLvl++;
+        leveled = true;
       }
-    }
+      if (profLvl >= 10) profXp = 0;
+      let compLvl = src.companionLevel || 1, compExp = src.companionExp || 0, compLeveled = false;
+      if (src.companion) {
+        compExp += compGain;
+        while (compLvl < 10 && compExp >= (COMP_TABLE[compLvl-1] || 1000)) {
+          compExp -= (COMP_TABLE[compLvl-1] || 1000);
+          compLvl++;
+          compLeveled = true;
+        }
+      }
+      return { profXp, profLvl, leveled, compLvl, compExp, compLeveled };
+    };
+    const _opt = _prog(_charData);
+    let newProfXp = _opt.profXp, newProfLvl = _opt.profLvl, leveledProf = _opt.leveled;
+    let companionLeveledUp = _opt.compLeveled, companionLevel = _opt.compLvl, companionExp = _opt.compExp;
 
     // ── OPTIMISTIC UI — XP bar only (NO inventory change here) ───────────
     // We only update XP/level in _charData optimistically so the bar moves
@@ -7704,34 +7866,32 @@ window._doGather = async function() {
     // ── Single atomic Firestore write (inventory + XP + companion) ────────
     const isEquip = getItemType(found) === 'equipment';
     const newIid  = isEquip ? (Math.random().toString(36).slice(2,10) + Date.now().toString(36)) : null;
-    const firestoreUpdates = {
-      professionXp:  newProfXp,
-      professionLvl: newProfLvl,
-    };
-    if (_charData.companion) {
-      firestoreUpdates.companionExp   = companionExp;
-      firestoreUpdates.companionLevel = companionLevel;
-    }
-    // When the player levels up mid-week and the quota hasn't been completed yet,
-    // reset the submitted counts so the new (higher) level's requirements start
-    // fresh. Without this, partial submissions at the old level would still be
-    // counted against the new level's larger thresholds, causing the system to
-    // re-prompt for a second submission and consume items a second time.
-    if (leveledProf) {
-      const _currentQP = _charData.quotaProgress || {};
-      if (!_currentQP.completed) {
-        const _resetQP = {
-          week:      _currentQP.week || getCurrentQuotaWeek(),
-          submitted: { common:0, uncommon:0, rare:0, legendary:0, mythic:0 },
-          completed: false,
-          penalty:   false,
-          bonus:     false,
-        };
-        firestoreUpdates.quotaProgress = _resetQP;
-        _charData.quotaProgress        = _resetQP;
-        window.showToast(`Profession Level ${newProfLvl}! Weekly quota reset for your new level.`, 'info');
+    // Evaluated INSIDE the transaction against the server doc (see _invWrite).
+    let _auth = null, _qpReset = null;
+    const _authFn = (fresh) => {
+      const a = _prog(fresh);
+      _auth = a;
+      const upd = { professionXp: a.profXp, professionLvl: a.profLvl };
+      if (fresh.companion) { upd.companionExp = a.compExp; upd.companionLevel = a.compLvl; }
+      // When the player levels up mid-week and the quota hasn't been completed yet,
+      // reset the submitted counts so the new (higher) level's requirements start
+      // fresh. Without this, partial submissions at the old level would still be
+      // counted against the new level's larger thresholds, causing the system to
+      // re-prompt for a second submission and consume items a second time.
+      _qpReset = null;
+      if (a.leveled) {
+        const qp = fresh.quotaProgress || {};
+        if (!qp.completed) {
+          _qpReset = {
+            week:      qp.week || getCurrentQuotaWeek(),
+            submitted: { common:0, uncommon:0, rare:0, legendary:0, mythic:0 },
+            completed: false, penalty: false, bonus: false,
+          };
+          upd.quotaProgress = _qpReset;
+        }
       }
-    }
+      return upd;
+    };
     await _invWrite(_uid, inv => {
       const ex = inv.find(i => i.name === found);
       if (ex && !isEquip) {
@@ -7741,10 +7901,25 @@ window._doGather = async function() {
         if (isEquip) ni.iid = newIid;
         inv.push(ni);
       }
-    }, firestoreUpdates);
+    }, _authFn);
 
     // ── Write confirmed — sync UI from authoritative server data ──────────
     window._gatherWritePending = false;
+    // Adopt the numbers the server actually stored (they can differ from the
+    // optimistic ones if another tab/device changed XP), then redraw the
+    // profession bar from them — it used to stay on the optimistic values.
+    if (_auth) {
+      newProfXp = _auth.profXp; newProfLvl = _auth.profLvl; leveledProf = _auth.leveled;
+      companionExp = _auth.compExp; companionLevel = _auth.compLvl; companionLeveledUp = _auth.compLeveled;
+      _charData.professionXp  = newProfXp;
+      _charData.professionLvl = newProfLvl;
+      if (_charData.companion) { _charData.companionExp = companionExp; _charData.companionLevel = companionLevel; }
+      if (_qpReset) {
+        _charData.quotaProgress = _qpReset;
+        window.showToast(`Profession Level ${newProfLvl}! Weekly quota reset for your new level.`, 'info');
+      }
+    }
+    showActiveProfession(_charData);
     window._allInvItems = _charData.inventory;
     window._refreshInvDisplay();
 
@@ -7793,6 +7968,9 @@ window._doGather = async function() {
   } catch (err) {
     console.error(err);
     window._gatherWritePending = false;
+    // The bar was moved optimistically before the write — pull the real numbers
+    // back from the server so it doesn't sit ahead of what was actually saved.
+    try { await refreshCharData(); if (_charData?.profession) showActiveProfession(_charData); } catch (_) {}
     logEl.innerHTML = `<div class="gather-log-entry empty">❌ Gather failed. Try again.</div>`;
   }
 
@@ -7859,9 +8037,12 @@ window.saveNameChange = async function() {
   if (btn) { btn.disabled = true; btn.textContent = "SAVING..."; }
 
   try {
-    const updates = { name: newName, lastNameChange: now };
-    if (cost > 0) updates.gold = increment(-cost); // FIXED: use increment to avoid concurrent-write clobber
-    await updateDoc(doc(db, "characters", _uid), updates);
+    await _charTx(_uid, fresh => {
+      if (cost > 0 && (fresh.gold ?? 0) < cost) throw _invAbort('Not enough gold. You need 100 coins.');
+      const u = { name: newName, lastNameChange: now };
+      if (cost > 0) u.gold = increment(-cost);
+      return { updates: u, local: {} };
+    });
 
     // Update local state
     _charData.name = newName;
@@ -7874,7 +8055,7 @@ window.saveNameChange = async function() {
     window.showToast(`Name changed to "${newName}"!`, "success");
   } catch(e) {
     console.error("[saveNameChange]", e);
-    errEl.textContent = "Failed to save name. Try again.";
+    errEl.textContent = e?.userAbort ? e.message : "Failed to save name. Try again.";
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = "SAVE"; }
   }
@@ -8607,9 +8788,12 @@ window.joinFaction = async function(factionName, idx) {
   // Wait for animation, then join and crossfade
   setTimeout(async () => {
     try {
-      await updateDoc(doc(db, "characters", _uid), { faction: factionName, gold: increment(-500) }); // FIXED: use increment
+      const _jr = await _charTx(_uid, fresh => {
+        if ((fresh.gold ?? 0) < 500) throw _invAbort('Not enough gold to join (500 needed).');
+        return { updates: { faction: factionName, gold: increment(-500) }, local: { gold: (fresh.gold ?? 0) - 500 } };
+      });
       _charData.faction = factionName;
-      _charData.gold = Math.max(0, (_charData.gold||0) - 500);
+      _charData.gold = _jr.local.gold;
       window.showToast(`Joined ${factionName}!`, "success");
       // Crossfade: fade out all, then show immersive view
       container.style.transition = 'opacity 0.5s';
@@ -8622,7 +8806,7 @@ window.joinFaction = async function(factionName, idx) {
       set("stat-gold", _charData.gold);
       set("s-gold", _charData.gold);
     } catch(e) {
-      window.showToast("Failed to join faction.", "error");
+      window.showToast(e?.userAbort ? e.message : "Failed to join faction.", "error");
     }
   }, 700);
 }
@@ -8933,13 +9117,15 @@ window.leaveFaction = async function(factionName) {
   // All checks passed, allow leave
   try {
     const now = Date.now();
-    await updateDoc(doc(db, "characters", _uid), {
-      faction: null,
-      gold: increment(-2000), // FIXED: use increment to avoid concurrent-write clobber
-      factionLeaveInfo: { cooldownUntil: now + 7*24*60*60*1000, taskCompleted: false }
+    const _lr = await _charTx(_uid, fresh => {
+      if ((fresh.gold ?? 0) < 2000) throw _invAbort('Not enough gold to leave (2,000 required).');
+      return {
+        updates: { faction: null, gold: increment(-2000), factionLeaveInfo: { cooldownUntil: now + 7*24*60*60*1000, taskCompleted: false } },
+        local: { gold: (fresh.gold ?? 0) - 2000 },
+      };
     });
     _charData.faction = null;
-    _charData.gold = Math.max(0, (_charData.gold||0) - 2000);
+    _charData.gold = _lr.local.gold;
     _charData.factionLeaveInfo = { cooldownUntil: now + 7*24*60*60*1000, taskCompleted: false };
     window.showToast(`Left ${factionName}.`, "success");
     renderFactionsPanel();
@@ -8947,7 +9133,7 @@ window.leaveFaction = async function(factionName) {
     set("stat-gold", _charData.gold);
     set("s-gold", _charData.gold);
   } catch(e) {
-    window.showToast("Failed to leave faction.", "error");
+    window.showToast(e?.userAbort ? e.message : "Failed to leave faction.", "error");
   }
 }
 
@@ -9471,6 +9657,218 @@ function _getPrimaryStat(charClass, stats) {
   const map = { Warrior:'str', Guardian:'def', Arcanist:'int', Hunter:'dex', Assassin:'dex', Cleric:'int', Summoner:'int' };
   return stats[map[charClass]||'str'] || 10;
 }
+
+// ── Crit & Dodge helpers ───────────────────────────────────────────────────
+// Returns the player's crit chance (0–0.60) based on companions, race, and
+// any active battle-state buff (e.g. Predator's Instinct).
+function _calcCritChance(char, battleState) {
+  let chance = 0.05; // base 5%
+  const comp = (char?.companion?.name || '').toLowerCase();
+  if (comp === 'duskit') chance += 0.10;
+  const race = (char?.race || '').toLowerCase();
+  if (race.includes('fairy')) chance += 0.03;
+  // Predator's Instinct / active crit buff stored in battleState
+  if (battleState?.critBoost) chance += battleState.critBoost;
+  return Math.min(0.60, chance);
+}
+
+// Returns the player's dodge chance (0–0.35) based on DEX advantage.
+function _calcDodgeChance(playerDex, monsterDex) {
+  if (playerDex <= monsterDex) return 0;
+  const advantage = playerDex - monsterDex;
+  return Math.min(0.35, Math.floor(advantage / 10) * 0.01);
+}
+
+// Rolls a crit. Returns { isCrit, mult } where mult is 1.0 or 1.5.
+function _rollCrit(chance) {
+  const isCrit = Math.random() < chance;
+  return { isCrit, mult: isCrit ? 1.5 : 1.0 };
+}
+
+// Rolls a dodge. Returns true if the hit is dodged entirely.
+function _rollDodge(chance) {
+  return Math.random() < chance;
+}
+
+// ── Buff duration tracker ──────────────────────────────────────────────────
+// Call once per round AFTER the monster acts. Decrements all timed buffs
+// (buff_str, buff_int, buff_def, buff_dex) and clears expired ones.
+// buffDurations is an object like { buff_str: 3, buff_int: 2 }.
+function _tickBuffDurations(battleState) {
+  const durKey = s => `${s}_turns`;
+  const buffStats = ['str','int','def','dex'];
+  for (const s of buffStats) {
+    const bk = `buff_${s}`;
+    const dk = durKey(bk);
+    if (battleState[bk] && battleState[bk] > 0) {
+      if (battleState[dk] === undefined) battleState[dk] = 3; // default 3 rounds if not set
+      battleState[dk]--;
+      if (battleState[dk] <= 0) {
+        battleState[bk] = 0;
+        battleState[dk] = 0;
+      }
+    }
+  }
+}
+
+// ── Status effect HUD ──────────────────────────────────────────────────────
+// Injects status icon containers into the battle arena if not already present,
+// then re-renders them based on current battleState.
+function _ensureStatusContainers() {
+  if (document.getElementById('battle-player-status')) return;
+  // Player status bar (buffs) — insert after player-hp-fill bar
+  const playerPanel = document.querySelector('.player-battle-panel, #player-battle-panel, .battle-player-side');
+  if (playerPanel) {
+    const bar = document.createElement('div');
+    bar.id = 'battle-player-status';
+    bar.style.cssText = 'display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;min-height:22px;';
+    playerPanel.appendChild(bar);
+  }
+  // Monster status bar (debuffs) — insert after monster-hp-fill bar
+  const monPanel = document.querySelector('.monster-battle-panel, #monster-battle-panel, .battle-monster-side');
+  if (monPanel) {
+    const bar = document.createElement('div');
+    bar.id = 'battle-monster-status';
+    bar.style.cssText = 'display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;min-height:22px;';
+    monPanel.appendChild(bar);
+  }
+  // Fallback: append near battle-log if panel elements not found
+  if (!document.getElementById('battle-player-status') || !document.getElementById('battle-monster-status')) {
+    const arena = document.getElementById('battle-arena');
+    if (!arena) return;
+    if (!document.getElementById('battle-player-status')) {
+      const bar = document.createElement('div');
+      bar.id = 'battle-player-status';
+      bar.style.cssText = 'display:flex;gap:4px;flex-wrap:wrap;padding:4px 8px;min-height:22px;';
+      arena.insertBefore(bar, arena.firstChild);
+    }
+    if (!document.getElementById('battle-monster-status')) {
+      const bar = document.createElement('div');
+      bar.id = 'battle-monster-status';
+      bar.style.cssText = 'display:flex;gap:4px;flex-wrap:wrap;padding:4px 8px;min-height:22px;';
+      arena.insertBefore(bar, arena.firstChild);
+    }
+  }
+  // Inject CSS for status icons and damage floats (once)
+  if (!document.getElementById('battle-spec-styles')) {
+    const style = document.createElement('style');
+    style.id = 'battle-spec-styles';
+    style.textContent = `
+      .bstatus-icon {
+        display:inline-flex;align-items:center;gap:2px;
+        background:rgba(0,0,0,0.55);border:1px solid rgba(255,255,255,0.15);
+        border-radius:4px;padding:2px 5px;font-size:0.72rem;
+        color:#fff;white-space:nowrap;
+      }
+      .bstatus-icon .bs-rounds {
+        background:rgba(255,255,255,0.18);border-radius:3px;
+        padding:0 3px;font-size:0.65rem;font-weight:700;
+      }
+      .bstatus-icon.bs-buff   { border-color:#c9a84c; color:#ffe082; }
+      .bstatus-icon.bs-debuff { border-color:#e05555; color:#ff8a80; }
+      .bstatus-icon.bs-dot    { border-color:#ff6d00; color:#ffb74d; }
+      .bstatus-icon.bs-ctrl   { border-color:#7c4dff; color:#ce93d8; }
+      .bstatus-icon.bs-regen  { border-color:#4caf50; color:#a5d6a7; }
+      .bstatus-icon.bs-shield { border-color:#4da6ff; color:#b3d9ff; }
+      /* Damage floats */
+      .dmg-float {
+        position:absolute;pointer-events:none;font-weight:800;
+        text-shadow:0 1px 3px rgba(0,0,0,0.8);
+        animation:dmgFloat 1.1s ease-out forwards;z-index:9999;
+        font-size:1.1rem;
+      }
+      .dmg-float.dmg-normal  { color:#ffffff; }
+      .dmg-float.dmg-crit    { color:#FFD700; font-size:1.45rem; }
+      .dmg-float.dmg-dot     { color:#ff6d00; font-size:0.9rem; }
+      .dmg-float.dmg-heal    { color:#4cff72; }
+      .dmg-float.dmg-dodge   { color:#90a4ae; font-size:0.85rem; }
+      .dmg-float.dmg-stun    { color:#ce93d8; }
+      @keyframes dmgFloat {
+        0%   { opacity:1; transform:translateY(0)   scale(1); }
+        20%  { opacity:1; transform:translateY(-12px) scale(1.15); }
+        100% { opacity:0; transform:translateY(-48px) scale(0.85); }
+      }
+      .battle-screen-shake { animation: bShake 0.22s ease; }
+      @keyframes bShake {
+        0%,100% { transform:translateX(0); }
+        20%     { transform:translateX(-5px); }
+        40%     { transform:translateX(5px); }
+        60%     { transform:translateX(-4px); }
+        80%     { transform:translateX(4px); }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+}
+
+// Render status icons from battleState.
+function _renderBattleStatus(battleState, isAuto) {
+  _ensureStatusContainers();
+  const playerEl  = document.getElementById('battle-player-status');
+  const monsterEl = document.getElementById('battle-monster-status');
+  if (!playerEl || !monsterEl) return;
+
+  const icon = (emoji, label, rounds, cls) => {
+    const roundsStr = rounds === Infinity || rounds > 90 ? '∞' : rounds;
+    return `<span class="bstatus-icon ${cls}" title="${label}">
+      ${emoji}<span class="bs-rounds">${roundsStr}</span>
+    </span>`;
+  };
+
+  // ── Player buffs ──
+  let playerHtml = '';
+  if (battleState.buff_str  > 0) playerHtml += icon('💪',`STR +${Math.round(battleState.buff_str*100)}%`,  battleState.buff_str_turns  || '?', 'bs-buff');
+  if (battleState.buff_int  > 0) playerHtml += icon('🧠',`INT +${Math.round(battleState.buff_int*100)}%`,  battleState.buff_int_turns  || '?', 'bs-buff');
+  if (battleState.buff_def  > 0) playerHtml += icon('🛡️',`DEF +${Math.round(battleState.buff_def*100)}%`,  battleState.buff_def_turns  || '?', 'bs-buff');
+  if (battleState.buff_dex  > 0) playerHtml += icon('💨',`DEX +${Math.round(battleState.buff_dex*100)}%`,  battleState.buff_dex_turns  || '?', 'bs-buff');
+  if (battleState.hotActive)     playerHtml += icon('💚',`Regen ${Math.round((battleState.hotPct||0)*100)}%/turn`, battleState.hotTurns, 'bs-regen');
+  if (battleState.shieldPct)     playerHtml += icon('🔵',`Shield ${Math.round((battleState.shieldPct||0)*100)}%`, 1, 'bs-shield');
+  if (battleState.echoActive)    playerHtml += icon('🔁','Echo Strike', 1, 'bs-buff');
+  playerEl.innerHTML = playerHtml;
+
+  // ── Monster debuffs ──
+  let monHtml = '';
+  if (battleState.dotActive)     monHtml += icon(
+    battleState.dotLabel === 'Bleed' ? '🩸' : battleState.dotLabel === 'Burn' ? '🔥' : battleState.dotLabel === 'Hex Curse' ? '🌑' : '☠️',
+    `${battleState.dotLabel||'DoT'} ${Math.round((battleState.dotPct||0)*100)}%/turn`,
+    battleState.dotTurns, 'bs-dot'
+  );
+  if (battleState.monsterStunned)     monHtml += icon('⚡','Stunned — skips turn', 1, 'bs-ctrl');
+  if (battleState.monsterSkillLocked) monHtml += icon('🔇','Silenced — melee only', 1, 'bs-ctrl');
+  if (battleState.defBreak)           monHtml += icon('💔',`DEF -${Math.round((battleState.defBreakAmt||0)*100)}%`, battleState.defBreakTurns||2, 'bs-debuff');
+  if (battleState.deathMark)          monHtml += icon('☠️',`Death Mark +${Math.round((battleState.deathMarkBonus||0)*100)}%`, 1, 'bs-debuff');
+  if (battleState.summonActive)       monHtml += icon('🐉','Summon active', battleState.summonTurns > 90 ? Infinity : battleState.summonTurns, 'bs-debuff');
+  monsterEl.innerHTML = monHtml;
+}
+
+// Clear status containers (call on battle end/start)
+function _clearBattleStatus() {
+  const p = document.getElementById('battle-player-status');
+  const m = document.getElementById('battle-monster-status');
+  if (p) p.innerHTML = '';
+  if (m) m.innerHTML = '';
+}
+
+// ── Damage float animation ─────────────────────────────────────────────────
+// Spawns a floating damage number near the given anchor element ID.
+// type: 'normal'|'crit'|'dot'|'heal'|'dodge'|'stun'
+function _spawnDmgFloat(anchorId, text, type) {
+  const anchor = document.getElementById(anchorId);
+  if (!anchor) return;
+  const rect = anchor.getBoundingClientRect();
+  const el = document.createElement('div');
+  el.className = `dmg-float dmg-${type}`;
+  el.textContent = type === 'crit' ? `⚡ ${text}!` : type === 'heal' ? `+${text}` : type === 'dodge' ? 'DODGE' : type === 'stun' ? '⚡ STUNNED!' : text;
+  el.style.left = `${rect.left + rect.width * 0.3 + Math.random() * rect.width * 0.4}px`;
+  el.style.top  = `${rect.top  + rect.height * 0.3}px`;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1200);
+  // Screen shake on crit
+  if (type === 'crit') {
+    const arena = document.getElementById('battle-arena');
+    if (arena) { arena.classList.add('battle-screen-shake'); setTimeout(() => arena.classList.remove('battle-screen-shake'), 250); }
+  }
+}
  
 // ── Loot tables — match spec drop chances ─────────────────────────────────────
 // Each grade defines independent drop slots. Each slot has:
@@ -9814,12 +10212,13 @@ async function _clientBattleTurn(action, skillName) {
   // ── Flee ──
   if (action === 'flee') {
     const fleeCost = 10;
-    const newGold  = Math.max(0, (char.gold || 0) - fleeCost);
-    await updateDoc(doc(db, "characters", uid), {
-      gold: newGold,
-      hp: playerHp,
-      mana: playerMana,
+    // Fee comes off the SERVER gold balance (clamped at 0) inside a transaction,
+    // not an absolute value computed from the local copy.
+    const _fr = await _charTx(uid, fresh => {
+      const g = Math.max(0, (fresh.gold || 0) - fleeCost);
+      return { updates: { gold: g, hp: playerHp, mana: playerMana }, local: { gold: g } };
     });
+    const newGold = _fr.local.gold;
     if (char) {
       char.gold = newGold;
       char.hp   = playerHp;
@@ -9853,19 +10252,11 @@ async function _clientBattleTurn(action, skillName) {
       const drops  = _rollDrops(b.grade, b.zoneName || monster?.zoneName);
       const _veilExpBonus = _charData?.deity === 'Veil' ? (1 + _getFaithBlessingPct(_charData)) : 1;
       const expGain = Math.round(((b.zoneName||monster?.zoneName ? LEVEL_BAND_STATS[ZONE_LEVEL_BAND[b.zoneName||monster?.zoneName]]?.exp : null) || MONSTER_EXP_LOCAL[b.grade] || 10) * _getRaceExpMult(_charData?.race) * _getCompanionExpMult(_charData?.companion?.name) * _veilExpBonus * _getExpBuffMult(_charData));
-      const inv = [...(char.inventory||[])];
-      drops.items.forEach(item => {
-        const ex = inv.find(i => i.name === item.name);
-        const _isEquip = getItemType(item.name) === 'equipment';
-        if (ex && !_isEquip) { ex.qty += item.qty; }
-        else { const _ni = {...item}; if (_isEquip) _ni.iid = Math.random().toString(36).slice(2,10)+Date.now().toString(36); inv.push(_ni); }
-      });
-      const gold = (char.gold||0) + drops.gold;
-      const { newXp, newLevel, newRank, newXpMax, leveledUp } = _processExp(char.xp||0, char.xpMax||100, char.level||1, char.rank||'Wanderer', expGain, char.charClass);
-      const dotUpdates = { gold, inventory: inv, xp: newXp, level: newLevel, rank: newRank, xpMax: newXpMax, hp: playerHp, mana: playerMana };
-      if (leveledUp) { dotUpdates.hpMax = (char.hpMax||100)+10; dotUpdates.manaMax = (char.manaMax||50)+5; dotUpdates.statPoints = (char.statPoints||0)+3; }
-      Object.assign(_charData, dotUpdates);
-      await updateDoc(doc(db, "characters", uid), dotUpdates);
+      // Transactional payout (see _commitKillReward) — no stale local overwrite.
+      const _kr = await _commitKillReward(uid, { drops, expGain, hp: playerHp, mana: playerMana });
+      let newLevel = char.level, newRank = char.rank, leveledUp = false;
+      if (_kr) { ({ newLevel, newRank, leveledUp } = _kr.px); _applyKillRewardLocal(_kr, drops); }
+      else window.showToast?.('⚠️ Reward sync failed — check your connection.', 'error');
       await updateDoc(doc(db, "battles", uid), { status:"victory" });
       const updates = {};
       log.push(`💀 ${monster.name} defeated by ${b.dotLabel||"DoT"}! +${expGain} EXP, +${drops.gold} gold`);
@@ -9956,27 +10347,7 @@ async function _clientBattleTurn(action, skillName) {
     const drops  = _rollDrops(b.grade, b.zoneName || monster?.zoneName);
     const _veilExpBonus = _charData?.deity === 'Veil' ? (1 + _getFaithBlessingPct(_charData)) : 1;
         const expGain = Math.round(((b.zoneName||monster?.zoneName ? LEVEL_BAND_STATS[ZONE_LEVEL_BAND[b.zoneName||monster?.zoneName]]?.exp : null) || MONSTER_EXP_LOCAL[b.grade] || 10) * _getRaceExpMult(_charData?.race) * _getCompanionExpMult(_charData?.companion?.name) * _veilExpBonus * _getExpBuffMult(_charData));
-    const inv = [...(char.inventory||[])];
-    drops.items.forEach(item => {
-      const ex = inv.find(i => i.name === item.name);
-      const _isEquip = getItemType(item.name) === 'equipment';
-      if (ex && !_isEquip) { ex.qty += item.qty; }
-      else { const _ni = {...item}; if (_isEquip) _ni.iid = Math.random().toString(36).slice(2,10)+Date.now().toString(36); inv.push(_ni); }
-    });
-    const { newXp, newLevel, newRank, newXpMax, leveledUp } = _processExp(
-      char.xp||0, char.xpMax||100, char.level||1, char.rank||"Wanderer", expGain, char.charClass
-    );
-    const updates = {
-      hp: playerHp, mana: playerMana,
-      gold: (char.gold||0) + drops.gold,
-      inventory: inv, xp:newXp, xpMax:newXpMax,
-      level: newLevel, rank:newRank,
-    };
-    if (leveledUp) {
-      updates.statPoints = (char.statPoints||0)+3;
-      updates.hpMax      = (char.hpMax||100)+10;
-      updates.manaMax    = (char.manaMax||50)+5;
-    }
+    const extra = {};   // companion fields, merged into the transactional payout
     // Award companion EXP for battle victory
     let companionExpMsg = '';
     if (char.companion) {
@@ -9994,19 +10365,23 @@ async function _clientBattleTurn(action, skillName) {
         companionXpMax = COMPANION_EXP_TABLE[companionLevel-1] || companionXpMax;
         companionLeveledUp = true;
       }
-      updates.companionExp = companionExp;
-      updates.companionLevel = companionLevel;
+      extra.companionExp = companionExp;
+      extra.companionLevel = companionLevel;
       companionExpMsg = `🐾 Companion gained ${compExpGain} EXP!`;
       if (companionLeveledUp) companionExpMsg += ` 🆙 Companion leveled up to Lv.${companionLevel}!`;
       log.push(companionExpMsg);
     }
+    // Transactional payout (see _commitKillReward) — no stale local overwrite.
+    const _kr = await _commitKillReward(uid, { drops, expGain, hp: playerHp, mana: playerMana, extra });
+    let newLevel = char.level, newRank = char.rank, leveledUp = false, updates = {};
+    if (_kr) {
+      ({ newLevel, newRank, leveledUp } = _kr.px);
+      _applyKillRewardLocal(_kr, drops);
+      updates = { ..._kr.local, inventory: _charData.inventory };
+    } else window.showToast?.('⚠️ Reward sync failed — check your connection.', 'error');
     log.push(`💀 ${monster.name} defeated!`);
     log.push(`💰 +${drops.gold} gold · ⭐ +${expGain} EXP`);
     if (leveledUp) log.push(`🎉 LEVEL UP! ${newRank} Level ${_displayLevel(newLevel)}!`);
-    await updateDoc(doc(db, "characters", uid), updates);
-    // Sync in-memory charData so HP bar updates immediately without full refresh
-    Object.assign(_charData, updates);
-    window._allInvItems = updates.inventory || _charData.inventory;
     await updateDoc(doc(db, "battles", uid), { status:"victory" });
     const isElite = ["B","A","S"].includes(b.grade);
     await _incrementQuest("kill", 1);
@@ -10042,8 +10417,20 @@ async function _clientBattleTurn(action, skillName) {
     const _race = (char.race || '').toLowerCase();
     if (_race.includes('elder dragon')) monDmg = Math.round(monDmg * 0.80);
     else if (_race.includes('dragonborn')) monDmg = Math.round(monDmg * 0.90);
-    playerHp = Math.max(0, playerHp - monDmg);
-    log.push(`👹 Monster attacks for ${monDmg}. Your HP: ${playerHp}`);
+    // Dodge roll
+    const _dodgeChanceM = _calcDodgeChance(stats.dex || 10, b.monster?.dex || 10);
+    if (_rollDodge(_dodgeChanceM)) {
+      log.push(`💨 You dodged the monster's attack!`);
+      _spawnDmgFloat('player-hp-fill', 'DODGE', 'dodge');
+    } else {
+      playerHp = Math.max(0, playerHp - monDmg);
+      log.push(`👹 Monster attacks for ${monDmg}. Your HP: ${playerHp}`);
+      _spawnDmgFloat('player-hp-fill', monDmg, 'normal');
+    }
+    // Buff duration expiry (end of round)
+    _tickBuffDurations(battleUpdates);
+    // Status HUD update
+    _renderBattleStatus({ ...b, ...battleUpdates }, false);
   }
 
   // ── Defeat ──
@@ -10353,6 +10740,10 @@ function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stat
       if (b.echoActive) { dmg *= 2; updates.echoActive = false; log.push(`🔁 Echo-strike doubles the hit!`); }
       // Death Mark bonus
       if (b.deathMark) { dmg = Math.round(dmg * (1 + (b.deathMarkBonus || 0.60))); updates.deathMark = false; log.push(`☠️ Death Mark triggered!`); }
+      // Crit roll
+      const _critD = _rollCrit(_calcCritChance(window._charData, b));
+      if (_critD.isCrit) { dmg = Math.round(dmg * 1.5); log.push(`⚡ CRITICAL HIT!`); _spawnDmgFloat('monster-hp-fill', dmg, 'crit'); }
+      else { _spawnDmgFloat('monster-hp-fill', dmg, 'normal'); }
       monHp = Math.max(0, monHp - dmg);
       log.push(`⚔️ ${skillName}: ${dmg} damage!`);
       if (isBackstab) updates.backstabUsed = true;
@@ -10416,6 +10807,7 @@ function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stat
       const healed = Math.round(playerHpMax * sk.healPct * _glimmerMult);
       playerHp = Math.min(playerHpMax, playerHp + healed);
       log.push(`💚 ${skillName}: Restored ${healed} HP!`);
+      _spawnDmgFloat('player-hp-fill', healed, 'heal');
       break;
     }
     case "hpbuff": {
@@ -10443,6 +10835,7 @@ function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stat
           const bk = `buff_${s}`;
           if ((b[bk] || 0) < BUFF_CAP) allCapped = false;
           updates[bk] = Math.min(BUFF_CAP, (b[bk] || 0) + sk.buffMult);
+          updates[`${bk}_turns`] = sk.tier === 'advanced' ? 4 : 3; // reset duration on re-cast
         }
         if (allCapped) {
           log.push(`⬆️ ${skillName}: Buff cap reached (160% max)!`);
@@ -10456,8 +10849,9 @@ function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stat
           log.push(`⬆️ ${skillName}: Buff cap reached (160% max)!`);
         } else {
           updates[bKey] = Math.min(BUFF_CAP, (b[bKey] || 0) + sk.buffMult);
+          updates[`${bKey}_turns`] = sk.tier === 'advanced' ? 4 : 3; // reset duration on re-cast
           if (sk.hpBonus) { playerHp = Math.min(playerHpMax, playerHp + Math.round(playerHpMax * sk.hpBonus)); }
-          log.push(`⬆️ ${skillName}: +${Math.round(sk.buffMult*100)}% ${sk.stat.toUpperCase()}! (Total: ${Math.round(updates[bKey]*100)}%)`);
+          log.push(`⬆️ ${skillName}: +${Math.round(sk.buffMult*100)}% ${sk.stat.toUpperCase()}! (Total: ${Math.round(updates[bKey]*100)}%) [${updates[`${bKey}_turns`]} turns]`);
         }
       }
       break;
@@ -10504,6 +10898,7 @@ function _applySkill(skillName, playerHp, playerMana, playerHpMax, monster, stat
       monHp = Math.max(0, monHp - dmg);
       updates.monsterStunned = true;
       log.push(`💫 ${skillName}: ${dmg} damage! Monster is stunned and will skip next turn!`);
+      _spawnDmgFloat('monster-hp-fill', '⚡ STUNNED!', 'stun');
       break;
     }
     case "skillock": {
@@ -10795,7 +11190,7 @@ function _launchAutoBattleLoop(grade, zoneName) {
   _renderBattlePotionStrip(); // show potions at battle start
 
   const logEl = document.getElementById('battle-log');
-  if (logEl) logEl.innerHTML = '';
+  if (logEl) logEl.innerHTML = ''; _clearBattleStatus();
   addBattleLog(`🔄 Auto-battle started in <b>${zoneName}</b> — ${poolSize} monsters await!`);
 
   async function fightOneMonster() {
@@ -10870,16 +11265,50 @@ function _launchAutoBattleLoop(grade, zoneName) {
         if (battleState.hotTurns <= 0) battleState.hotActive = false;
       }
 
-      // Pick next affordable skill, fall back to melee
+      // ── Priority-based AI skill selection (spec Section 7) ──────────────
+      // P1 Survival: heal if HP < 25%
+      // P2 Buff maintenance: buff if no offensive buff active
+      // P3 Stun: 30% chance to stun if no control on monster
+      // P4 DoT: apply if no DoT active
+      // P5 Heavy damage: hardest hitter if buffed + monster debuffed
+      // P6 Default: highest-damage affordable skill
       let usedSkill = null;
       if (!_autoBattleForceMelee) {
-        for (let i = 0; i < classSkills.length; i++) {
-          const sk = classSkills[(skillIdx + i) % classSkills.length];
-          if ((sk.mana || 0) <= playerMana) {
-            usedSkill = sk;
-            skillIdx  = (skillIdx + i + 1) % classSkills.length;
-            break;
-          }
+        const affordable = classSkills.filter(sk => (sk.mana || 0) <= playerMana);
+        const byType     = t => affordable.filter(sk => sk.type === t);
+        const hasOffBuff = battleState.buff_str > 0 || battleState.buff_int > 0 || battleState.buff_dex > 0;
+        const hasControl = battleState.monsterStunned || battleState.monsterSkillLocked;
+        const hasDoT     = battleState.dotActive;
+        const isLowHp    = playerHp / playerHpMax < 0.25;
+        const manaPct    = playerMana / playerManaMax;
+
+        if (isLowHp) {
+          // P1 — heal
+          usedSkill = byType('heal')[0] || byType('hpbuff')[0] || byType('hot')[0] || null;
+        }
+        if (!usedSkill && !hasOffBuff) {
+          // P2 — buff up
+          usedSkill = byType('buff')[0] || null;
+        }
+        if (!usedSkill && !hasControl && manaPct > 0.3 && Math.random() < 0.30) {
+          // P3 — stun/silence
+          usedSkill = byType('stun')[0] || byType('skillock')[0] || null;
+        }
+        if (!usedSkill && !hasDoT) {
+          // P4 — apply DoT
+          usedSkill = byType('dot')[0] || null;
+        }
+        if (!usedSkill && hasOffBuff && hasDoT && manaPct > 0.4) {
+          // P5 — heavy damage
+          const heavy = affordable.filter(sk => sk.type === 'damage' || sk.type === 'execute' || sk.type === 'multihit');
+          heavy.sort((a, b) => (b.mult || b.multPerHit || 1) - (a.mult || a.multPerHit || 1));
+          usedSkill = heavy[0] || null;
+        }
+        if (!usedSkill) {
+          // P6 — default: highest multiplier affordable; avoid advanced if mana < 60%
+          const pool = affordable.filter(sk => manaPct >= 0.6 || (sk.mana || 0) < 40);
+          pool.sort((a, b) => (b.mult || 1) - (a.mult || 1));
+          usedSkill = pool.find(sk => sk.type !== 'sacrificial') || pool[0] || null;
         }
       }
 
@@ -10918,6 +11347,10 @@ function _launchAutoBattleLoop(grade, zoneName) {
         if (battleState.defBreak) { battleState.defBreak = false; battleState.defBreakAmt = 0; }
         // Death Mark
         if (battleState.deathMark) { dmg = Math.round(dmg * (1 + (battleState.deathMarkBonus || 0.60))); battleState.deathMark = false; }
+        // Crit
+        const _mCrit = _rollCrit(_calcCritChance(char, battleState));
+        if (_mCrit.isCrit) { dmg = Math.round(dmg * 1.5); addBattleLog(`⚡ CRITICAL HIT!`); _spawnDmgFloat('monster-hp-fill', dmg, 'crit'); }
+        else { _spawnDmgFloat('monster-hp-fill', dmg, 'normal'); }
         monHp = Math.max(0, monHp - dmg);
       }
 
@@ -10926,6 +11359,7 @@ function _launchAutoBattleLoop(grade, zoneName) {
         if (battleState.monsterStunned) {
           battleState.monsterStunned = false;
           addBattleLog(`💫 Monster stunned — skips attack!`);
+          _spawnDmgFloat('player-hp-fill', 'STUNNED!', 'stun');
         } else {
           const _mit3 = Math.min(Math.floor((stats.def||10) * 0.3), Math.floor(monster.atk * 0.75));
           const buffDefFact = battleState.buff_def ? (1 + battleState.buff_def) : 1;
@@ -10935,8 +11369,20 @@ function _launchAutoBattleLoop(grade, zoneName) {
           const _raceAB = (char.race || '').toLowerCase();
           if (_raceAB.includes('elder dragon')) mdmg = Math.round(mdmg * 0.80);
           else if (_raceAB.includes('dragonborn')) mdmg = Math.round(mdmg * 0.90);
-          playerHp = Math.max(0, playerHp - mdmg);
+          // Dodge roll
+          const _dodgeChance = _calcDodgeChance(stats.dex || 10, monster.dex || 10);
+          if (_rollDodge(_dodgeChance)) {
+            addBattleLog(`💨 You dodged the attack!`);
+            _spawnDmgFloat('player-hp-fill', 'DODGE', 'dodge');
+          } else {
+            playerHp = Math.max(0, playerHp - mdmg);
+            _spawnDmgFloat('player-hp-fill', mdmg, 'normal');
+          }
         }
+        // ── Buff duration expiry (end of round, after monster acts) ──
+        _tickBuffDurations(battleState);
+        // ── Update status HUD ──
+        _renderBattleStatus(battleState, true);
       }
 
       updateBattleBars(monHp, monster.hp, playerHp, playerHpMax, playerMana, playerManaMax);
@@ -10986,25 +11432,21 @@ function _launchAutoBattleLoop(grade, zoneName) {
     const drops   = _rollDrops(grade, zoneName);
     const _veilExpBonus2 = _charData?.deity === 'Veil' ? (1 + _getFaithBlessingPct(_charData)) : 1;
     const expGain = Math.round(((zoneName ? LEVEL_BAND_STATS[ZONE_LEVEL_BAND[zoneName]]?.exp : null) || MONSTER_EXP_LOCAL[grade] || 10) * _getRaceExpMult(_charData?.race) * _getCompanionExpMult(_charData?.companion?.name) * _veilExpBonus2 * _getExpBuffMult(_charData));
-    const inv = [...(char.inventory||[])];
-    drops.items.forEach(item => {
-      const ex = inv.find(i => i.name === item.name);
-      const _isEquip = getItemType(item.name) === 'equipment';
-      if (ex && !_isEquip) { ex.qty += item.qty; }
-      else { const _ni = {...item}; if (_isEquip) _ni.iid = Math.random().toString(36).slice(2,10)+Date.now().toString(36); inv.push(_ni); }
-    });
-    char.gold      = (_charData.gold||0) + drops.gold;  // keep char in sync for HUD
-    char.inventory = inv;
-    const { newXp, newLevel, newRank, newXpMax, leveledUp } = _processExp(
-      char.xp||0, char.xpMax||100, char.level||1, char.rank||'Wanderer', expGain, char.charClass
-    );
-    char.xp = newXp; char.xpMax = newXpMax; char.level = newLevel; char.rank = newRank;
-    if (leveledUp) {
-      char.statPoints = (char.statPoints||0) + 3;
-      char.hpMax      = (char.hpMax||100) + 10;
-      char.manaMax    = (char.manaMax||50) + 5;
-      addBattleLog(`🎉 LEVEL UP! Now Level ${newLevel} ${newRank}!`);
-      window.showToast(`🎉 LEVEL UP! Now Level ${newLevel} ${newRank}!`, 'success');
+    // Pay out FIRST, transactionally (see _commitKillReward). Quest hooks run
+    // afterwards so any quest reward they trigger builds on the committed
+    // inventory instead of racing ahead of it and getting overwritten.
+    const _kr = await _commitKillReward(_uid, { drops, expGain, hp: playerHp, mana: playerMana });
+    let leveledUp = false;
+    if (_kr) {
+      const { newLevel, newRank } = _kr.px;
+      leveledUp = _kr.px.leveledUp;
+      _applyKillRewardLocal(_kr, drops);   // char === _charData, so HUD/char stay in sync
+      if (leveledUp) {
+        addBattleLog(`🎉 LEVEL UP! Now Level ${newLevel} ${newRank}!`);
+        window.showToast(`🎉 LEVEL UP! Now Level ${newLevel} ${newRank}!`, 'success');
+      }
+    } else {
+      window.showToast?.('⚠️ Reward sync failed — check your connection.', 'error');
     }
     addBattleLog(`✅ ${monster.name} defeated! +${drops.gold}💰 +${expGain} EXP`);
 
@@ -11023,18 +11465,6 @@ function _launchAutoBattleLoop(grade, zoneName) {
     const isElite = ['B','A','S'].includes(grade);
     await window._recordZoneKill(zoneName, grade);
     await _incrementQuest('kill', 1);
-    await updateDoc(doc(db, 'characters', _uid), {
-      gold: increment(drops.gold),
-      inventory: char.inventory,
-      xp: increment(expGain), xpMax: char.xpMax, level: char.level, rank: char.rank,
-      hp: playerHp, mana: playerMana,
-      ...(leveledUp ? { statPoints: increment(3), hpMax: char.hpMax, manaMax: char.manaMax } : {})
-    });
-    // Keep local _charData in sync so subsequent reads in this session are accurate
-    Object.assign(_charData, { gold: char.gold, inventory: char.inventory,
-      xp: char.xp, xpMax: char.xpMax, level: char.level, rank: char.rank,
-      hp: playerHp, mana: playerMana,
-      ...(leveledUp ? { statPoints: char.statPoints, hpMax: char.hpMax, manaMax: char.manaMax } : {}) });
     logActivity('⚔️', `<b>Auto: Defeated ${monster.name}</b>${isElite?' <span style="color:#e8d070">[Elite]</span>':''} · +${drops.gold}💰 +${expGain} EXP`, isElite ? '#e8d070' : '#e05555');
 
     // Small pause between monsters, then continue
@@ -11572,9 +12002,26 @@ window._useBattlePotion = async function(itemName, kind) {
   const invIdx = (_charData.inventory || []).findIndex(i => i.name === itemName);
   if (invIdx === -1) { window.showToast('Potion not found in inventory.', 'error'); return; }
 
-  // ── Step 2: Compute the live battle HP/Mana from the running loop ─────────
-  const liveHp   = (window._autoBattleLiveHp   !== undefined) ? window._autoBattleLiveHp   : (_charData.hp   || 0);
-  const liveMana = (window._autoBattleLiveMana !== undefined) ? window._autoBattleLiveMana : (_charData.mana || 0);
+  // ── Step 2: Compute the live battle HP/Mana from the correct source ───────
+  // Auto-battle: use the live loop trackers (battles doc not kept in sync turn-by-turn)
+  // Manual battle: battles doc IS the authoritative source — read it fresh.
+  let liveHp, liveMana;
+  if (_autoBattleRunning) {
+    liveHp   = (window._autoBattleLiveHp   !== undefined) ? window._autoBattleLiveHp   : (_charData.hp   || 0);
+    liveMana = (window._autoBattleLiveMana !== undefined) ? window._autoBattleLiveMana : (_charData.mana || 0);
+  } else {
+    // Manual battle: pull directly from the battles doc so we have the exact
+    // current HP/Mana after any damage taken this turn, not a stale _charData snapshot.
+    try {
+      const bSnap = await getDoc(doc(db, 'battles', auth.currentUser?.uid));
+      const bData = bSnap.exists() ? bSnap.data() : {};
+      liveHp   = bData.playerHp   ?? (_charData.hp   || 0);
+      liveMana = bData.playerMana ?? (_charData.mana || 0);
+    } catch(_) {
+      liveHp   = _charData.hp   || 0;
+      liveMana = _charData.mana || 0;
+    }
+  }
   const hpMax   = _charData.hpMax   || 100;
   const manaMax = _charData.manaMax || 50;
 
@@ -11610,13 +12057,22 @@ window._useBattlePotion = async function(itemName, kind) {
   window._allInvItems  = localInv;
 
   // ── Step 5: Signal the auto-battle loop to pick up the new HP/Mana ────────
-  _autoBattleHealedHp      = newHp;
-  _autoBattleHealedMana    = newMana;
+  // Only update the tracker for the potion type that was actually used.
+  // Setting both always was causing HP potions to also snap Mana back (and vice
+  // versa) because newHp/newMana are initialised to liveHp/liveMana and the loop
+  // would blindly re-apply the unchanged value, overwriting what it had accumulated.
+  if (isHpPotion) {
+    _autoBattleHealedHp      = newHp;
+    _autoBattleHealedMana    = null;   // don't touch mana
+    window._autoBattleLiveHp = newHp;
+    // leave window._autoBattleLiveMana alone
+  } else if (isManaPotion) {
+    _autoBattleHealedHp      = null;   // don't touch hp
+    _autoBattleHealedMana    = newMana;
+    window._autoBattleLiveMana = newMana;
+    // leave window._autoBattleLiveHp alone
+  }
   _autoBattlePotionPending = true;
-
-  // Update live tracking vars immediately so any concurrent reads are correct
-  window._autoBattleLiveHp   = newHp;
-  window._autoBattleLiveMana = newMana;
 
   // ── Step 6: Update bars and strip instantly (zero lag for the player) ──────
   const monHpEl  = document.getElementById('monster-hp-text');
@@ -11637,22 +12093,38 @@ window._useBattlePotion = async function(itemName, kind) {
   }, fsExtra).then(() => {
     // After the write settles, re-inject live HP/Mana into _charData so it
     // doesn't get overwritten by refreshCharData's out-of-battle values.
-    if (_autoBattleRunning) {
-      const curLiveHp   = window._autoBattleLiveHp;
-      const curLiveMana = window._autoBattleLiveMana;
-      if (curLiveHp   !== undefined) _charData.hp   = curLiveHp;
-      if (curLiveMana !== undefined) _charData.mana = curLiveMana;
+    // Also re-inject the locally-decremented inventory so the settled write
+    // doesn't race with a stale onSnapshot and revert the count.
+    if (_charData) {
+      if (_autoBattleRunning || document.getElementById('battle-arena')?.style.display !== 'none') {
+        const curLiveHp   = window._autoBattleLiveHp;
+        const curLiveMana = window._autoBattleLiveMana;
+        if (curLiveHp   !== undefined) _charData.hp   = curLiveHp;
+        if (curLiveMana !== undefined) _charData.mana = curLiveMana;
+        // Keep the locally-decremented inventory — the server write is now settled
+        // so this is authoritative. Don't pull from server until battle ends.
+        _charData.inventory = localInv;
+        window._allInvItems = localInv;
+      }
     }
     // Re-render strip after Firestore confirms (keeps qty in sync if there was a race)
     _renderBattlePotionStrip();
   }).catch(e => console.warn('[BattlePotion] Firestore write failed:', e));
 
-  // Manual fight mode: also update the battles doc so _clientBattleTurn reads
-  // the correct HP/Mana (it reads from Firestore, not _charData).
+  // Manual fight mode: update the battles doc so _clientBattleTurn reads the
+  // correct value on the next turn. Only write the field that actually changed —
+  // writing both was resetting the untouched stat to a stale snapshot value.
   if (!_autoBattleRunning) {
     try {
       const uid = auth.currentUser?.uid;
-      if (uid) await updateDoc(doc(db, 'battles', uid), { playerHp: newHp, playerMana: newMana });
+      if (uid) {
+        const battleUpdate = isHpPotion   ? { playerHp:   newHp   }
+                           : isManaPotion ? { playerMana: newMana }
+                           : {};
+        if (Object.keys(battleUpdate).length) {
+          await updateDoc(doc(db, 'battles', uid), battleUpdate);
+        }
+      }
     } catch(_) {}
   }
 
@@ -12349,15 +12821,17 @@ function _buildFighter(c) {
 const BOSS_MECHANIC_FNS = {
   aoe: (state, abilityName) => {
     const baseDmg = Math.round(state.boss.atk * 0.65);
+    let _aoeDmgDealt = 0;
     state.party.forEach(p => {
       if (p.status === 'alive') {
         const r = (p.race || '').toLowerCase();
         const resist = r.includes('elder dragon') ? 0.20 : r.includes('dragonborn') ? 0.10 : 0;
         const dmg = Math.round(baseDmg * (1 - resist));
         p.hp = Math.max(0, p.hp - dmg);
+        _aoeDmgDealt = dmg; // representative value (may vary by race)
       }
     });
-    return `🌊 ${abilityName}! All party members take ${dmg} damage!`;
+    return `🌊 ${abilityName}! All party members take ~${_aoeDmgDealt} damage!`;
   },
   drain: (state, abilityName) => {
     const t = state.party.find(p => p.status === 'alive');
@@ -12683,6 +13157,7 @@ window.startBossRaid = function(party, bossTemplate) {
     party: _bossRaidParty,
     leaderIdx: 0,
     myIdx: _bossRaidParty.findIndex(p => p.uid === _uid) ?? 0,
+    runId: Date.now() + '-' + Math.random().toString(36).slice(2, 8),
     log: [`🛡️ Raid starts! ${_bossRaidParty.map(p=>p.name).join(', ')} vs ${_bossRaidBoss.name}!`],
     status: 'active',
     turn: 1,
@@ -12702,7 +13177,7 @@ function _showBossRaidArena() {
   document.getElementById('raid-turn-actions').style.display = 'none';
   document.getElementById('raid-waiting-msg').style.display  = 'none';
   const logEl = document.getElementById('raid-log');
-  if (logEl) logEl.innerHTML = '';
+  if (logEl) logEl.innerHTML = ''; _clearBattleStatus();
   const arenaEl = document.getElementById('boss-raid-arena');
   arenaEl.style.display = 'block';
 
@@ -12819,19 +13294,27 @@ window.doRaidTurn = function(action, skillName) {
     playerDmg = Math.max(1, primary - def + _randInt(-2, 3));
     if (me._weakened) { playerDmg = Math.round(playerDmg * 0.7); me._weakened--; }
     if (me._stunned)  { me._stunned = 0; s.log.push(`😵 ${me.name} was stunned and couldn't act!`); }
-    else if (me._frozen)   { me._frozen = 0; s.log.push(`❄️ ${me.name} is frozen and skips their turn!`); }
+    else if (me._frozen)   { me._frozen = Math.max(0, me._frozen - 1); s.log.push(`❄️ ${me.name} is frozen and skips their turn!`); }
     else if (me._silenced) { me._silenced = 0; /* silenced only blocks skills, melee still fires */ s.log.push(`🔇 ${me.name} is silenced but swings anyway!`);
       // Curse detonation — acting while cursed
       if (me._cursed) { const cDmg = me._cursed; me._cursed = 0; me.hp = Math.max(0, me.hp - cDmg); if (me.hp <= 0) me.status = 'defeated'; s.log.push(`🔮 Curse detonates on ${me.name} for ${cDmg} damage!`); }
       // Blind check
       if (me._blinded && Math.random() < 0.60) { me._blinded = 0; s.log.push(`👁️ ${me.name} is blinded — attack misses!`); }
-      else { me._blinded = 0; s.boss.hp = Math.max(0, s.boss.hp - playerDmg); s.log.push(`⚔️ ${me.name} strikes ${s.boss.name} for ${playerDmg} damage!`);
+      else {
+        me._blinded = 0;
+        // Crit roll (spec Section 3)
+        const _raidCrit1 = _rollCrit(_calcCritChance(_charData, {}));
+        if (_raidCrit1.isCrit) { playerDmg = Math.round(playerDmg * 1.5); s.log.push(`⚡ CRITICAL HIT!`); }
+        s.boss.hp = Math.max(0, s.boss.hp - playerDmg);
+        s.log.push(`⚔️ ${me.name} strikes ${s.boss.name} for ${playerDmg} damage!${_raidCrit1.isCrit ? ' ⚡' : ''}`);
         // Nibblit: 5% lifesteal on hit
         if ((me.companion || '').toLowerCase() === 'nibblit' && Math.random() < 0.05) {
           const steal = Math.max(1, Math.round(playerDmg * 0.05));
           me.hp = Math.min(me.maxHp, me.hp + steal);
           s.log.push(`🩸 Nibblit siphons ${steal} HP for ${me.name}!`);
-        } if (s.boss._reflect > 0) { const rDmg = Math.round(playerDmg * 0.4); me.hp = Math.max(0, me.hp - rDmg); if (me.hp <= 0) me.status = 'defeated'; s.boss._reflect = 0; s.log.push(`🪞 Reflected! ${me.name} takes ${rDmg} reflected damage!`); } }
+        }
+        if (s.boss._reflect > 0) { const rDmg = Math.round(playerDmg * 0.4); me.hp = Math.max(0, me.hp - rDmg); if (me.hp <= 0) me.status = 'defeated'; s.boss._reflect = 0; s.log.push(`🪞 Reflected! ${me.name} takes ${rDmg} reflected damage!`); }
+      }
     }
     else {
       // Curse detonation — acting while cursed
@@ -12840,8 +13323,11 @@ window.doRaidTurn = function(action, skillName) {
       if (me._blinded && Math.random() < 0.60) { me._blinded = 0; s.log.push(`👁️ ${me.name} is blinded — attack misses!`); }
       else {
         me._blinded = 0;
+        // Crit roll
+        const _raidCrit2 = _rollCrit(_calcCritChance(_charData, {}));
+        if (_raidCrit2.isCrit) { playerDmg = Math.round(playerDmg * 1.5); s.log.push(`⚡ CRITICAL HIT!`); }
         s.boss.hp = Math.max(0, s.boss.hp - playerDmg);
-        s.log.push(`⚔️ ${me.name} strikes ${s.boss.name} for ${playerDmg} damage!`);
+        s.log.push(`⚔️ ${me.name} strikes ${s.boss.name} for ${playerDmg} damage!${_raidCrit2.isCrit ? ' ⚡' : ''}`);
         // Reflect check
         if (s.boss._reflect > 0) {
           const rDmg = Math.round(playerDmg * 0.4);
@@ -12866,8 +13352,11 @@ window.doRaidTurn = function(action, skillName) {
           const stat = me[sk.stat] || primary;
           playerDmg = Math.max(1, Math.round(stat * (sk.mult||1)) - Math.floor((s.boss.def||10)*0.3));
           if (me._weakened) { playerDmg = Math.round(playerDmg * 0.7); me._weakened--; }
+          // Crit roll on skill damage
+          const _raidSkCrit = _rollCrit(_calcCritChance(_charData, {}));
+          if (_raidSkCrit.isCrit) { playerDmg = Math.round(playerDmg * 1.5); s.log.push(`⚡ CRITICAL HIT!`); }
           s.boss.hp = Math.max(0, s.boss.hp - playerDmg);
-          s.log.push(`✨ ${me.name} uses ${skillName} for ${playerDmg} damage!`);
+          s.log.push(`✨ ${me.name} uses ${skillName} for ${playerDmg} damage!${_raidSkCrit.isCrit ? ' ⚡' : ''}`);
           // Reflect check on skill damage too
           if (s.boss._reflect > 0) {
             const rDmg = Math.round(playerDmg * 0.4);
@@ -13060,27 +13549,47 @@ function _showRaidResult() {
   const logEl = document.getElementById('raid-result-log');
   if (isWin) {
     const boss = BOSS_LIST.find(b => b.id === s.boss.id) || {};
-    const goldEach = _randInt(200, 500);
-    const expEach  = _randInt(300, 600);
-    logEl.innerHTML = [
-      `🏆 ${s.boss.name} defeated!`,
-      `💰 Each party member earns ${goldEach} gold`,
-      `✨ Each party member earns ${expEach} EXP`,
-    ].map(l => `<div class="battle-result-log-line">${l}</div>`).join('');
-    // Award current player
-    if (_charData) {
-      const { newXp, newLevel, newRank, newXpMax, leveledUp } = _processExp(
-        _charData.xp||0, _charData.xpMax||100, _charData.level||1, _charData.rank||'Wanderer', expEach, _charData.charClass
-      );
-      const pvpUpdates = { gold: increment(goldEach), xp:newXp, level:newLevel, rank:newRank, xpMax:newXpMax };
-      if (leveledUp) { pvpUpdates.hpMax = (_charData.hpMax||100)+10; pvpUpdates.manaMax = (_charData.manaMax||50)+5; pvpUpdates.statPoints = (_charData.statPoints||0)+3; }
-      updateDoc(doc(db, 'characters', _uid), pvpUpdates)
-        .then(() => {
-          _charData.gold = (_charData.gold||0)+goldEach;
-          if (leveledUp) { _charData.hpMax = (_charData.hpMax||100)+10; _charData.manaMax = (_charData.manaMax||50)+5; _charData.statPoints = (_charData.statPoints||0)+3; }
-          set('stat-gold', _charData.gold); set('s-gold', _charData.gold);
-          if (leveledUp) window.showToast(`🎉 Level Up! ${newRank} Lv.${_displayLevel(newLevel)}`, 'success');
-        }).catch(()=>{});
+    // _showRaidResult runs on EVERY arena re-render while the raid is over (each
+    // party snapshot), so the reward must be strictly once-per-raid: it used to
+    // re-roll a new random amount and pay out again on every render.
+    const _rk = 'raidPaid:' + _uid + ':' + (s.runId || ((s.boss && s.boss.id) + '|' + ((s.log && s.log[0]) || '')));
+    window._raidRewardCache = window._raidRewardCache || {};
+    let _rw = window._raidRewardCache[_rk];
+    let _claimedEarlier = false;
+    try { _claimedEarlier = !!localStorage.getItem(_rk); } catch (_) {}
+    let _payNow = false;
+    if (!_rw && !_claimedEarlier) {
+      _rw = { gold: _randInt(200, 500), exp: _randInt(300, 600) };
+      window._raidRewardCache[_rk] = _rw;
+      try { localStorage.setItem(_rk, '1'); } catch (_) {}
+      _payNow = true;
+    }
+    if (_rw) {
+      logEl.innerHTML = [
+        `🏆 ${s.boss.name} defeated!`,
+        `💰 Each party member earns ${_rw.gold} gold`,
+        `✨ Each party member earns ${_rw.exp} EXP`,
+      ].map(l => `<div class="battle-result-log-line">${l}</div>`).join('');
+    } else {
+      logEl.innerHTML = [
+        `🏆 ${s.boss.name} defeated!`,
+        `✅ Your rewards for this raid were already claimed.`,
+      ].map(l => `<div class="battle-result-log-line">${l}</div>`).join('');
+    }
+    // Award current player — transactionally, from the SERVER doc.
+    if (_payNow && _charData) {
+      _commitKillReward(_uid, { drops: { gold: _rw.gold, items: [] }, expGain: _rw.exp }).then(kr => {
+        if (!kr) {
+          // Payout failed — release the claim so the next render can retry.
+          delete window._raidRewardCache[_rk];
+          try { localStorage.removeItem(_rk); } catch (_) {}
+          window.showToast('Raid reward failed to save. Retrying…', 'error');
+          return;
+        }
+        _applyKillRewardLocal(kr, { items: [] });
+        set('stat-gold', _charData.gold); set('s-gold', _charData.gold);
+        if (kr.px.leveledUp) window.showToast(`🎉 Level Up! ${kr.px.newRank} Lv.${_displayLevel(kr.px.newLevel)}`, 'success');
+      }).catch(() => {});
     }
   } else {
     logEl.innerHTML = `<div class="battle-result-log-line">No rewards. No death penalty — prepare better next time.</div>`;
@@ -14626,7 +15135,22 @@ async function refreshCharData() {
   try {
     const snap = await getDocFromServer(doc(db, 'characters', _uid));
     if (snap.exists()) {
-      _charData        = snap.data();
+      const _server = snap.data();
+      if (_autoBattleRunning || _currentBattle) {
+        // A battle is running: the battle loop holds a reference to this exact
+        // _charData object and owns hp/mana/inventory/gold/xp/level locally
+        // (they're committed through the write queue and may be a write ahead of
+        // this read). Merge the server's other fields IN PLACE and keep those —
+        // replacing the object made potion counts and HP snap back to older values
+        // and detached the loop's reference from the global.
+        const _keep = {};
+        ['hp','mana','inventory','gold','xp','xpMax','level','rank','hpMax','manaMax','statPoints'].forEach(k => {
+          if (_charData && k in _charData) _keep[k] = _charData[k];
+        });
+        Object.assign(_charData, _server, _keep);
+      } else {
+        _charData = _server;
+      }
       window._charData = _charData;
       window._allInvItems = _charData.inventory || [];
       _syncAllDisplays(_charData);
@@ -15121,19 +15645,27 @@ window.chooseCompanion = async function(index) {
   const companionData = { name, icon, bonus, level: 1, exp: 0, expMax: 1000 };
   const charUpdates = { companion: companionData, companionLevel: 1, companionExp: 0 };
 
-  // Consume the potion if switching
-  if (isSwitch) {
-    const inv = [...(window._charData.inventory || [])];
-    const potIdx = inv.findIndex(i => i.name === 'Companion Change Potion');
-    if (potIdx !== -1) {
-      inv[potIdx].qty -= 1;
-      if (inv[potIdx].qty <= 0) inv.splice(potIdx, 1);
-      charUpdates.inventory = inv;
-      window._charData.inventory = inv;
-    }
-  }
   try {
-    await updateDoc(doc(db, 'characters', _uid), charUpdates);
+    if (isSwitch) {
+      // The potion is consumed from the SERVER inventory in the same transaction
+      // that swaps the companion — if it's already gone, nothing changes. (It used
+      // to be deducted from the local copy first and written back wholesale, and a
+      // missing potion was silently ignored, so the switch still went through.)
+      await _invWrite(_uid, (invFresh, fresh) => {
+        if (!invFresh.find(i => i.name === 'Companion Change Potion' && (i.qty ?? 0) >= 1)) {
+          throw _invAbort('You need a Companion Change Potion to switch companions.');
+        }
+        _consumeOne(invFresh, 'Companion Change Potion');
+      }, charUpdates);
+      if (_autoBattleRunning) {
+        window._charData.inventory = (window._charData.inventory || []).map(i => i.name === 'Companion Change Potion' ? { ...i, qty: (i.qty ?? 1) - 1 } : i).filter(i => (i.qty ?? 1) > 0);
+      }
+    } else {
+      await _charTx(_uid, fresh => {
+        if (fresh.companion?.name && fresh.companion.name !== name) throw _invAbort('You already have a companion.');
+        return { updates: charUpdates, local: charUpdates };
+      });
+    }
     window._charData.companion = companionData;
     window._charData.companionLevel = 1;
     window._charData.companionExp = 0;
@@ -15143,7 +15675,7 @@ window.chooseCompanion = async function(index) {
     logActivity('🐾', `<b>Companion ${isSwitch ? 'Switched' : 'Chosen'}!</b> ${name} joined your journey.`, '#c9a84c');
   } catch(e) {
     console.error(e);
-    window.showToast('Failed to save companion.', 'error');
+    window.showToast(e?.userAbort ? e.message : 'Failed to save companion.', 'error');
   }
 };
 
@@ -15900,6 +16432,26 @@ window.patchAllInventoryGrades = async function() {
     return summary;
   }
 
+  // Same fix as the detection loop below, but applied to a FRESH copy of the
+  // inventory inside a transaction at write time (returns true if it changed anything).
+  const _gradePatchInv = (invArr) => {
+    let did = false;
+    for (const item of invArr) {
+      const baseName = (item.name || '').replace(/\s*\+\d+$/, '');
+      if (!baseName) continue;
+      const looksLikeEquip =
+        item.type === 'equipment' || item.type === 'weapon' || item.type === 'armor' ||
+        ALL_WEAPON_NAMES.includes(baseName) || ALL_ARMOR_NAMES.includes(baseName);
+      if (!looksLikeEquip) continue;
+      if (item.type !== 'equipment') { item.type = 'equipment'; did = true; }
+      if (!item.grade) {
+        const resolved = window._resolveEquipGrade(baseName);
+        if (resolved) { item.grade = resolved; did = true; }
+      }
+    }
+    return did;
+  };
+
   for (const charDoc of allDocs) {
     summary.checked++;
     const data = charDoc.data();
@@ -15941,7 +16493,16 @@ window.patchAllInventoryGrades = async function() {
 
     if (changed) {
       try {
-        await updateDoc(doc(db, 'characters', charDoc.id), { inventory: inv });
+        // Re-read and re-apply inside a transaction: this tool used to write back
+        // an inventory snapshot read earlier in the run, wiping anything a live
+        // player gained or spent in the meantime.
+        const _ref = doc(db, 'characters', charDoc.id);
+        await runTransaction(db, async tx => {
+          const snap = await tx.get(_ref);
+          if (!snap.exists()) return;
+          const freshInv = Array.isArray(snap.data().inventory) ? snap.data().inventory.map(i => ({ ...i })) : [];
+          if (_gradePatchInv(freshInv)) tx.update(_ref, { inventory: freshInv });
+        });
         summary.patched++;
         console.log(`[GradePatch] ✅ Patched ${charDoc.id} (${data.name || 'unnamed'})`);
       } catch (e) {

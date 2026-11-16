@@ -34,27 +34,11 @@ button,
   touch-action: manipulation;
 }
 
-/* ── Duel forfeit button ───────────────────────── */
-.duel-forfeit-row {
-  display: flex;
-  justify-content: center;
-  padding: 6px 12px 10px;
-}
-.duel-forfeit-btn {
-  background: transparent;
-  border: 1px solid #6b3a3a;
-  color: #c07070;
-  font-size: 0.75rem;
-  padding: 4px 14px;
-  border-radius: 4px;
-  cursor: pointer;
-  opacity: 0.7;
-  transition: opacity 0.15s, background 0.15s;
-}
-.duel-forfeit-btn:hover {
-  opacity: 1;
-  background: rgba(180, 60, 60, 0.18);
-}
+/* Duel forfeit button styling lives in duel.css — see that file, not here.
+   (A conflicting copy used to live inline in this <style> block; since it
+   loaded after duel.css's <link>, it silently won and duel.css's version
+   never actually rendered. Removed so duel.css is the single source of
+   truth for duel UI.) */
 /* ── Flat zone region label (replaces collapsible dropdowns) ─────────────── */
 .zone-region-label-flat {
   font-family: var(--ff-mono, monospace);
@@ -2897,7 +2881,7 @@ button,
   function doEnchant() { window._doEnchant?.(); }
 
 
-
+    
 </script>
 <script>
 // Failsafe: Always log when RUN is clicked, even if the button is re-rendered

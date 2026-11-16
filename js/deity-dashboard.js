@@ -4462,6 +4462,43 @@ const DCHAT_LOCATION_BG = {
   "heart-garden":         "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis_wildlands.jpeg?alt=media&token=1897eed1-4719-4aeb-aed7-14be9434c38e",
   "valley-of-overflowing": "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis_wildlands.jpeg?alt=media&token=1897eed1-4719-4aeb-aed7-14be9434c38e",
   "verdantis-wildlands":  "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fverdantis_wildlands.jpeg?alt=media&token=1897eed1-4719-4aeb-aed7-14be9434c38e",
+  // Pub locations — use the capital city map images
+  "the-frosty-flagon":    "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Ffrostveil%2Ffrostpire-capital.jpeg?alt=media&token=ac9bbbac-90b6-4f61-9935-7f50007926dd",
+  "the-sunken-cask":      "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fverdantis%2Fsolmere-capital.jpeg?alt=media&token=2d5cd553-bb6e-48cb-a8ea-3a584581d049",
+  // Vorthak — Glass Hell sub-region
+  "lake-of-reflections":  "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fglass-hell.jpg?alt=media&token=0e81de0c-af56-49c7-9e2b-dcb9d9c8fa78",
+  "crystal-cave":         "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fglass-hell.jpg?alt=media&token=0e81de0c-af56-49c7-9e2b-dcb9d9c8fa78",
+  "rainbow-valley":       "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fglass-hell.jpg?alt=media&token=0e81de0c-af56-49c7-9e2b-dcb9d9c8fa78",
+  "shimmering-peak":      "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fglass-hell.jpg?alt=media&token=0e81de0c-af56-49c7-9e2b-dcb9d9c8fa78",
+  "mirror-sky":           "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fglass-hell.jpg?alt=media&token=0e81de0c-af56-49c7-9e2b-dcb9d9c8fa78",
+  // Vorthak — Shattered Heavens sub-region
+  "tempest-crown":        "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fshattered-heavens.jpg?alt=media&token=22ef88f0-9ccf-4e11-ad8d-f573f15ea85e",
+  "frostfall-exp":        "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fshattered-heavens.jpg?alt=media&token=22ef88f0-9ccf-4e11-ad8d-f573f15ea85e",
+  "frostfall-expanse":    "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fshattered-heavens.jpg?alt=media&token=22ef88f0-9ccf-4e11-ad8d-f573f15ea85e",
+  "ember-horizon":        "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fshattered-heavens.jpg?alt=media&token=22ef88f0-9ccf-4e11-ad8d-f573f15ea85e",
+  "veilwater-basin":      "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fshattered-heavens.jpg?alt=media&token=22ef88f0-9ccf-4e11-ad8d-f573f15ea85e",
+  "titan-divide":         "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fshattered-heavens.jpg?alt=media&token=22ef88f0-9ccf-4e11-ad8d-f573f15ea85e",
+  // Vorthak — Dark Woodlands sub-region
+  "crimson-fang":         "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fdark-woodlands.jpg?alt=media&token=d408a676-ec9f-40a7-8dd0-08899c88a04a",
+  "root-grove":           "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fdark-woodlands.jpg?alt=media&token=d408a676-ec9f-40a7-8dd0-08899c88a04a",
+  "serpent-mire":         "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fdark-woodlands.jpg?alt=media&token=d408a676-ec9f-40a7-8dd0-08899c88a04a",
+  "burrowdeep":           "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fdark-woodlands.jpg?alt=media&token=d408a676-ec9f-40a7-8dd0-08899c88a04a",
+  "burrowdeep-basin":     "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fdark-woodlands.jpg?alt=media&token=d408a676-ec9f-40a7-8dd0-08899c88a04a",
+  "gremlin-hollows":      "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fdark-woodlands.jpg?alt=media&token=d408a676-ec9f-40a7-8dd0-08899c88a04a",
+  // Vorthak — Corrupted Hallows sub-region
+  "gravemarch-fields":    "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fcorrupted-hallows.jpg?alt=media&token=90859bb8-c4d6-44f1-ad54-f085f85b9fc5",
+  "fallen-bastion":       "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fcorrupted-hallows.jpg?alt=media&token=90859bb8-c4d6-44f1-ad54-f085f85b9fc5",
+  "whispering-necropolis":"https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fcorrupted-hallows.jpg?alt=media&token=90859bb8-c4d6-44f1-ad54-f085f85b9fc5",
+  // Vorthak — Otherworld sub-region
+  "blighted-world":       "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fotherworld.jpg?alt=media&token=9c5bfee7-ab52-44be-acca-806572eac528",
+  "infernal-reach":       "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fotherworld.jpg?alt=media&token=9c5bfee7-ab52-44be-acca-806572eac528",
+  "sphinx-dominion":      "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fotherworld.jpg?alt=media&token=9c5bfee7-ab52-44be-acca-806572eac528",
+  "ashwing-aerie":        "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fotherworld.jpg?alt=media&token=9c5bfee7-ab52-44be-acca-806572eac528",
+  "leviathan-depths":     "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fvorthak%2Fotherworld.jpg?alt=media&token=9c5bfee7-ab52-44be-acca-806572eac528",
+  // Nyx Abyss
+  "void-chasm":           "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fnyx-abyss%2Fnyx-abyss.jpeg?alt=media&token=f53427ea-4393-48e1-93d7-c83f7823dd8a",
+  "abyssal-depths":       "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fnyx-abyss%2Fnyx-abyss.jpeg?alt=media&token=f53427ea-4393-48e1-93d7-c83f7823dd8a",
+  "fallen-heaven":        "https://firebasestorage.googleapis.com/v0/b/inkcraftrp.firebasestorage.app/o/maps%2Fnyx-abyss%2Fnyx-abyss.jpeg?alt=media&token=f53427ea-4393-48e1-93d7-c83f7823dd8a",
 };
 
 function _applyDchatBg(locationId) {
@@ -5722,6 +5759,11 @@ window._dchatDuelPlayer = function() {
   inkConfirm(`Challenge ${name} to a PUBLIC duel?\n\nEveryone in chat will watch the fight live!`).then(confirmed => {
     if (confirmed) window.initiateChatDuel?.(uid, name, tab, locId).catch(() => window.showToast?.("Failed to send duel challenge.", "error"));
   });
+};
+
+// ── Toggle the players-bar (mobile only — collapses the chip list) ────────
+window._toggleDchatPlayersBar = function() {
+  document.getElementById('dchat-players-bar')?.classList.toggle('collapsed');
 };
 
 // ── Load all active players for the general tab bar ───────────────────────

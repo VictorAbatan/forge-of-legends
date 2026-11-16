@@ -504,40 +504,12 @@ async function _doDuelTurnInner(duelId, action, extraArg) {
     }
   }
 
-  // Apply ongoing heal-over-time effects before acting.
-  if (myState.hotActive && myState.hotTurns > 0) {
-    const hotHeal  = Math.max(1, Math.round(me.maxHp * (myState.hotPct || 0.10)));
-    const hotTurns = Math.max(0, myState.hotTurns - 1);
-    myHp = Math.min(me.maxHp, myHp + hotHeal);
-    myState = { ...myState, hotTurns, hotActive: hotTurns > 0 };
-    await _postEventBubble(tab, locId, duelId,
-      `💚 <b>${meDisplayName}</b> regenerates <span class="duel-heal">+${hotHeal}</span> HP from ${myState.hotLabel || 'healing magic'}! (${hotTurns} turn${hotTurns===1?'':'s'} left)`, '💚');
-  }
-
-  // Apply active summons at the start of my turn.
-  if (myState.summonActive && myState.summonTurns > 0) {
-    const summonDmg = Math.max(1, Math.round((myState.summonDmgPct || 0.40) * (me.int || 10) * (1 + (myState.summonBuff || 0))));
-    oppHp = Math.max(0, oppHp - summonDmg);
-    const summonTurns = myState.leviathanSummoned ? myState.summonTurns : Math.max(0, myState.summonTurns - 1);
-    myState = { ...myState, summonTurns, summonActive: myState.leviathanSummoned || summonTurns > 0 };
-    await _postEventBubble(tab, locId, duelId,
-      `🐉 <b>${meDisplayName}</b>'s summon strikes for <span class="duel-dmg">${summonDmg}</span> damage! (${summonTurns} turn${summonTurns===1?'':'s'} remaining)`, '🐉');
-    if (oppHp <= 0) {
-      const myHpKey2   = actingAsNpc ? 'targetHp'     : (isChallenger ? 'challengerHp'   : 'targetHp');
-      const oppHpKey2  = actingAsNpc ? 'challengerHp' : (isChallenger ? 'targetHp'       : 'challengerHp');
-      await updateDoc(duelRef, {
-        [myHpKey2]:   myHp,
-        [oppHpKey2]:  0,
-        [myStateKey]: myState,
-        status: 'complete', winnerId: actingAsNpc ? duel.targetId : (isChallenger ? duel.challengerId : duel.targetId),
-        winnerName: meDisplayName, loserName: oppDisplayName,
-        currentTurnUid: null,
-      });
-      await _postEventBubble(tab, locId, duelId,
-        `🏆 <b>${meDisplayName}</b>'s summon vanquishes <b>${oppDisplayName}</b>!`, '🏆');
-      return;
-    }
-  }
+  // NOTE: HoT and summon ticks were previously also applied here, at the start
+  // of the turn before acting. That duplicated the end-of-turn ticks below
+  // (spec Step 9), causing double healing / double summon damage and duration
+  // burning down twice as fast per turn. HoT and summons now tick exactly
+  // once per turn, at end-of-turn only. DoT above is intentionally still
+  // start-of-turn (it must bite before the player can respond).
 
   let dmg      = 0;
   let eventIcon = '⚔️';
@@ -559,10 +531,12 @@ async function _doDuelTurnInner(duelId, action, extraArg) {
 
   // ── Resolve action ──────────────────────────────
   if (action === 'melee') {
-    dmg = _calcDamage(me, opp, null, myState);
+    const _critRef = {};
+    dmg = _calcDamage(me, opp, null, myState, _critRef);
     oppHp = Math.max(0, oppHp - dmg);
     eventIcon = '⚔️';
-    eventText = `<b>${meDisplayName}</b> strikes <b>${oppDisplayName}</b> for <span class="duel-dmg">${dmg}</span> damage!${skillLockNote}`;
+    const critNote = _critRef.crit ? ' <span style="color:#FFD700">⚡ Critical Hit!</span>' : '';
+    eventText = `<b>${meDisplayName}</b> strikes <b>${oppDisplayName}</b> for <span class="duel-dmg">${dmg}</span> damage!${critNote}${skillLockNote}`;
 
   } else if (action === 'defend') {
     const hRegen = Math.round(me.maxHp * 0.10);
@@ -595,6 +569,7 @@ async function _doDuelTurnInner(duelId, action, extraArg) {
     }
     myMana = Math.max(0, myMana - cost);
 
+    const _critRef = {};
     const applyDamage = (raw) => {
       let effective = Math.max(1, Math.round(raw));
       if (myState.echoActive) {
@@ -613,6 +588,7 @@ async function _doDuelTurnInner(duelId, action, extraArg) {
         effective = Math.round(effective * (1 + (oppState.defBreakAmt || 0.15)));
         eventText += ` 💥 ${oppDisplayName}'s defence is weakened!`;
       }
+      if (_critRef.crit) eventText += ` <span style="color:#FFD700">⚡ Critical Hit!</span>`;
       dmg = applyOpponentShield(effective);
       oppHp = Math.max(0, oppHp - dmg);
       return dmg;
@@ -620,31 +596,31 @@ async function _doDuelTurnInner(duelId, action, extraArg) {
 
 
     if (sk.type === 'damage') {
-      applyDamage(_calcDamage(me, opp, null, myState) * (sk.mult || 1.0));
+      applyDamage(_calcDamage(me, opp, null, myState, _critRef) * (sk.mult || 1.0));
       eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> for <span class="duel-dmg">${dmg}</span> damage!`;
     } else if (sk.type === 'backstab') {
       const firstHit = !myState.backstabUsed;
       const mult = firstHit ? (sk.mult || 1.75) : (sk.multAfter || 0.95);
-      applyDamage(_calcDamage(me, opp, null, myState) * mult);
+      applyDamage(_calcDamage(me, opp, null, myState, _critRef) * mult);
       myStateUpd.backstabUsed = true;
       eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> for <span class="duel-dmg">${dmg}</span> damage${firstHit ? ' (critical backstab!)' : ''}!`;
     } else if (sk.type === 'execute') {
-      const effective = _calcDamage(me, opp, null, myState) * ((oppHp / (opp.maxHp || oppHp)) <= (sk.threshold || 0.35) ? (sk.mult || 1.8) : 1.05);
+      const effective = _calcDamage(me, opp, null, myState, _critRef) * ((oppHp / (opp.maxHp || oppHp)) <= (sk.threshold || 0.35) ? (sk.mult || 1.8) : 1.05);
       applyDamage(effective);
       eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> for <span class="duel-dmg">${dmg}</span> damage!`;
     } else if (sk.type === 'priority') {
-      applyDamage(_calcDamage(me, opp, null, myState) * ((sk.mult || 1.1)));
+      applyDamage(_calcDamage(me, opp, null, myState, _critRef) * ((sk.mult || 1.1)));
       eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — a swift strike for <span class="duel-dmg">${dmg}</span> damage!`;
     } else if (sk.type === 'condDamage') {
       const hasDebuff = oppState.dotActive || oppState.deathMark || oppState.defBreak;
       const mult = hasDebuff ? (sk.mult || 1.25) : 1.05;
-      applyDamage(_calcDamage(me, opp, null, myState) * mult);
+      applyDamage(_calcDamage(me, opp, null, myState, _critRef) * mult);
       eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> for <span class="duel-dmg">${dmg}</span> damage${hasDebuff ? ' (bonus vs debuffed target)' : ''}!`;
     } else if (sk.type === 'multihit') {
       const hits = sk.hits || 2;
       let total = 0;
       for (let h = 0; h < hits; h++) {
-        total += Math.max(1, Math.round(_calcDamage(me, opp, null, myState) * (sk.multPerHit || 0.60)));
+        total += Math.max(1, Math.round(_calcDamage(me, opp, null, myState, _critRef) * (sk.multPerHit || 0.60)));
       }
       applyDamage(total);
       eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — ${hits} hits for <span class="duel-dmg">${dmg}</span> total damage!`;
@@ -678,10 +654,11 @@ async function _doDuelTurnInner(duelId, action, extraArg) {
         const cap = 1.60;
         const nextVal = Math.min(cap, (myState[buffKey] || 0) + (sk.buffMult || 0));
         myStateUpd[buffKey] = nextVal;
+        myStateUpd[`${buffKey}_turns`] = sk.mana >= 40 ? 4 : 3; // advanced = 4 rounds, others = 3
         if (sk.hpBonus) {
           myHp = Math.min(me.maxHp, myHp + Math.round(me.maxHp * sk.hpBonus));
         }
-        eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — +${Math.round((nextVal - (myState[buffKey] || 0)) * 100)}% ${sk.stat.toUpperCase()}!`;
+        eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — +${Math.round((nextVal - (myState[buffKey] || 0)) * 100)}% ${sk.stat.toUpperCase()} for ${myStateUpd[`${buffKey}_turns`]} turns!`;
       }
     } else if (sk.type === 'dot') {
       oppStateUpd.dotActive    = true;
@@ -691,7 +668,7 @@ async function _doDuelTurnInner(duelId, action, extraArg) {
       oppStateUpd.dotLifesteal = sk.lifesteal || false;
       eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — ${oppStateUpd.dotLabel} applied!`;
     } else if (sk.type === 'stun') {
-      applyDamage(_calcDamage(me, opp, null, myState) * (sk.mult || 1.0));
+      applyDamage(_calcDamage(me, opp, null, myState, _critRef) * (sk.mult || 1.0));
       oppStateUpd.stunned = true;
       eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — <span class="duel-dmg">${dmg}</span> damage and <b>${oppDisplayName}</b> is stunned!`;
     } else if (sk.type === 'skillock') {
@@ -724,7 +701,7 @@ async function _doDuelTurnInner(duelId, action, extraArg) {
     } else if (sk.type === 'summon') {
       const summonBuff = myState.summonBuff || 0;
       const dmgPct = (sk.summonDmgPct || 0.35) * (1 + summonBuff);
-      applyDamage(_calcDamage(me, opp, null, myState) * dmgPct);
+      applyDamage(_calcDamage(me, opp, null, myState, _critRef) * dmgPct);
       myStateUpd.summonActive = true;
       myStateUpd.summonDmgPct = dmgPct;
       myStateUpd.summonTurns = sk.unique ? 999 : (sk.summonTurns || 3);
@@ -764,7 +741,7 @@ async function _doDuelTurnInner(duelId, action, extraArg) {
         myStateUpd.summonActive = false;
         myStateUpd.summonTurns = 0;
         myStateUpd.leviathanSummoned = false;
-        applyDamage(_calcDamage(me, opp, null, myState) * (sk.mult || 2.0));
+        applyDamage(_calcDamage(me, opp, null, myState, _critRef) * (sk.mult || 2.0));
         eventText = `<b>${meDisplayName}</b> destroys all summons for <span class="duel-dmg">${dmg}</span> damage!`;
       }
     } else if (sk.type === 'sacrificial') {
@@ -786,11 +763,87 @@ async function _doDuelTurnInner(duelId, action, extraArg) {
         eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> — sacrifices <span class="duel-dmg">${selfCost} HP</span> for power!`;
       }
     } else {
-      applyDamage(_calcDamage(me, opp, null, myState) * (sk.mult || 1.0));
+      applyDamage(_calcDamage(me, opp, null, myState, _critRef) * (sk.mult || 1.0));
       eventText = `<b>${meDisplayName}</b> uses <b>${extraArg}</b> for <span class="duel-dmg">${dmg}</span> damage!`;
     }
 
     eventIcon = '⚔️';
+  }
+
+  // ── Crit announce ref — passed into _calcDamage so it can signal back ──
+  // (already used above in action blocks that call _calcDamage with announceRef)
+
+  // ── Dodge check on melee (attacker DEX advantage gives up to 35% dodge) ──
+  // Applied to the opponent's future counter — in a turn-based duel the "dodge"
+  // represents the defender's ability to avoid the hit. We roll here for the
+  // attacker's melee/skill hit landing on the opponent.
+  // DEX-based dodge: opponent dodges if they have a DEX advantage.
+  if ((action === 'melee' || action === 'skill') && dmg > 0) {
+    const oppDex = opp.dex || 8;
+    const myDex  = me.dex  || 8;
+    if (oppDex > myDex) {
+      const dodgeChance = Math.min(0.35, Math.floor((oppDex - myDex) / 10) * 0.01);
+      if (Math.random() < dodgeChance) {
+        // Hit dodged — zero damage, update log
+        dmg    = 0;
+        oppHp  = Math.max(0, oppHp + (opp.hp - oppHp)); // restore (no change)
+        // We already subtracted dmg from oppHp inside applyDamage above,
+        // so add it back:
+        oppHp  = Math.min(opp.maxHp || 100, oppHp + dmg);
+        // Re-zero so the victory check doesn't trigger
+        dmg = 0;
+        eventText += ` 💨 <b>${oppDisplayName}</b> dodged the attack!`;
+      }
+    }
+  }
+
+  // ── End-of-turn ticks (after action resolves, before state write) ──
+
+  // HoT tick on acting player (spec: Regen ticks after all damage, Step 9)
+  if (myState.hotActive && (myState.hotTurns || 0) > 0) {
+    const hotHeal = Math.round((me.maxHp || 100) * (myState.hotPct || 0.10));
+    myHp = Math.min(me.maxHp || 100, myHp + hotHeal);
+    const hotLeft = myState.hotTurns - 1;
+    myStateUpd.hotTurns  = hotLeft;
+    myStateUpd.hotActive = hotLeft > 0;
+    if (hotLeft > 0) eventText += ` 💚 Regen: +${hotHeal} HP (${hotLeft} turns left).`;
+  }
+
+  // Summon tick on acting player's summon (damages opponent each turn)
+  if (myState.summonActive && (myState.summonTurns || 0) > 0) {
+    const sumDmg = Math.max(1, Math.round(_getPrimary(me) * (myState.summonDmgPct || 0.40)));
+    oppHp = Math.max(0, oppHp - sumDmg);
+    const sumLeft = myState.leviathanSummoned ? myState.summonTurns : myState.summonTurns - 1;
+    myStateUpd.summonTurns  = sumLeft;
+    myStateUpd.summonActive = sumLeft > 0 || myState.leviathanSummoned;
+    eventText += ` 🐉 Summon attacks for <span class="duel-dmg">${sumDmg}</span>!`;
+  }
+
+  // Buff duration expiry (spec Section 4: buffs last 3–4 rounds)
+  // Each buff_X has a matching buff_X_turns counter set when the buff was applied.
+  for (const s of ['str','int','def','dex']) {
+    const bk = `buff_${s}`;
+    const dk = `${bk}_turns`;
+    if ((myState[bk] || 0) > 0) {
+      // Default to 3 rounds if counter was never set (legacy battles)
+      const remaining = (myState[dk] !== undefined ? myState[dk] : 3) - 1;
+      myStateUpd[dk] = remaining;
+      if (remaining <= 0) {
+        myStateUpd[bk] = 0;
+        myStateUpd[dk] = 0;
+      }
+    }
+  }
+
+  // defBreak turn counter on opponent
+  if (oppState.defBreak) {
+    const dbLeft = (oppState.defBreakTurns !== undefined ? oppState.defBreakTurns : 2) - 1;
+    oppStateUpd.defBreakTurns = dbLeft;
+    if (dbLeft <= 0) {
+      oppStateUpd.defBreak    = false;
+      oppStateUpd.defBreakAmt = 0;
+      oppStateUpd.defBreakTurns = 0;
+    }
   }
 
   // Merge state updates
@@ -1052,10 +1105,12 @@ export function mountDuelCard(duelId, containerEl, fallbackSnapshot) {
     (snap) => {
       if (!snap.exists()) return;
       if (document.body.contains(containerEl)) {
+        const prevDuel = window._duelStates?.[duelId] || null;
         // Cache live state so openDuelStancePicker can read skills/mana without a Firestore round-trip
         if (!window._duelStates) window._duelStates = {};
         window._duelStates[duelId] = snap.data();
         renderDuelCard(snap.data(), duelId, containerEl);
+        if (prevDuel) _spawnDuelFloats(containerEl, prevDuel, snap.data());
 
         // Auto-fire stun skip: if it's MY turn but I'm flagged as stunned,
         // automatically fire the skip action — buttons are hidden so there's no
@@ -1085,6 +1140,34 @@ export function mountDuelCard(duelId, containerEl, fallbackSnapshot) {
     }
   );
   _duelUnsubs[duelId] = unsub;
+}
+
+// ── Damage/heal float animation ────────────────────
+// Compares HP before/after a Firestore update and, for whichever fighter(s)
+// changed, spawns a floating "-N" / "+N" number over their panel. This is a
+// net diff per side per update (a turn that both deals damage and ticks a
+// HoT/summon shows the combined result, which matches what actually
+// happened to that HP total).
+function _spawnDuelFloats(containerEl, prevDuel, nextDuel) {
+  const fighterEls = containerEl.querySelectorAll('.duel-fighter');
+  if (fighterEls.length < 2) return;
+  const sides = [
+    { hpKey: 'challengerHp', el: fighterEls[0] },
+    { hpKey: 'targetHp',     el: fighterEls[1] },
+  ];
+  for (const s of sides) {
+    const prevHp = prevDuel[s.hpKey];
+    const nextHp = nextDuel[s.hpKey];
+    if (prevHp == null || nextHp == null) continue;
+    const diff = nextHp - prevHp;
+    if (diff === 0 || !s.el) continue;
+    const span = document.createElement('span');
+    span.className = 'duel-float ' + (diff < 0 ? 'duel-float-dmg' : 'duel-float-heal');
+    span.textContent = (diff < 0 ? '' : '+') + diff;
+    s.el.appendChild(span);
+    span.addEventListener('animationend', () => span.remove());
+    setTimeout(() => span.remove(), 1800); // safety cleanup if animationend doesn't fire
+  }
 }
 
 // ── Render the duel card HTML ──────────────────────
@@ -1218,6 +1301,7 @@ export function renderDuelCard(duel, duelId, el, isStaticSnapshot = false) {
       <div class="duel-fighter-name">${duel.challengerName}</div>
       <div class="duel-fighter-rank">${duel.challengerRank || duel.challengerData?.rank || '—'} Lv.${duel.challengerLevel || duel.challengerData?.level || 1}</div>
       <div class="duel-stance-tag">${chStanceKey}</div>
+      ${_statusIconsHtml(duel.challengerState)}
       <div class="duel-hp-row">
         <span class="duel-hp-label">HP</span>
         <div class="duel-hp-track"><div class="duel-hp-fill" style="width:${chHpPct}%;background:${hpColor(chHpPct)}"></div></div>
@@ -1242,6 +1326,7 @@ export function renderDuelCard(duel, duelId, el, isStaticSnapshot = false) {
       <div class="duel-fighter-name">${duel.targetName}</div>
       <div class="duel-fighter-rank">${isPending ? 'Awaiting...' : ((duel.targetRank || duel.targetData?.rank || '—') + ' Lv.' + (duel.targetLevel || duel.targetData?.level || 1))}</div>
       <div class="duel-stance-tag">${tgStanceKey}</div>
+      ${_statusIconsHtml(duel.targetState)}
       <div class="duel-hp-row">
         <span class="duel-hp-label">HP</span>
         <div class="duel-hp-track"><div class="duel-hp-fill" style="width:${tgHpPct}%;background:${hpColor(tgHpPct)}"></div></div>
@@ -1678,7 +1763,7 @@ async function _postDuelSnapshot(duelId, tab, locId, snapshot) {
 //   scaled ≈ 150 × min(5, 20/1) = 150 × 5 = 750 (hits are massive)
 //   Rank 0 maxHp ≈ 110 → instant KO ✓
 // Two equal players (same rank/level) land balanced ~20–40% max HP hits.
-function _calcDamage(me, opp, skillType = null, myState = null) {
+function _calcDamage(me, opp, skillType = null, myState = null, announceRef = null) {
   const RANK_ORDER = ['Wanderer','Follower','Disciple','Master','Exalted','Crown','Supreme','Legend','Myth','Eternal'];
 
   // Determine attacker's primary stat with active buffs applied
@@ -1710,16 +1795,25 @@ function _calcDamage(me, opp, skillType = null, myState = null) {
   // Random variance ±15%
   const variance = 0.85 + Math.random() * 0.30;
 
-  // Crit check (simple 5%)
-  const critRoll = Math.random();
-  const critMult = critRoll < 0.05 ? 1.5 : 1.0;
+  // ── Full crit system (matches spec Section 3) ──
+  // Base 5% + companion bonuses + race bonuses + active crit buff
+  let critChance = 0.05;
+  const comp = (me.companion?.name || me.companionName || '').toLowerCase();
+  if (comp === 'duskit') critChance += 0.10;
+  const race = (me.race || '').toLowerCase();
+  if (race.includes('fairy')) critChance += 0.03;
+  if (myState?.critBoost) critChance += myState.critBoost;
+  critChance = Math.min(0.60, critChance);
+  const isCrit   = Math.random() < critChance;
+  const critMult = isCrit ? 1.5 : 1.0;
+  if (isCrit && announceRef) announceRef.crit = true; // signal caller to add crit text
 
   const rawDmg = base * variance * critMult;
 
-  // Defender mitigation: diminishing returns so def never blocks 100%
-  // Apply defBreak on the defender's side
-  const effDef   = opp.def || 5;
-  const defRatio = effDef / (effDef + 25);
+  // Defender mitigation: diminishing returns — apply defBreak if active on opponent
+  let effDef = opp.def || 5;
+  if (myState?.oppDefBreak || false) effDef = Math.round(effDef * (1 - (myState.oppDefBreakAmt || 0.40)));
+  const defRatio  = effDef / (effDef + 25);
   const mitigated = rawDmg * (1 - defRatio);
 
   return Math.max(1, Math.floor(mitigated));
@@ -1987,6 +2081,38 @@ function _getPrimary(me) {
 }
 function _rand(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
 function _pct(val, max)  { return max ? Math.max(0, Math.min(100, Math.round((val / max) * 100))) : 0; }
+
+// ── Status effect icon row ─────────────────────────
+// Reads a fighter's state object (challengerState/targetState) and returns
+// small badge HTML for every currently-active effect, so players can see
+// what's on them without having to scroll back through chat bubbles.
+function _statusIconsHtml(state) {
+  if (!state) return '';
+  const icons = [];
+  if (state.stunned)     icons.push({ icon: '💫', label: 'Stunned' });
+  if (state.skillLocked) icons.push({ icon: '🔒', label: 'Skill-locked' });
+  if (state.dotActive && state.dotTurns > 0)
+    icons.push({ icon: '🩸', label: `${state.dotLabel || 'Poison'} (${state.dotTurns})` });
+  if (state.hotActive && state.hotTurns > 0)
+    icons.push({ icon: '💚', label: `Regen (${state.hotTurns})` });
+  if (state.shieldPct)
+    icons.push({ icon: '🛡️', label: `Shield ${Math.round(state.shieldPct * 100)}%` });
+  if (state.defBreak)
+    icons.push({ icon: '💥', label: `Def -${Math.round((state.defBreakAmt || 0) * 100)}%` });
+  if (state.deathMark)
+    icons.push({ icon: '☠️', label: 'Death Marked' });
+  if (state.echoActive)
+    icons.push({ icon: '🔁', label: 'Echo ready' });
+  if (state.summonActive || state.leviathanSummoned)
+    icons.push({ icon: '🐉', label: state.leviathanSummoned ? 'Leviathan' : `Summon (${state.summonTurns || 0})` });
+  for (const s of ['str', 'int', 'def', 'dex']) {
+    const v = state[`buff_${s}`];
+    if (v > 0) icons.push({ icon: '⚡', label: `+${Math.round(v * 100)}% ${s.toUpperCase()}` });
+  }
+  if (!icons.length) return '';
+  return `<div class="duel-status-icons">${icons.map(i =>
+    `<span class="duel-status-icon" title="${i.label}">${i.icon}</span>`).join('')}</div>`;
+}
 function _avHtml(url, sz) {
   if (url?.startsWith('http'))
     return `<img src="${url}" style="width:${sz}px;height:${sz}px;border-radius:50%;object-fit:cover"/>`;

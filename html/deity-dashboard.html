@@ -751,9 +751,10 @@
       </div>
 
       <!-- Players in location -->
-      <div class="dchat-players-bar" id="dchat-players-bar" style="display:none">
+      <div class="dchat-players-bar collapsed" id="dchat-players-bar" style="display:none">
         <span class="dchat-players-label" id="dchat-players-label">👥 In this location:</span>
         <div class="dchat-players-list" id="dchat-players-list"></div>
+        <button type="button" class="dchat-players-toggle" id="dchat-players-toggle" onclick="window._toggleDchatPlayersBar?.()" aria-label="Show/hide players list">▾</button>
       </div>
 
       <!-- Single chat window -->
@@ -1128,4 +1129,4 @@
       </div>
     </div>
   </div>
-</html> 
+</html>
